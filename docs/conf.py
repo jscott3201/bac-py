@@ -16,6 +16,7 @@ extensions = [
     "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
+    "sphinx_autodoc_typehints",
 ]
 
 master_doc = "index"
@@ -34,7 +35,7 @@ napoleon_preprocess_types = True
 # -- Autodoc -----------------------------------------------------------------
 
 autodoc_member_order = "bysource"
-autodoc_typehints = "description"
+autodoc_typehints = "none"
 autodoc_typehints_format = "short"
 autodoc_default_options = {
     "members": True,

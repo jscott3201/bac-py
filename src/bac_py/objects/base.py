@@ -87,6 +87,9 @@ class BACnetObject:
         if prop_id == PropertyIdentifier.PROPERTY_LIST:
             return self._get_property_list()
 
+        if prop_id == PropertyIdentifier.CURRENT_COMMAND_PRIORITY:
+            return self._get_current_command_priority()
+
         if prop_id not in self.PROPERTY_DEFINITIONS:
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
 
@@ -127,7 +130,11 @@ class BACnetObject:
         prop_def = self.PROPERTY_DEFINITIONS.get(prop_id)
         if prop_def is None:
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
-        if prop_def.access == PropertyAccess.READ_ONLY:
+        if prop_def.access == PropertyAccess.READ_ONLY and not (
+            # Present_Value is writable when Out_Of_Service is TRUE (Clause 12)
+            prop_id == PropertyIdentifier.PRESENT_VALUE
+            and self._properties.get(PropertyIdentifier.OUT_OF_SERVICE) is True
+        ):
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.WRITE_ACCESS_DENIED)
 
         if self._is_commandable(prop_id):
@@ -152,13 +159,52 @@ class BACnetObject:
         async with self._write_lock:
             self.write_property(prop_id, value, priority, array_index)
 
+    # Properties excluded from Property_List per Clause 12 / 12.11.
+    _PROPERTY_LIST_EXCLUSIONS: ClassVar[frozenset[PropertyIdentifier]] = frozenset(
+        {
+            PropertyIdentifier.OBJECT_IDENTIFIER,
+            PropertyIdentifier.OBJECT_NAME,
+            PropertyIdentifier.OBJECT_TYPE,
+            PropertyIdentifier.PROPERTY_LIST,
+        }
+    )
+
     def _get_property_list(self) -> list[PropertyIdentifier]:
-        """Return list of all properties present on this object."""
-        return [
+        """Return list of all properties present on this object.
+
+        Per the BACnet standard, Property_List shall not include
+        Object_Identifier, Object_Name, Object_Type, or Property_List.
+        """
+        result = [
             pid
             for pid in self.PROPERTY_DEFINITIONS
-            if pid in self._properties or self.PROPERTY_DEFINITIONS[pid].required
+            if pid not in self._PROPERTY_LIST_EXCLUSIONS
+            and (pid in self._properties or self.PROPERTY_DEFINITIONS[pid].required)
         ]
+        # Current_Command_Priority is a computed property (not stored in
+        # _properties) that must appear in Property_List when the object
+        # is commandable.
+        if (
+            self._priority_array is not None
+            and PropertyIdentifier.CURRENT_COMMAND_PRIORITY in self.PROPERTY_DEFINITIONS
+            and PropertyIdentifier.CURRENT_COMMAND_PRIORITY not in result
+        ):
+            result.append(PropertyIdentifier.CURRENT_COMMAND_PRIORITY)
+        return result
+
+    def _get_current_command_priority(self) -> int | None:
+        """Return the active command priority level (Clause 19.5).
+
+        Returns the priority (1-16) of the highest-priority non-null
+        slot in the priority array, or None if all slots are relinquished.
+        Raises UNKNOWN_PROPERTY if the object is not commandable.
+        """
+        if self._priority_array is None:
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
+        for i, slot in enumerate(self._priority_array):
+            if slot is not None:
+                return i + 1
+        return None
 
     def _is_commandable(self, prop_id: PropertyIdentifier) -> bool:
         """Check if a property supports command prioritization (Clause 19.2)."""

@@ -101,8 +101,13 @@ class TestDeviceObject:
         dev = DeviceObject(1)
         plist = dev.read_property(PropertyIdentifier.PROPERTY_LIST)
         assert isinstance(plist, list)
-        assert PropertyIdentifier.OBJECT_IDENTIFIER in plist
-        assert PropertyIdentifier.OBJECT_TYPE in plist
+        # Per the spec, Property_List excludes these four properties
+        assert PropertyIdentifier.OBJECT_IDENTIFIER not in plist
+        assert PropertyIdentifier.OBJECT_NAME not in plist
+        assert PropertyIdentifier.OBJECT_TYPE not in plist
+        assert PropertyIdentifier.PROPERTY_LIST not in plist
+        # But other required properties should be present
+        assert PropertyIdentifier.SYSTEM_STATUS in plist
 
     def test_object_list_default_empty(self):
         dev = DeviceObject(1)
@@ -205,9 +210,9 @@ class TestObjectFactory:
         assert dev.object_identifier.instance_number == 42
 
     def test_create_unsupported_type_raises(self):
-        # ANALOG_INPUT isn't registered (only DeviceObject is)
+        # CALENDAR is not registered
         with pytest.raises(BACnetError) as exc_info:
-            create_object(ObjectType.ANALOG_INPUT, 1)
+            create_object(ObjectType.CALENDAR, 1)
         assert exc_info.value.error_code == ErrorCode.UNSUPPORTED_OBJECT_TYPE
 
 

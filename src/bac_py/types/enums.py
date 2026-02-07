@@ -424,6 +424,7 @@ class PropertyIdentifier(IntEnum):
     POWER = 384
     TRANSITION = 385
     EGRESS_ACTIVE = 386
+    CURRENT_COMMAND_PRIORITY = 431
 
 
 class ErrorClass(IntEnum):
@@ -750,3 +751,161 @@ class BvlcResultCode(IntEnum):
     READ_FOREIGN_DEVICE_TABLE_NAK = 0x0040
     DELETE_FOREIGN_DEVICE_TABLE_ENTRY_NAK = 0x0050
     DISTRIBUTE_BROADCAST_TO_NETWORK_NAK = 0x0060
+
+
+class EventState(IntEnum):
+    """BACnet event state enumeration (Clause 12)."""
+
+    NORMAL = 0
+    FAULT = 1
+    OFFNORMAL = 2
+    HIGH_LIMIT = 3
+    LOW_LIMIT = 4
+    LIFE_SAFETY_ALARM = 5
+
+
+class BinaryPV(IntEnum):
+    """BACnet binary present value enumeration (Clause 21)."""
+
+    INACTIVE = 0
+    ACTIVE = 1
+
+
+class Polarity(IntEnum):
+    """BACnet polarity enumeration (Clause 12)."""
+
+    NORMAL = 0
+    REVERSE = 1
+
+
+class Reliability(IntEnum):
+    """BACnet reliability enumeration (Clause 12)."""
+
+    NO_FAULT_DETECTED = 0
+    NO_SENSOR = 1
+    OVER_RANGE = 2
+    UNDER_RANGE = 3
+    OPEN_LOOP = 4
+    SHORTED_LOOP = 5
+    NO_OUTPUT = 6
+    UNRELIABLE_OTHER = 7
+    PROCESS_ERROR = 8
+    MULTI_STATE_FAULT = 9
+    CONFIGURATION_ERROR = 10
+    COMMUNICATION_FAILURE = 12
+    MEMBER_FAULT = 13
+    MONITORED_OBJECT_FAULT = 14
+    TRIPPED = 15
+    LAMP_FAILURE = 16
+    ACTIVATION_FAILURE = 17
+    RENEW_DHCP_FAILURE = 18
+    RENEW_FD_REGISTRATION_FAILURE = 19
+    RESTART_AUTO_NEGOTIATION_FAILURE = 20
+    RESTART_FAILURE = 21
+    PROPRIETARY_COMMAND_FAILURE = 22
+    FAULTS_LISTED = 23
+    REFERENCED_OBJECT_FAULT = 24
+
+
+class EngineeringUnits(IntEnum):
+    """BACnet engineering units enumeration (Clause 21).
+
+    Only commonly used units are listed; vendor-specific units
+    can be represented by integer values outside this enum.
+    """
+
+    # Temperature
+    DEGREES_CELSIUS = 62
+    DEGREES_FAHRENHEIT = 64
+    DEGREES_KELVIN = 63
+
+    # Pressure
+    PASCALS = 53
+    KILOPASCALS = 54
+    BARS = 55
+    POUNDS_PER_SQUARE_INCH = 56
+    MILLIMETERS_OF_WATER = 206
+    INCHES_OF_WATER = 205
+
+    # Flow
+    CUBIC_METERS_PER_SECOND = 142
+    CUBIC_METERS_PER_HOUR = 135
+    LITERS_PER_SECOND = 85
+    LITERS_PER_MINUTE = 88
+    CUBIC_FEET_PER_MINUTE = 84
+    US_GALLONS_PER_MINUTE = 89
+
+    # Energy
+    JOULES = 16
+    KILOJOULES = 17
+    WATT_HOURS = 18
+    KILOWATT_HOURS = 19
+    BTUS = 20
+    THERMS = 21
+
+    # Power
+    WATTS = 48
+    KILOWATTS = 49
+    MEGAWATTS = 50
+    HORSEPOWER = 51
+
+    # Electrical
+    VOLTS = 5
+    MILLIVOLTS = 124
+    AMPERES = 3
+    MILLIAMPERES = 125
+    OHMS = 4
+    KILOHMS = 122
+    MEGOHMS = 123
+
+    # Frequency
+    HERTZ = 27
+    KILOHERTZ = 129
+    MEGAHERTZ = 130
+
+    # Humidity
+    PERCENT_RELATIVE_HUMIDITY = 29
+    PERCENT = 98
+
+    # Length
+    METERS = 31
+    CENTIMETERS = 118
+    MILLIMETERS = 30
+    INCHES = 32
+    FEET = 33
+
+    # Time
+    SECONDS = 73
+    MINUTES = 72
+    HOURS = 71
+    DAYS = 70
+
+    # Velocity
+    METERS_PER_SECOND = 40
+    FEET_PER_MINUTE = 74
+
+    # Volume
+    CUBIC_METERS = 46
+    CUBIC_FEET = 79
+    LITERS = 75
+    US_GALLONS = 83
+
+    # Mass
+    KILOGRAMS = 28
+    POUNDS_MASS = 115
+
+    # Area
+    SQUARE_METERS = 0
+    SQUARE_FEET = 1
+
+    # Concentration
+    PARTS_PER_MILLION = 96
+
+    # Illuminance
+    LUX = 37
+
+    # Special
+    NO_UNITS = 95
+    REVOLUTIONS_PER_MINUTE = 104
+    DEGREES_ANGULAR = 90
+    DEGREES_PHASE = 14
