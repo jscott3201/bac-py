@@ -236,9 +236,7 @@ class BACnetApplication:
                         abort_reason=AbortReason.SEGMENTATION_NOT_SUPPORTED,
                     )
                     if self._network:
-                        self._network.send(
-                            encode_apdu(abort), source, expecting_reply=False
-                        )
+                        self._network.send(encode_apdu(abort), source, expecting_reply=False)
                     self._client_tsm.handle_abort(
                         source, pdu.invoke_id, AbortReason.SEGMENTATION_NOT_SUPPORTED
                     )

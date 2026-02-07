@@ -124,10 +124,7 @@ class DefaultServerHandlers:
 
         # Wildcard device instance 4194303 resolves to local device (Clause 15.5.2)
         obj_id = request.object_identifier
-        if (
-            obj_id.object_type == ObjectType.DEVICE
-            and obj_id.instance_number == 0x3FFFFF
-        ):
+        if obj_id.object_type == ObjectType.DEVICE and obj_id.instance_number == 0x3FFFFF:
             obj_id = self._device.object_identifier
 
         # Look up the object
@@ -175,10 +172,7 @@ class DefaultServerHandlers:
 
         # Wildcard device instance 4194303 resolves to local device (Clause 15.9)
         obj_id = request.object_identifier
-        if (
-            obj_id.object_type == ObjectType.DEVICE
-            and obj_id.instance_number == 0x3FFFFF
-        ):
+        if obj_id.object_type == ObjectType.DEVICE and obj_id.instance_number == 0x3FFFFF:
             obj_id = self._device.object_identifier
 
         # Look up the object
