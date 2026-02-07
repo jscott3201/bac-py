@@ -1,0 +1,7 @@
+[project]
+name = "bac-py"
+version = "0.1.0"
+description = "Asynchronous BACnet library for Python"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
