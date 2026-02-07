@@ -4,11 +4,33 @@
 
 This document defines the phased implementation plan for bac-py. Each phase produces a usable, testable slice of functionality. Phases build on each other bottom-up through the protocol stack.
 
-## 2. Phase 1: Foundation — Encoding, Types, and Transport
+## 2. Phase 0: Project Scaffolding
+
+**Goal**: Set up the project structure, tooling, and CI pipeline before writing any protocol code.
+
+### 2.1 Deliverables
+
+| Item                | What                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------- |
+| `pyproject.toml`    | Project metadata, Python 3.13+ requirement, dev dependencies (pytest, pytest-asyncio, mypy, ruff)     |
+| `src/bac_py/`       | Package directory with `__init__.py` and empty subpackage stubs for types/, encoding/, network/, etc. |
+| `tests/`            | Test directory mirroring source tree with `conftest.py`                                               |
+| `.github/workflows` | CI pipeline: lint (ruff), type check (mypy), test (pytest) on Python 3.13                             |
+| `ruff.toml`         | Linter/formatter configuration                                                                        |
+
+### 2.2 Testing
+
+- Verify `uv run pytest` runs successfully with zero tests
+- Verify `uv run mypy src/` passes with no errors
+- Verify `uv run ruff check src/` passes
+
+---
+
+## 3. Phase 1: Foundation — Encoding, Types, and Transport
 
 **Goal**: Establish the wire-format codec and UDP transport. After this phase, we can send and receive raw BACnet/IP datagrams.
 
-### 2.1 Deliverables
+### 3.1 Deliverables
 
 | Module                   | File             | What                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ------------------------ | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -22,7 +44,7 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 | `transport/bvll.py`      | BVLL codec       | `encode_bvll`, `decode_bvll`, `BvllMessage`, `BvlcFunction`                                                                                                                                                                                                                                                                                                                                                                                        |
 | `transport/bip.py`       | UDP transport    | `BIPTransport` with `asyncio.DatagramProtocol`, send/receive                                                                                                                                                                                                                                                                                                                                                                                       |
 
-### 2.2 Testing
+### 3.2 Testing
 
 - **Unit tests for every encoder/decoder**: Round-trip property (encode then decode equals original) for all primitive types
 - **Tag edge cases**: Extended tag numbers (>14), extended lengths (5-253, 254-65535, >65535), opening/closing tags
@@ -31,17 +53,17 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 - **APDU round-trip**: All 8 PDU types, segmented and non-segmented variants
 - **Integration test**: Send/receive a raw UDP datagram on localhost, verify BVLL+NPDU framing
 
-### 2.3 Spec References
+### 3.3 Spec References
 
 - Clause 6 (Network Layer), Clause 20 (Encoding), Annex J (BACnet/IP)
 
 ---
 
-## 3. Phase 2: Core Services — ReadProperty, WriteProperty, Who-Is/I-Am
+## 4. Phase 2: Core Services — ReadProperty, WriteProperty, Who-Is/I-Am
 
 **Goal**: Implement the minimum viable client and server. A client can discover devices and read/write single properties. A server can respond to Who-Is and ReadProperty.
 
-### 3.1 Deliverables
+### 4.1 Deliverables
 
 | Module                       | File                      | What                                                                             |
 | ---------------------------- | ------------------------- | -------------------------------------------------------------------------------- |
@@ -58,7 +80,7 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 | `objects/device.py`          | Device object             | `DeviceObject` with required properties                                          |
 | `app/server.py`              | Server handlers           | Default handlers for Who-Is, ReadProperty                                        |
 
-### 3.2 Testing
+### 4.2 Testing
 
 - **Service codec tests**: Encode/decode for each service request and response, matching spec examples from Annex F
 - **TSM tests**: Invoke-id allocation, timeout/retry behavior, Future resolution on ACK, exception on Error/Reject/Abort
@@ -66,17 +88,17 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 - **Integration test**: Two `BACnetApplication` instances on localhost. Client sends Who-Is, receives I-Am. Client reads a property from the server's device object.
 - **Object database tests**: Add/remove objects, read/write properties, unknown object/property errors
 
-### 3.3 Spec References
+### 4.3 Spec References
 
 - Clause 5.4 (TSM), Clause 12.11 (Device Object), Clause 15.5 (ReadProperty), Clause 15.9 (WriteProperty), Clause 16.10 (Who-Is/I-Am)
 
 ---
 
-## 4. Phase 3: Object Model — Analog, Binary, Multi-State
+## 5. Phase 3: Object Model — Analog, Binary, Multi-State
 
 **Goal**: Implement the core I/O object types. A server can host AnalogInput, AnalogOutput, BinaryInput, BinaryOutput, Multi-State objects with proper property schemas and commandable behavior.
 
-### 4.1 Deliverables
+### 5.1 Deliverables
 
 | Module                  | File                 | What                                                                       |
 | ----------------------- | -------------------- | -------------------------------------------------------------------------- |
@@ -86,34 +108,35 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 | `objects/base.py`       | Commandable support  | Priority array, relinquish default, command prioritization                 |
 | `types/constructed.py`  | Constructed encoding | Sequences, property value polymorphic encoding/decoding                    |
 
-### 4.2 Testing
+### 5.2 Testing
 
 - **Property schema tests**: Verify required properties present, optional properties work, unknown property returns error
 - **Command prioritization**: Write at various priorities, verify Present_Value follows highest-priority non-null value. Relinquish and verify fallback.
 - **Status flags**: Out-of-service, fault, alarm, overridden states
 - **Integration**: Server with multiple object types, client reads all properties via ReadPropertyMultiple
 
-### 4.3 Spec References
+### 5.3 Spec References
 
 - Clause 12 (Object Types), Clause 19.2 (Command Prioritization)
 
 ---
 
-## 5. Phase 4: Bulk Services — ReadPropertyMultiple, WritePropertyMultiple
+## 6. Phase 4: Bulk Services — ReadPropertyMultiple, WritePropertyMultiple, ReadRange
 
 **Goal**: Implement efficient bulk operations. These are critical for real-world performance.
 
-### 5.1 Deliverables
+### 6.1 Deliverables
 
 | Module                                | File                | What                                                                                             |
 | ------------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------ |
 | `services/read_property_multiple.py`  | RPM                 | `ReadPropertyMultipleRequest`, `ReadPropertyMultipleACK`, encode/decode with nested access specs |
 | `services/write_property_multiple.py` | WPM                 | `WritePropertyMultipleRequest`, encode/decode with per-property error reporting                  |
+| `services/read_range.py`              | ReadRange           | `ReadRangeRequest`, `ReadRangeACK`, encode/decode for array/list slicing                         |
 | `encoding/constructed.py`             | Constructed helpers | `ReadAccessSpecification`, `ReadAccessResult`, `WriteAccessSpecification`                        |
-| `app/client.py`                       | Client extensions   | `BACnetClient.read_property_multiple()`, `.write_property_multiple()`                            |
-| `app/server.py`                       | Server handlers     | RPM and WPM handlers with batch processing                                                       |
+| `app/client.py`                       | Client extensions   | `BACnetClient.read_property_multiple()`, `.write_property_multiple()`, `.read_range()`           |
+| `app/server.py`                       | Server handlers     | RPM, WPM, and ReadRange handlers with batch processing                                           |
 
-### 5.2 Testing
+### 6.2 Testing
 
 - **RPM round-trip**: Request multiple properties from multiple objects, verify all values returned
 - **RPM error handling**: Mix of valid and unknown properties — verify per-property errors in results
@@ -121,17 +144,17 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 - **WPM partial failure**: Some writes succeed, some fail — verify correct error reporting
 - **Performance benchmark**: Compare N individual ReadProperty calls vs. one RPM call
 
-### 5.3 Spec References
+### 6.3 Spec References
 
-- Clause 15.7 (ReadPropertyMultiple), Clause 15.10 (WritePropertyMultiple)
+- Clause 15.7 (ReadPropertyMultiple), Clause 15.8 (ReadRange), Clause 15.10 (WritePropertyMultiple)
 
 ---
 
-## 6. Phase 5: Segmentation
+## 7. Phase 5: Segmentation
 
 **Goal**: Handle APDUs larger than the max APDU size. Required for ReadPropertyMultiple responses with many properties and for devices with small APDU buffers.
 
-### 6.1 Deliverables
+### 7.1 Deliverables
 
 | Module                    | File                | What                                                          |
 | ------------------------- | ------------------- | ------------------------------------------------------------- |
@@ -139,7 +162,7 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 | `app/tsm.py`              | TSM updates         | Client and server TSM states for segmented transactions       |
 | `app/application.py`      | Application updates | Wire segmentation into APDU send/receive path                 |
 
-### 6.2 Testing
+### 7.2 Testing
 
 - **Client reassembly**: Server sends segmented ComplexACK, client reassembles correctly
 - **Server reassembly**: Client sends segmented ConfirmedRequest, server reassembles
@@ -147,17 +170,17 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 - **Timeout recovery**: Segment timeout, retry, abort
 - **Exceeds max segments**: Verify abort when segment count exceeds limit
 
-### 6.3 Spec References
+### 7.3 Spec References
 
 - Clause 5.2 (Segmentation), Clause 5.4 (TSM states for segmentation)
 
 ---
 
-## 7. Phase 6: COV and Events
+## 8. Phase 6: COV and Events
 
 **Goal**: Implement Change of Value subscriptions and event notifications. This enables real-time monitoring.
 
-### 7.1 Deliverables
+### 8.1 Deliverables
 
 | Module              | File              | What                                                                       |
 | ------------------- | ----------------- | -------------------------------------------------------------------------- |
@@ -167,7 +190,7 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 | `app/client.py`     | Client extensions | `.subscribe_cov()`, COV callback registration                              |
 | `app/server.py`     | Server extensions | COV subscription management, notification sending                          |
 
-### 7.2 Testing
+### 8.2 Testing
 
 - **Subscribe and receive**: Client subscribes to COV, server value changes, client receives notification
 - **COV increment**: Analog value changes within increment = no notification. Exceeds increment = notification.
@@ -175,17 +198,17 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 - **Confirmed vs. unconfirmed**: Test both notification modes
 - **Multiple subscribers**: Multiple clients subscribe to the same object
 
-### 7.3 Spec References
+### 8.3 Spec References
 
 - Clause 13 (Alarm and Event Services), Clause 13.1 (COV)
 
 ---
 
-## 8. Phase 7: Device Management and File Access
+## 9. Phase 7: Device Management and File Access
 
 **Goal**: Implement remaining device management services and file transfer.
 
-### 8.1 Deliverables
+### 9.1 Deliverables
 
 | Module                         | File              | What                                                                                        |
 | ------------------------------ | ----------------- | ------------------------------------------------------------------------------------------- |
@@ -197,7 +220,7 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 | `services/private_transfer.py` | Private transfer  | ConfirmedPrivateTransfer, UnconfirmedPrivateTransfer                                        |
 | `objects/file.py`              | File object       | FileObject with stream/record access                                                        |
 
-### 8.2 Testing
+### 9.2 Testing
 
 - **DCC**: Enable/disable communication, verify rejected requests during disable
 - **Reinitialize**: Warm start, cold start
@@ -206,48 +229,48 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 - **Object creation/deletion**: Dynamic object management
 - **Private transfer**: Vendor-specific service round-trip
 
-### 8.3 Spec References
+### 9.3 Spec References
 
 - Clause 14 (File Access), Clause 15.1-15.4 (List/Object Management), Clause 16 (Device Management)
 
 ---
 
-## 9. Phase 8: BBMD and Foreign Device
+## 10. Phase 8: BBMD and Foreign Device
 
 **Goal**: Full BBMD and foreign device support for multi-subnet deployments.
 
-### 9.1 Deliverables
+### 10.1 Deliverables
 
 | Module                        | File           | What                                                                      |
 | ----------------------------- | -------------- | ------------------------------------------------------------------------- |
 | `transport/bbmd.py`           | BBMD           | BBMDManager: BDT management, broadcast forwarding, FDT management         |
 | `transport/foreign_device.py` | Foreign device | ForeignDeviceManager: Registration, re-registration, distribute-broadcast |
 
-### 9.2 Testing
+### 10.2 Testing
 
 - **Foreign device registration**: Register, re-register, timeout
 - **Broadcast forwarding**: BBMD forwards broadcasts to all BDT peers and foreign devices
 - **Distribute-broadcast**: Foreign device sends broadcast via BBMD
 - **Multi-BBMD**: Two BBMDs forward broadcasts between subnets
 
-### 9.3 Spec References
+### 10.3 Spec References
 
 - Annex J.4-J.7 (BBMD, Foreign Device Registration)
 
 ---
 
-## 10. Phase 9: Extended Object Types
+## 11. Phase 9: Extended Object Types
 
 **Goal**: Implement Tier 2 and Tier 3 object types.
 
-### 10.1 Deliverables
+### 11.1 Deliverables
 
 | Priority | Objects                                                                                                                                                               |
 | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Tier 2   | Schedule, Calendar, TrendLog, NotificationClass, EventEnrollment, Loop, Accumulator, Program                                                                          |
 | Tier 3   | IntegerValue, PositiveIntegerValue, CharacterStringValue, LargeAnalogValue, DateTimeValue, BitStringValue, OctetStringValue, Channel, NetworkPort, Timer, LoadControl |
 
-### 10.2 Testing
+### 11.2 Testing
 
 - Property schema validation per spec for each object type
 - Schedule/Calendar: Effective period, weekly schedule, exception schedule
@@ -256,14 +279,14 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 
 ---
 
-## 11. Testing Strategy
+## 12. Testing Strategy
 
-### 11.1 Test Framework
+### 12.1 Test Framework
 
 - **pytest** + **pytest-asyncio** for async test support
 - Tests organized to mirror the source tree: `tests/encoding/`, `tests/transport/`, `tests/services/`, etc.
 
-### 11.2 Test Categories
+### 12.2 Test Categories
 
 | Category    | Purpose                                                       | Run Time         |
 | ----------- | ------------------------------------------------------------- | ---------------- |
@@ -272,7 +295,7 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 | Conformance | Verify encoded bytes match spec Annex F examples exactly      | < 1 second each  |
 | Interop     | Test against bacnet-stack C applications or BACnet test tools | Manual/CI        |
 
-### 11.3 Conformance Test Vectors
+### 12.3 Conformance Test Vectors
 
 The spec (Annex F) provides example encodings. We implement these as exact byte-comparison tests:
 
@@ -291,7 +314,7 @@ def test_read_property_request_encoding():
     ])
 ```
 
-### 11.4 Mock Transport for Testing
+### 12.4 Mock Transport for Testing
 
 ```python
 class MockTransport:
@@ -314,7 +337,7 @@ class MockTransport:
             self._receive_callback(data, source)
 ```
 
-## 12. Project Structure Summary
+## 13. Project Structure Summary
 
 ```
 bac-py/
@@ -418,14 +441,14 @@ bac-py/
         └── test_cov.py
 ```
 
-## 13. Dependency Decisions
+## 14. Dependency Decisions
 
 | Dependency          | Type     | Phase  | Purpose                                    |
 | ------------------- | -------- | ------ | ------------------------------------------ |
-| Python 3.13+ stdlib | Required | 1      | asyncio, struct, enum, dataclasses, typing |
-| pytest              | Dev      | 1      | Test framework                             |
-| pytest-asyncio      | Dev      | 1      | Async test support                         |
-| mypy                | Dev      | 1      | Static type checking                       |
-| ruff                | Dev      | 1      | Linting and formatting                     |
-| coverage            | Dev      | 1      | Test coverage reporting                    |
+| Python 3.13+ stdlib | Required | 0      | asyncio, struct, enum, dataclasses, typing |
+| pytest              | Dev      | 0      | Test framework                             |
+| pytest-asyncio      | Dev      | 0      | Async test support                         |
+| mypy                | Dev      | 0      | Static type checking                       |
+| ruff                | Dev      | 0      | Linting and formatting                     |
+| coverage            | Dev      | 0      | Test coverage reporting                    |
 | cryptography        | Optional | Future | BACnet Secure Connect (Clause 24)          |

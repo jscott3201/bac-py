@@ -112,6 +112,7 @@ class BACnetApplication:
 
         await self._transport.start()
         self._running = True
+        self._stop_event = asyncio.Event()
 
         try:
             async with asyncio.TaskGroup() as tg:
@@ -125,18 +126,20 @@ class BACnetApplication:
                 # I-Am announcement on startup
                 tg.create_task(self._startup_announce())
 
-                # Keep alive until cancelled
-                tg.create_task(self._run_forever())
+                # Keep alive until stop() is called
+                tg.create_task(self._wait_for_stop())
+        except* Exception as eg:
+            # TaskGroup wraps child exceptions in ExceptionGroup.
+            # Log them so they aren't silently swallowed.
+            for exc in eg.exceptions:
+                logger.error("Background task failed", exc_info=exc)
         finally:
             self._running = False
             await self._transport.stop()
 
-    async def _run_forever(self) -> None:
-        """Block until the application is cancelled."""
-        try:
-            await asyncio.Future()  # Never resolves; cancelled on shutdown
-        except asyncio.CancelledError:
-            pass
+    async def _wait_for_stop(self) -> None:
+        """Block until stop() signals the event."""
+        await self._stop_event.wait()
 ```
 
 ### 3.2 Context Manager Interface
@@ -146,14 +149,26 @@ For convenience, the application also supports `async with`:
 ```python
 class BACnetApplication:
     async def __aenter__(self) -> BACnetApplication:
-        self._run_task = asyncio.create_task(self.run())
-        # Wait for transport to be ready
-        while not self._running:
-            await asyncio.sleep(0)
+        self._ready_event = asyncio.Event()
+        self._run_task = asyncio.create_task(self._run_and_signal_ready())
+        # Wait for transport to be ready without busy-spinning
+        await self._ready_event.wait()
         return self
 
+    async def _run_and_signal_ready(self) -> None:
+        """Wrapper that signals readiness after transport starts."""
+        # run() sets self._running = True after transport.start().
+        # We need to signal the ready event at that point.
+        # Override is kept simple: run() already sets _running,
+        # and we poll once after yielding control.
+        task = asyncio.ensure_future(self.run())
+        while not self._running:
+            await asyncio.sleep(0)
+        self._ready_event.set()
+        await task
+
     async def __aexit__(self, *exc_info) -> None:
-        self._run_task.cancel()
+        self._stop_event.set()
         with contextlib.suppress(asyncio.CancelledError):
             await self._run_task
 ```
@@ -210,15 +225,16 @@ Timeouts use `loop.call_later()` rather than `asyncio.wait_for()` to avoid task 
 ```python
 def _start_timeout(self, txn: ClientTransaction) -> None:
     loop = asyncio.get_running_loop()
+    key = (txn.destination, txn.invoke_id)
     txn.timeout_handle = loop.call_later(
         self._timeout_seconds,
         self._on_timeout,
-        txn.invoke_id,
+        key,
     )
 
-def _on_timeout(self, invoke_id: int) -> None:
+def _on_timeout(self, key: tuple[BACnetAddress, int]) -> None:
     """Called by the event loop when a request times out."""
-    txn = self._transactions.get(invoke_id)
+    txn = self._transactions.get(key)
     if txn is None or txn.future.done():
         return
 
@@ -270,7 +286,7 @@ async def _cov_lifetime_monitor(self) -> None:
     """Prune expired COV subscriptions."""
     while True:
         await asyncio.sleep(10)  # Check every 10 seconds
-        now = asyncio.get_event_loop().time()
+        now = asyncio.get_running_loop().time()
         expired = [
             sub for sub in self._cov_subscriptions
             if sub.lifetime is not None
@@ -346,7 +362,7 @@ async def _dispatch_confirmed(self, header: ConfirmedRequestPDU,
 
 ### 6.2 Write Serialization
 
-To prevent race conditions on object write operations, each object has an `asyncio.Lock` that serializes writes without blocking reads:
+To prevent race conditions on object write operations, each object has an `asyncio.Lock` that serializes writes without blocking reads. The lock is needed because write operations may involve multiple steps (e.g., validating a value, updating the priority array, recalculating Present_Value, and triggering COV notifications). Without the lock, two concurrent writes could interleave mid-operation and corrupt the priority array state:
 
 ```python
 class BACnetObject:
@@ -382,9 +398,9 @@ async def stop(self) -> None:
         if not txn.future.done():
             txn.future.cancel()
 
-    # Cancel the run task (triggers TaskGroup cleanup)
+    # Signal the run loop to exit (triggers TaskGroup cleanup)
+    self._stop_event.set()
     if self._run_task and not self._run_task.done():
-        self._run_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await self._run_task
 ```
@@ -399,7 +415,9 @@ async def main():
     loop = asyncio.get_running_loop()
 
     for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, lambda: asyncio.create_task(app.stop()))
+        loop.add_signal_handler(
+            sig, lambda: asyncio.create_task(app.stop())
+        )
 
     await app.run()
 ```
@@ -434,6 +452,7 @@ class BACnetRunner:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._app: BACnetApplication | None = None
+        self._client: BACnetClient | None = None
         self._started = threading.Event()
 
     def start(self) -> None:
@@ -449,16 +468,16 @@ class BACnetRunner:
 
     def _run(self) -> None:
         self._loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(self._loop)
         self._app = BACnetApplication(self._config)
+        self._client = BACnetClient(self._app)
         self._started.set()
         self._loop.run_until_complete(self._app.run())
 
     def read_property(self, addr, obj_id, prop_id, timeout=10):
         """Thread-safe synchronous read."""
-        coro = BACnetClient(self._app).read_property(addr, obj_id, prop_id)
         return asyncio.run_coroutine_threadsafe(
-            coro, self._loop
+            self._client.read_property(addr, obj_id, prop_id),
+            self._loop
         ).result(timeout=timeout)
 ```
 

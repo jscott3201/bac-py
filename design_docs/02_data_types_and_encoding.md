@@ -160,23 +160,41 @@ class PropertyIdentifier(IntEnum):
     ACTIVE_TEXT = 4
     ACTIVE_VT_SESSIONS = 5
     # ... (complete list from spec - ~500 defined properties)
+    APDU_SEGMENT_TIMEOUT = 10
+    APDU_TIMEOUT = 11
+    APPLICATION_SOFTWARE_VERSION = 12
+    COV_INCREMENT = 22
+    DATABASE_REVISION = 155
+    DESCRIPTION = 28
+    DEVICE_ADDRESS_BINDING = 30
+    EVENT_STATE = 36
+    FIRMWARE_REVISION = 44
+    MAX_APDU_LENGTH_ACCEPTED = 62
+    MAX_PRES_VALUE = 65
+    MAX_SEGMENTS_ACCEPTED = 167
+    MIN_PRES_VALUE = 69
+    MODEL_NAME = 70
+    NUMBER_OF_APDU_RETRIES = 73
     OBJECT_IDENTIFIER = 75
     OBJECT_LIST = 76
     OBJECT_NAME = 77
     OBJECT_TYPE = 79
+    OUT_OF_SERVICE = 81
     PRESENT_VALUE = 85
     PRIORITY_ARRAY = 87
+    PROPERTY_LIST = 371
     PROTOCOL_OBJECT_TYPES_SUPPORTED = 96
+    PROTOCOL_REVISION = 139
     PROTOCOL_SERVICES_SUPPORTED = 97
     PROTOCOL_VERSION = 98
+    RELIABILITY = 103
+    RELINQUISH_DEFAULT = 104
+    SEGMENTATION_SUPPORTED = 107
     STATUS_FLAGS = 111
     SYSTEM_STATUS = 112
     UNITS = 117
     VENDOR_IDENTIFIER = 120
     VENDOR_NAME = 121
-    MODEL_NAME = 70
-    FIRMWARE_REVISION = 44
-    APPLICATION_SOFTWARE_VERSION = 12
     # ... continued
     # Vendor-specific: 512+
 
@@ -198,11 +216,15 @@ class ErrorCode(IntEnum):
     DEVICE_BUSY = 3
     DYNAMIC_CREATION_NOT_SUPPORTED = 4
     FILE_ACCESS_DENIED = 5
-    OBJECT_DELETION_NOT_PERMITTED = 23
-    OBJECT_IDENTIFIER_ALREADY_EXISTS = 24
+    INVALID_ARRAY_INDEX = 42
     MISSING_REQUIRED_PARAMETER = 16
     NO_OBJECTS_OF_SPECIFIED_TYPE = 17
+    NO_SPACE_TO_ADD_LIST_ELEMENT = 18
+    OBJECT_DELETION_NOT_PERMITTED = 23
+    OBJECT_IDENTIFIER_ALREADY_EXISTS = 24
+    OPTIONAL_FUNCTIONALITY_NOT_SUPPORTED = 45
     PROPERTY_IS_NOT_A_LIST = 22
+    PROPERTY_IS_NOT_AN_ARRAY = 50
     READ_ACCESS_DENIED = 27
     SERVICE_REQUEST_DENIED = 29
     TIMEOUT = 30
@@ -263,8 +285,17 @@ Bits:  7  6  5  4  3  2  1  0
 - **Class** (bit 3): 0 = application tag, 1 = context-specific tag
 - **L/V/T** (bits 2-0): Length, Value, or Type indicator
   - For primitive: data length (0-4 inline, 5 = extended length follows)
-  - For Boolean app-tagged: value (0 = False, 1 = True)
+  - For Boolean app-tagged: **value** (0 = False, 1 = True) — no contents octet
+  - For Boolean context-tagged: **length** = 1, with 1 contents octet (0x00 = False, 0x01 = True)
   - For constructed: 6 = opening tag, 7 = closing tag
+
+**Extended Length Encoding** (Clause 20.2.1.3.1): When L/V/T = 5 (B'101'), the data length follows:
+
+- 5-253 octets: 1 extension byte containing the length
+- 254-65535 octets: extension byte = 0xFE, followed by 2-byte big-endian length
+- 65536-2^32-1 octets: extension byte = 0xFF, followed by 4-byte big-endian length
+
+**Boolean Encoding Asymmetry** (Clause 20.2.3): Application-tagged Booleans encode the value directly in the L/V/T bits with no contents octet. Context-tagged Booleans encode a length of 1 in L/V/T and place the value in 1 contents octet. The encoder must handle these two cases separately.
 
 ### 4.2 Codec Design
 
@@ -328,14 +359,21 @@ def encode_double(value: float) -> bytes:
 def decode_double(data: memoryview) -> float:
     return struct.unpack('>d', data[:8])[0]
 
-# Character String - leading charset byte, default UTF-8
+# Character String - leading charset byte, default UTF-8 (Clause 20.2.9)
+# Charset values: 0x00=UTF-8, 0x01=DBCS, 0x02=JIS C 6226, 0x03=UCS-4, 0x04=UCS-2, 0x05=ISO-8859-1
+_CHARSET_DECODERS: dict[int, str] = {
+    0x00: 'utf-8',
+    0x05: 'iso-8859-1',
+}
+
 def encode_character_string(value: str, charset: int = 0) -> bytes:
     return bytes([charset]) + value.encode('utf-8')
 def decode_character_string(data: memoryview) -> str:
     charset = data[0]
-    if charset == 0:  # UTF-8
-        return bytes(data[1:]).decode('utf-8')
-    ...
+    encoding = _CHARSET_DECODERS.get(charset)
+    if encoding is None:
+        raise ValueError(f"Unsupported BACnet character set: 0x{charset:02x}")
+    return bytes(data[1:]).decode(encoding)
 
 # Object Identifier - 4 bytes: 10-bit type + 22-bit instance
 def encode_object_identifier(obj_type: int, instance: int) -> bytes:
@@ -506,6 +544,7 @@ class ConfirmedServiceChoice(IntEnum):
     CREATE_OBJECT = 10
     DELETE_OBJECT = 11
     READ_PROPERTY = 12
+    # 13 was formerly read-property-conditional, removed in spec revision 12
     READ_PROPERTY_MULTIPLE = 14
     READ_RANGE = 26
     WRITE_PROPERTY = 15

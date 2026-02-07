@@ -22,80 +22,81 @@ BACnet uses a four-layer collapsed OSI architecture:
 └─────────────────────────────────────┘
 ```
 
-bac-py mirrors this with a corresponding Python module hierarchy:
+bac-py mirrors this with a corresponding Python module hierarchy using the `src/` layout (PEP 517/518):
 
 ```
-bac_py/
-├── __init__.py
-├── types/                  # BACnet data types and enumerations
-│   ├── __init__.py
-│   ├── primitives.py       # Null, Bool, Unsigned, Signed, Real, Double, etc.
-│   ├── constructed.py      # Sequences, choices, lists
-│   ├── enums.py            # ObjectType, PropertyIdentifier, ErrorClass, etc.
-│   └── object_id.py        # BACnetObjectIdentifier
-│
-├── encoding/               # ASN.1/BER-like tag-length-value encoding
-│   ├── __init__.py
-│   ├── tags.py             # Application & context-specific tag encode/decode
-│   ├── primitives.py       # Encoding rules per data type (Clause 20.2)
-│   └── apdu.py             # APDU fixed-part encoding (Clause 20.1)
-│
-├── network/                # Network layer (Clause 6)
-│   ├── __init__.py
-│   ├── npdu.py             # NPDU encode/decode, control octet parsing
-│   └── address.py          # BACnet addresses (local, remote, broadcast)
-│
-├── transport/              # Data link layer implementations
-│   ├── __init__.py
-│   ├── base.py             # Abstract transport protocol
-│   ├── bip.py              # BACnet/IP (Annex J) - UDP transport
-│   ├── bvll.py             # BVLL message encode/decode
-│   ├── bbmd.py             # BBMD broadcast management
-│   └── foreign_device.py   # Foreign device registration
-│
-├── services/               # Application layer services
-│   ├── __init__.py
-│   ├── base.py             # Service request/response base classes
-│   ├── who_is.py           # Who-Is / I-Am (Clause 16.10)
-│   ├── who_has.py          # Who-Has / I-Have (Clause 16.9)
-│   ├── read_property.py    # ReadProperty (Clause 15.5)
-│   ├── read_property_multiple.py  # ReadPropertyMultiple (Clause 15.7)
-│   ├── write_property.py   # WriteProperty (Clause 15.9)
-│   ├── write_property_multiple.py # WritePropertyMultiple (Clause 15.10)
-│   ├── read_range.py       # ReadRange (Clause 15.8)
-│   ├── cov.py              # SubscribeCOV, COV notifications (Clause 13)
-│   ├── event.py            # Event notifications (Clause 13)
-│   ├── device_mgmt.py      # DCC, ReinitializeDevice, TimeSynchronization
-│   ├── file_access.py      # AtomicReadFile, AtomicWriteFile (Clause 14)
-│   ├── object_mgmt.py      # CreateObject, DeleteObject (Clause 15.3-15.4)
-│   ├── list_element.py     # AddListElement, RemoveListElement (Clause 15.1-15.2)
-│   ├── private_transfer.py # ConfirmedPrivateTransfer, UnconfirmedPrivateTransfer
-│   └── errors.py           # BACnet-Error, Reject, Abort (Clause 18)
-│
-├── objects/                # BACnet object model (Clause 12)
-│   ├── __init__.py
-│   ├── base.py             # BACnetObject base class with property registry
-│   ├── device.py           # Device object (Clause 12.11)
-│   ├── analog.py           # AnalogInput, AnalogOutput, AnalogValue
-│   ├── binary.py           # BinaryInput, BinaryOutput, BinaryValue
-│   ├── multistate.py       # MultiStateInput, MultiStateOutput, MultiStateValue
-│   ├── schedule.py         # Schedule, Calendar
-│   ├── trendlog.py         # TrendLog, TrendLogMultiple
-│   ├── notification.py     # NotificationClass, EventEnrollment
-│   ├── file.py             # File object
-│   ├── loop.py             # Loop (PID control)
-│   ├── network_port.py     # NetworkPort object
-│   └── value_types.py      # IntegerValue, PositiveIntegerValue, CharStringValue, etc.
-│
-├── app/                    # High-level application interface
-│   ├── __init__.py
-│   ├── client.py           # BACnet client application
-│   ├── server.py           # BACnet server application
-│   └── device.py           # Local device management
-│
-└── segmentation/           # Message segmentation (Clause 5.2)
+src/
+└── bac_py/
     ├── __init__.py
-    └── manager.py          # Segmentation state machine
+    ├── types/                  # BACnet data types and enumerations
+    │   ├── __init__.py
+    │   ├── primitives.py       # Null, Bool, Unsigned, Signed, Real, Double, etc.
+    │   ├── constructed.py      # Sequences, choices, lists
+    │   ├── enums.py            # ObjectType, PropertyIdentifier, ErrorClass, etc.
+    │   └── object_id.py        # BACnetObjectIdentifier
+    │
+    ├── encoding/               # ASN.1/BER-like tag-length-value encoding
+    │   ├── __init__.py
+    │   ├── tags.py             # Application & context-specific tag encode/decode
+    │   ├── primitives.py       # Encoding rules per data type (Clause 20.2)
+    │   └── apdu.py             # APDU fixed-part encoding (Clause 20.1)
+    │
+    ├── network/                # Network layer (Clause 6)
+    │   ├── __init__.py
+    │   ├── npdu.py             # NPDU encode/decode, control octet parsing
+    │   └── address.py          # BACnet addresses (local, remote, broadcast)
+    │
+    ├── transport/              # Data link layer implementations
+    │   ├── __init__.py
+    │   ├── base.py             # Abstract transport protocol
+    │   ├── bip.py              # BACnet/IP (Annex J) - UDP transport
+    │   ├── bvll.py             # BVLL message encode/decode
+    │   ├── bbmd.py             # BBMD broadcast management
+    │   └── foreign_device.py   # Foreign device registration
+    │
+    ├── services/               # Application layer services
+    │   ├── __init__.py
+    │   ├── base.py             # Service request/response base classes
+    │   ├── who_is.py           # Who-Is / I-Am (Clause 16.10)
+    │   ├── who_has.py          # Who-Has / I-Have (Clause 16.9)
+    │   ├── read_property.py    # ReadProperty (Clause 15.5)
+    │   ├── read_property_multiple.py  # ReadPropertyMultiple (Clause 15.7)
+    │   ├── write_property.py   # WriteProperty (Clause 15.9)
+    │   ├── write_property_multiple.py # WritePropertyMultiple (Clause 15.10)
+    │   ├── read_range.py       # ReadRange (Clause 15.8)
+    │   ├── cov.py              # SubscribeCOV, COV notifications (Clause 13)
+    │   ├── event.py            # Event notifications (Clause 13)
+    │   ├── device_mgmt.py      # DCC, ReinitializeDevice, TimeSynchronization
+    │   ├── file_access.py      # AtomicReadFile, AtomicWriteFile (Clause 14)
+    │   ├── object_mgmt.py      # CreateObject, DeleteObject (Clause 15.3-15.4)
+    │   ├── list_element.py     # AddListElement, RemoveListElement (Clause 15.1-15.2)
+    │   ├── private_transfer.py # ConfirmedPrivateTransfer, UnconfirmedPrivateTransfer
+    │   └── errors.py           # BACnet-Error, Reject, Abort (Clause 18)
+    │
+    ├── objects/                # BACnet object model (Clause 12)
+    │   ├── __init__.py
+    │   ├── base.py             # BACnetObject base class with property registry
+    │   ├── device.py           # Device object (Clause 12.11)
+    │   ├── analog.py           # AnalogInput, AnalogOutput, AnalogValue
+    │   ├── binary.py           # BinaryInput, BinaryOutput, BinaryValue
+    │   ├── multistate.py       # MultiStateInput, MultiStateOutput, MultiStateValue
+    │   ├── schedule.py         # Schedule, Calendar
+    │   ├── trendlog.py         # TrendLog, TrendLogMultiple
+    │   ├── notification.py     # NotificationClass, EventEnrollment
+    │   ├── file.py             # File object
+    │   ├── loop.py             # Loop (PID control)
+    │   ├── network_port.py     # NetworkPort object
+    │   └── value_types.py      # IntegerValue, PositiveIntegerValue, CharStringValue, etc.
+    │
+    ├── app/                    # High-level application interface
+    │   ├── __init__.py
+    │   ├── client.py           # BACnet client application
+    │   ├── server.py           # BACnet server application
+    │   └── device.py           # Local device management
+    │
+    └── segmentation/           # Message segmentation (Clause 5.2)
+        ├── __init__.py
+        └── manager.py          # Segmentation state machine
 ```
 
 ## 3. Core Design Principles
@@ -179,12 +180,29 @@ User calls:  await client.read_property(device_addr, obj_id, prop_id)
 
 ### 5.1 Transaction State Machine (TSM)
 
-The application layer maintains a Transaction State Machine per the spec (Clause 5.4):
+The application layer maintains a Transaction State Machine per the spec (Clause 5.4). A transaction is uniquely identified by the tuple `(remote_address, invoke_id)` — this composite key is critical because multiple remote devices may independently use the same invoke-id.
 
-- **Client TSM**: Tracks outstanding confirmed requests by invoke-id. Handles retries, timeouts, and segmented responses. Each active request holds a reference to an `asyncio.Future` that the caller awaits.
-- **Server TSM**: Tracks incoming confirmed requests that require a response. Manages segmented request reassembly and response segmentation.
+**Client TSM** (Clause 5.4.4) has four states:
 
-The TSM is implemented as a dict of `Transaction` objects keyed by `(remote_address, invoke_id)`.
+| State              | Description                                                                                               |
+| ------------------ | --------------------------------------------------------------------------------------------------------- |
+| IDLE               | No active transaction. Awaiting local application request.                                                |
+| SEGMENTED_REQUEST  | Sending a segmented Confirmed-Request. Awaiting SegmentACK for each window.                               |
+| AWAIT_CONFIRMATION | Unsegmented or fully-sent request. Awaiting response (ACK/Error/Reject/Abort). Handles timeout and retry. |
+| SEGMENTED_CONF     | Receiving a segmented ComplexACK. Collecting segments, sending SegmentACKs.                               |
+
+Each active request holds a reference to an `asyncio.Future` that the caller awaits.
+
+**Server TSM** (Clause 5.4.5) has four states:
+
+| State              | Description                                                                         |
+| ------------------ | ----------------------------------------------------------------------------------- |
+| IDLE               | No active transaction. Awaiting incoming confirmed request.                         |
+| SEGMENTED_REQUEST  | Receiving a segmented Confirmed-Request. Collecting segments, sending SegmentACKs.  |
+| AWAIT_RESPONSE     | Complete request received. Waiting for local service handler to produce a response. |
+| SEGMENTED_RESPONSE | Sending a segmented ComplexACK response. Awaiting SegmentACK for each window.       |
+
+Both TSMs are implemented as a dict of `Transaction` objects keyed by `(remote_address, invoke_id)`.
 
 ### 5.2 Service Dispatch
 
@@ -231,14 +249,25 @@ The library is configured through a `DeviceConfig` dataclass:
 ```python
 @dataclass(frozen=True)
 class DeviceConfig:
-    instance_number: int                    # Device instance number
-    name: str                               # Device name
+    instance_number: int                    # Device instance number (0-4194303)
+    name: str                               # Device name (unique internetwork-wide)
     vendor_id: int = 0                      # Vendor identifier
-    max_apdu_length: int = 1476             # Max APDU length accepted
+    vendor_name: str = ""                   # Vendor name
+    model_name: str = ""                    # Model name
+    firmware_revision: str = "0.1.0"        # Firmware revision string
+    application_software_version: str = "0.1.0"  # Application software version
+    max_apdu_length: int = 1476             # Max APDU length accepted (>= 50)
     segmentation_supported: Segmentation = Segmentation.BOTH
-    apdu_timeout: int = 3000                # Milliseconds
-    apdu_retries: int = 3                   # Number of retries
-    database_revision: int = 0              # Object database revision
+    max_segments_accepted: int = 64         # Max segments accepted (required if segmentation supported)
+    apdu_timeout: int = 6000                # Milliseconds (spec default: 6000, or 10000 if not configurable)
+    apdu_segment_timeout: int = 2000        # Milliseconds (required if segmentation supported)
+    apdu_retries: int = 3                   # Number of retries (spec default: 3)
+    database_revision: int = 0              # Object database revision (increment on create/delete/rename)
+    # Network configuration
+    interface: str = '0.0.0.0'              # Bind interface
+    port: int = 0xBAC0                      # UDP port (47808)
+    bbmd_address: BIPAddress | None = None  # BBMD address for foreign device mode
+    bbmd_ttl: int = 60                      # Foreign device TTL in seconds
 ```
 
 ## 8. Error Model
@@ -284,12 +313,12 @@ bac_py.objects             # Object property changes
 
 Log levels follow standard semantics:
 
-| Level | Usage |
-|-------|-------|
-| DEBUG | Full PDU hex dumps, tag-by-tag decoding, timer starts/cancels |
-| INFO | Service requests/responses, device discovery, COV notifications |
+| Level   | Usage                                                                                  |
+| ------- | -------------------------------------------------------------------------------------- |
+| DEBUG   | Full PDU hex dumps, tag-by-tag decoding, timer starts/cancels                          |
+| INFO    | Service requests/responses, device discovery, COV notifications                        |
 | WARNING | Timeouts, retransmissions, unknown service choices, malformed packets silently dropped |
-| ERROR | Transaction failures, unhandled exceptions in handlers |
+| ERROR   | Transaction failures, unhandled exceptions in handlers                                 |
 
 No log messages are emitted at WARNING or above during normal operation. Users configure log levels and handlers through standard `logging.getLogger('bac_py')`.
 

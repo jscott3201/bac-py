@@ -187,7 +187,14 @@ class BACnetObject:
 
         BACnet priority 1 = highest, 16 = lowest.
         Priority array index is 0-based internally (priority - 1).
+        Priority 6 is reserved for Minimum On/Off and cannot be
+        written by external WriteProperty requests (Clause 19.2.3).
         """
+        if priority < 1 or priority > 16:
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.VALUE_OUT_OF_RANGE)
+        if priority == 6:
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.WRITE_ACCESS_DENIED)
+
         if self._priority_array is None:
             self._priority_array = [None] * 16
 
@@ -294,7 +301,40 @@ class DeviceObject(BACnetObject):
         PropertyIdentifier.OBJECT_LIST: PropertyDefinition(
             PropertyIdentifier.OBJECT_LIST, list,
             PropertyAccess.READ_ONLY, required=True),
-        # ... additional required and optional properties
+        PropertyIdentifier.MAX_APDU_LENGTH_ACCEPTED: PropertyDefinition(
+            PropertyIdentifier.MAX_APDU_LENGTH_ACCEPTED, int,
+            PropertyAccess.READ_ONLY, required=True, default=1476),
+        PropertyIdentifier.SEGMENTATION_SUPPORTED: PropertyDefinition(
+            PropertyIdentifier.SEGMENTATION_SUPPORTED, Segmentation,
+            PropertyAccess.READ_ONLY, required=True, default=Segmentation.BOTH),
+        PropertyIdentifier.MAX_SEGMENTS_ACCEPTED: PropertyDefinition(
+            PropertyIdentifier.MAX_SEGMENTS_ACCEPTED, int,
+            PropertyAccess.READ_ONLY, required=True, default=64),
+        PropertyIdentifier.APDU_TIMEOUT: PropertyDefinition(
+            PropertyIdentifier.APDU_TIMEOUT, int,
+            PropertyAccess.READ_WRITE, required=True, default=6000),
+        PropertyIdentifier.NUMBER_OF_APDU_RETRIES: PropertyDefinition(
+            PropertyIdentifier.NUMBER_OF_APDU_RETRIES, int,
+            PropertyAccess.READ_WRITE, required=True, default=3),
+        PropertyIdentifier.APDU_SEGMENT_TIMEOUT: PropertyDefinition(
+            PropertyIdentifier.APDU_SEGMENT_TIMEOUT, int,
+            PropertyAccess.READ_WRITE, required=True, default=2000),
+        PropertyIdentifier.DEVICE_ADDRESS_BINDING: PropertyDefinition(
+            PropertyIdentifier.DEVICE_ADDRESS_BINDING, list,
+            PropertyAccess.READ_ONLY, required=True, default=[]),
+        PropertyIdentifier.DATABASE_REVISION: PropertyDefinition(
+            PropertyIdentifier.DATABASE_REVISION, int,
+            PropertyAccess.READ_ONLY, required=True, default=0),
+        PropertyIdentifier.PROTOCOL_REVISION: PropertyDefinition(
+            PropertyIdentifier.PROTOCOL_REVISION, int,
+            PropertyAccess.READ_ONLY, required=True, default=22),  # 135-2016
+        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
+            PropertyIdentifier.PROPERTY_LIST, list,
+            PropertyAccess.READ_ONLY, required=True),
+        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
+            PropertyIdentifier.DESCRIPTION, str,
+            PropertyAccess.READ_WRITE, required=False),
+        # ... additional optional properties
     }
 ```
 
@@ -321,8 +361,8 @@ class AnalogInputObject(BACnetObject):
             PropertyIdentifier.STATUS_FLAGS, BitString,
             PropertyAccess.READ_ONLY, required=True),
         PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE, int,
-            PropertyAccess.READ_ONLY, required=True, default=0),
+            PropertyIdentifier.EVENT_STATE, EventState,
+            PropertyAccess.READ_ONLY, required=True, default=EventState.NORMAL),
         PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
             PropertyIdentifier.OUT_OF_SERVICE, bool,
             PropertyAccess.READ_WRITE, required=True, default=False),
@@ -345,6 +385,9 @@ class AnalogInputObject(BACnetObject):
         PropertyIdentifier.MAX_PRES_VALUE: PropertyDefinition(
             PropertyIdentifier.MAX_PRES_VALUE, float,
             PropertyAccess.READ_ONLY, required=False),
+        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
+            PropertyIdentifier.PROPERTY_LIST, list,
+            PropertyAccess.READ_ONLY, required=True),
     }
 ```
 
@@ -356,12 +399,14 @@ Analog Output is commandable - it has a priority array:
 class AnalogOutputObject(BACnetObject):
     OBJECT_TYPE = ObjectType.ANALOG_OUTPUT
 
-    def __init__(self, instance_number: int, **kwargs: Any):
+    def __init__(self, instance_number: int, commandable: bool = True,
+                 **kwargs: Any):
         super().__init__(instance_number, **kwargs)
         # Initialize 16-level priority array for commandable property
-        self._priority_array = [None] * 16
-        self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
-        self._properties[PropertyIdentifier.RELINQUISH_DEFAULT] = 0.0
+        if commandable:
+            self._priority_array = [None] * 16
+            self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
+            self._properties[PropertyIdentifier.RELINQUISH_DEFAULT] = 0.0
 
     PROPERTY_DEFINITIONS = {
         # ... same required properties as AnalogInput plus:
@@ -408,24 +453,24 @@ class MultiStateOutputObject(BACnetObject):
 
 Commandable properties (Present_Value on output and some value objects) use a 16-level priority array:
 
-| Priority | Typical Use                           |
-| -------- | ------------------------------------- |
-| 1        | Manual-Life Safety                    |
-| 2        | Automatic-Life Safety                 |
-| 3        | Available                             |
-| 4        | Available                             |
-| 5        | Critical Equipment Control            |
-| 6        | Minimum On/Off                        |
-| 7        | Available                             |
-| 8        | Manual Operator                       |
-| 9        | Available                             |
-| 10       | Available                             |
-| 11       | Available                             |
-| 12       | Available                             |
-| 13       | Available                             |
-| 14       | Available                             |
-| 15       | Available                             |
-| 16       | Available (lowest priority / default) |
+| Priority | Typical Use                                            |
+| -------- | ------------------------------------------------------ |
+| 1        | Manual-Life Safety                                     |
+| 2        | Automatic-Life Safety                                  |
+| 3        | Available                                              |
+| 4        | Available                                              |
+| 5        | Critical Equipment Control                             |
+| 6        | Minimum On/Off (reserved — written only by the device) |
+| 7        | Available                                              |
+| 8        | Manual Operator                                        |
+| 9        | Available                                              |
+| 10       | Available                                              |
+| 11       | Available                                              |
+| 12       | Available                                              |
+| 13       | Available                                              |
+| 14       | Available                                              |
+| 15       | Available                                              |
+| 16       | Available (lowest priority / default)                  |
 
 Writing `None` (Null) to a priority level relinquishes it. The highest-priority (lowest number) non-None value becomes the Present_Value.
 
@@ -434,6 +479,16 @@ Writing `None` (Null) to a priority level relinquishes it. The highest-priority 
 Objects that support COV reporting must track subscriptions and notify subscribers when values change:
 
 ```python
+class EventState(IntEnum):
+    """BACnet EventState enumeration (Clause 12.12.26)."""
+    NORMAL = 0
+    FAULT = 1
+    OFFNORMAL = 2
+    HIGH_LIMIT = 3
+    LOW_LIMIT = 4
+    LIFE_SAFETY_ALARM = 5
+
+
 class COVMixin:
     """Mixin for objects that support COV (Change of Value) reporting."""
 
@@ -455,11 +510,12 @@ class COVMixin:
     def check_cov(self, property_id: PropertyIdentifier,
                   new_value: Any) -> bool:
         """Check if value change exceeds COV increment for notification."""
-        if hasattr(self, '_cov_increment'):
+        cov_increment = self._properties.get(PropertyIdentifier.COV_INCREMENT)
+        if cov_increment is not None:
             if isinstance(new_value, (int, float)):
                 if self._last_reported_value is None:
                     return True
-                return abs(new_value - self._last_reported_value) >= self._cov_increment
+                return abs(new_value - self._last_reported_value) >= cov_increment
         # Binary and multi-state: any change triggers COV
         return new_value != self._last_reported_value
 

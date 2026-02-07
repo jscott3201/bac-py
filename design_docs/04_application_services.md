@@ -267,30 +267,43 @@ class ClientTransaction:
     expected_segments: int | None = None
 
 
+class ClientTransactionState(IntEnum):
+    """Client TSM states per Clause 5.4.4."""
+    IDLE = 0
+    SEGMENTED_REQUEST = 1
+    AWAIT_CONFIRMATION = 2
+    SEGMENTED_CONF = 3
+
+
 class ClientTSM:
-    """Client Transaction State Machine.
+    """Client Transaction State Machine (Clause 5.4.4).
 
     Manages outstanding confirmed requests, correlating responses
-    by (source_address, invoke_id).
+    by (source_address, invoke_id). Per Clause 5.4, a transaction
+    is uniquely identified by the composite key (remote_address,
+    invoke_id). Using invoke_id alone would cause collisions when
+    communicating with multiple devices simultaneously.
     """
 
     def __init__(self, network: NetworkLayer,
-                 apdu_timeout: float = 3.0,
+                 apdu_timeout: float = 6.0,
                  apdu_retries: int = 3):
         self._network = network
         self._timeout = apdu_timeout
         self._retries = apdu_retries
-        self._transactions: dict[int, ClientTransaction] = {}
+        self._transactions: dict[
+            tuple[BACnetAddress, int], ClientTransaction
+        ] = {}
         self._next_invoke_id = 0
 
-    def _allocate_invoke_id(self) -> int:
-        """Allocate the next available invoke ID (0-255)."""
+    def _allocate_invoke_id(self, destination: BACnetAddress) -> int:
+        """Allocate the next available invoke ID (0-255) for the given peer."""
         for _ in range(256):
             iid = self._next_invoke_id
             self._next_invoke_id = (self._next_invoke_id + 1) & 0xFF
-            if iid not in self._transactions:
+            if (destination, iid) not in self._transactions:
                 return iid
-        raise RuntimeError("No available invoke IDs")
+        raise RuntimeError("No available invoke IDs for this peer")
 
     async def send_request(self, service_choice: int,
                           request_data: bytes,
@@ -303,7 +316,7 @@ class ClientTSM:
         Raises BACnetError, BACnetReject, or BACnetAbort on failure.
         """
         loop = asyncio.get_running_loop()
-        invoke_id = self._allocate_invoke_id()
+        invoke_id = self._allocate_invoke_id(destination)
         future: asyncio.Future[bytes] = loop.create_future()
 
         txn = ClientTransaction(
@@ -313,26 +326,31 @@ class ClientTSM:
             request_data=request_data,
             future=future,
         )
-        self._transactions[invoke_id] = txn
+        key = (destination, invoke_id)
+        self._transactions[key] = txn
 
         try:
             await self._send_confirmed_request(txn)
             return await future
         finally:
-            self._transactions.pop(invoke_id, None)
+            self._transactions.pop(key, None)
             if txn.timeout_handle:
                 txn.timeout_handle.cancel()
 
-    def handle_simple_ack(self, invoke_id: int, service_choice: int) -> None:
-        txn = self._transactions.get(invoke_id)
+    def handle_simple_ack(self, source: BACnetAddress,
+                          invoke_id: int, service_choice: int) -> None:
+        key = (source, invoke_id)
+        txn = self._transactions.get(key)
         if txn and not txn.future.done():
             txn.future.set_result(b'')
 
-    def handle_complex_ack(self, invoke_id: int, service_choice: int,
+    def handle_complex_ack(self, source: BACnetAddress,
+                           invoke_id: int, service_choice: int,
                            data: bytes, segmented: bool,
                            more_follows: bool,
                            sequence_number: int | None) -> None:
-        txn = self._transactions.get(invoke_id)
+        key = (source, invoke_id)
+        txn = self._transactions.get(key)
         if not txn or txn.future.done():
             return
 
@@ -342,21 +360,27 @@ class ClientTSM:
             # Handle segmented response assembly
             self._handle_segment(txn, sequence_number, data, more_follows)
 
-    def handle_error(self, invoke_id: int, error_class: int,
+    def handle_error(self, source: BACnetAddress,
+                    invoke_id: int, error_class: int,
                     error_code: int) -> None:
-        txn = self._transactions.get(invoke_id)
+        key = (source, invoke_id)
+        txn = self._transactions.get(key)
         if txn and not txn.future.done():
             txn.future.set_exception(
                 BACnetError(ErrorClass(error_class), ErrorCode(error_code))
             )
 
-    def handle_reject(self, invoke_id: int, reason: int) -> None:
-        txn = self._transactions.get(invoke_id)
+    def handle_reject(self, source: BACnetAddress,
+                     invoke_id: int, reason: int) -> None:
+        key = (source, invoke_id)
+        txn = self._transactions.get(key)
         if txn and not txn.future.done():
             txn.future.set_exception(BACnetReject(RejectReason(reason)))
 
-    def handle_abort(self, invoke_id: int, reason: int) -> None:
-        txn = self._transactions.get(invoke_id)
+    def handle_abort(self, source: BACnetAddress,
+                    invoke_id: int, reason: int) -> None:
+        key = (source, invoke_id)
+        txn = self._transactions.get(key)
         if txn and not txn.future.done():
             txn.future.set_exception(BACnetAbort(AbortReason(reason)))
 
@@ -374,12 +398,13 @@ class ClientTSM:
 
     def _start_timeout(self, txn: ClientTransaction) -> None:
         loop = asyncio.get_running_loop()
+        key = (txn.destination, txn.invoke_id)
         txn.timeout_handle = loop.call_later(
-            self._timeout, self._on_timeout, txn.invoke_id
+            self._timeout, self._on_timeout, key
         )
 
-    def _on_timeout(self, invoke_id: int) -> None:
-        txn = self._transactions.get(invoke_id)
+    def _on_timeout(self, key: tuple[BACnetAddress, int]) -> None:
+        txn = self._transactions.get(key)
         if not txn or txn.future.done():
             return
         if txn.retry_count < self._retries:
@@ -391,7 +416,57 @@ class ClientTSM:
             )
 ```
 
-### 4.2 Segmentation Manager
+### 4.2 SegmentACK PDU and Wire Encoding Tables
+
+```python
+@dataclass(frozen=True, slots=True)
+class SegmentAckPDU:
+    """BACnet-SegmentACK-PDU (Clause 20.1.6)."""
+    negative_ack: bool          # True = NAK (request retransmission)
+    server: bool                # True = sent by server, False = sent by client
+    invoke_id: int              # Original invoke ID
+    sequence_number: int        # Sequence number being acknowledged
+    actual_window_size: int     # 1-127, accepted window size
+
+
+# Max-Segments-Accepted encoding (Clause 20.1.2.4)
+# 3-bit field in ConfirmedRequestPDU header
+MAX_SEGMENTS_ENCODING: dict[int, int | None] = {
+    0: None,    # Unspecified
+    1: 2,
+    2: 4,
+    3: 8,
+    4: 16,
+    5: 32,
+    6: 64,
+    7: None,    # Greater than 64
+}
+
+# Max-APDU-Length-Accepted encoding (Clause 20.1.2.5)
+# 4-bit field in ConfirmedRequestPDU and I-Am
+MAX_APDU_LENGTH_ENCODING: dict[int, int] = {
+    0: 50,      # MinimumMessageSize
+    1: 128,
+    2: 206,     # Fits LonTalk frame
+    3: 480,     # Fits ARCNET frame
+    4: 1024,
+    5: 1476,    # Fits Ethernet/BACnet-IP frame
+    # 6-15: reserved by ASHRAE
+}
+
+def encode_max_apdu_length(length: int) -> int:
+    """Convert a max APDU length to its 4-bit wire encoding."""
+    for code, max_len in sorted(MAX_APDU_LENGTH_ENCODING.items(), reverse=True):
+        if length >= max_len:
+            return code
+    return 0
+
+def decode_max_apdu_length(code: int) -> int:
+    """Convert a 4-bit wire encoding to max APDU length."""
+    return MAX_APDU_LENGTH_ENCODING.get(code, 50)
+```
+
+### 4.3 Segmentation Manager
 
 ```python
 class SegmentationManager:
@@ -559,6 +634,31 @@ class BACnetClient:
             self._app.register_cov_callback(process_id, callback)
         return process_id
 
+    async def unsubscribe_cov(
+        self,
+        address: BACnetAddress,
+        process_id: int,
+        object_identifier: ObjectIdentifier,
+    ) -> None:
+        """Cancel a COV subscription.
+
+        Per Clause 13.14, a cancellation request omits both
+        issueConfirmedNotifications and lifetime fields.
+        The server returns Result(+) even if no matching
+        subscription context exists.
+        """
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=process_id,
+            monitored_object_identifier=object_identifier,
+            # Both None = cancellation per spec
+            issue_confirmed_notifications=None,
+            lifetime=None,
+        )
+        await self._app.confirmed_request(
+            address, ConfirmedServiceChoice.SUBSCRIBE_COV, request.encode()
+        )
+        self._app.unregister_cov_callback(process_id)
+
     async def device_communication_control(
         self,
         address: BACnetAddress,
@@ -655,7 +755,9 @@ I-Am-Request ::= SEQUENCE {
     segmentationSupported  BACnetSegmentation,
     vendorID               Unsigned
 }
--- All application-tagged (no context tags)
+-- IMPORTANT: All fields use APPLICATION tags (not context-specific tags).
+-- This is unlike most other service requests which use context tags.
+-- The encoder must use encode_application_tagged() for all four fields.
 ```
 
 ### 6.6 SubscribeCOV-Request (Clause 13.14)
@@ -679,10 +781,18 @@ class BACnetException(Exception):
     pass
 
 class BACnetError(BACnetException):
-    """BACnet Error-PDU received. Contains error class and code per Clause 18."""
-    def __init__(self, error_class: ErrorClass, error_code: ErrorCode):
+    """BACnet Error-PDU received. Contains error class and code per Clause 18.
+
+    Note: In 135-2016, some services (e.g., WritePropertyMultiple,
+    CreateObject) may include additional error data beyond the basic
+    error-class + error-code pair. The error_data field captures this
+    optional extended encoding.
+    """
+    def __init__(self, error_class: ErrorClass, error_code: ErrorCode,
+                 error_data: bytes = b''):
         self.error_class = error_class
         self.error_code = error_code
+        self.error_data = error_data
         super().__init__(f"{error_class.name}: {error_code.name}")
 
 class BACnetReject(BACnetException):
@@ -728,21 +838,23 @@ The server TSM (Clause 5.4.3) tracks incoming confirmed requests that require a 
 
 ### 8.1 Server TSM States
 
-Per the BACnet specification, the server TSM has three states:
+Per Clause 5.4.5, the server TSM has four states:
 
-| State | Description |
-|-------|-------------|
-| IDLE | No active transaction for this invoke-id/source pair |
-| AWAIT_RESPONSE | Request received and dispatched; waiting for the service handler to complete |
-| SEGMENTED_RESPONSE | Sending a segmented response; waiting for SegmentACK from client |
+| State              | Description                                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------------------------- |
+| IDLE               | No active transaction for this invoke-id/source pair                                                     |
+| SEGMENTED_REQUEST  | Receiving a segmented Confirmed-Request. Collecting segments, sending SegmentACKs.                       |
+| AWAIT_RESPONSE     | Complete request received and dispatched; waiting for the service handler to complete                    |
+| SEGMENTED_RESPONSE | Sending a segmented response; waiting for SegmentACK from client                                         |
 
 ### 8.2 Server TSM Implementation
 
 ```python
 class ServerTransactionState(IntEnum):
     IDLE = 0
-    AWAIT_RESPONSE = 1
-    SEGMENTED_RESPONSE = 2
+    SEGMENTED_REQUEST = 1
+    AWAIT_RESPONSE = 2
+    SEGMENTED_RESPONSE = 3
 
 
 @dataclass
@@ -910,12 +1022,12 @@ class BACnetApplication:
             case PduType.SIMPLE_ACK:
                 header = decode_simple_ack(memoryview(data))
                 self._client_tsm.handle_simple_ack(
-                    header.invoke_id, header.service_choice
+                    source, header.invoke_id, header.service_choice
                 )
             case PduType.COMPLEX_ACK:
                 header = decode_complex_ack(memoryview(data))
                 self._client_tsm.handle_complex_ack(
-                    header.invoke_id, header.service_choice,
+                    source, header.invoke_id, header.service_choice,
                     header.service_ack,
                     header.segmented, header.more_follows,
                     header.sequence_number,
@@ -923,18 +1035,18 @@ class BACnetApplication:
             case PduType.ERROR:
                 header = decode_error_pdu(memoryview(data))
                 self._client_tsm.handle_error(
-                    header.invoke_id,
+                    source, header.invoke_id,
                     header.error_class, header.error_code,
                 )
             case PduType.REJECT:
                 header = decode_reject_pdu(memoryview(data))
                 self._client_tsm.handle_reject(
-                    header.invoke_id, header.reject_reason,
+                    source, header.invoke_id, header.reject_reason,
                 )
             case PduType.ABORT:
                 header = decode_abort_pdu(memoryview(data))
                 self._client_tsm.handle_abort(
-                    header.invoke_id, header.abort_reason,
+                    source, header.invoke_id, header.abort_reason,
                 )
             case PduType.SEGMENT_ACK:
                 # Handled by whichever TSM owns the transaction

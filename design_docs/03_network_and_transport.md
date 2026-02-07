@@ -68,6 +68,17 @@ BVLC_TYPE_BACNET_IP = 0x81
 BVLL_HEADER_LENGTH = 4  # Type(1) + Function(1) + Length(2)
 
 
+class BvlcResultCode(IntEnum):
+    """BVLC-Result codes (Annex J.2)."""
+    SUCCESSFUL_COMPLETION = 0x0000
+    WRITE_BROADCAST_DISTRIBUTION_TABLE_NAK = 0x0010
+    READ_BROADCAST_DISTRIBUTION_TABLE_NAK = 0x0020
+    REGISTER_FOREIGN_DEVICE_NAK = 0x0030
+    READ_FOREIGN_DEVICE_TABLE_NAK = 0x0040
+    DELETE_FOREIGN_DEVICE_TABLE_ENTRY_NAK = 0x0050
+    DISTRIBUTE_BROADCAST_TO_NETWORK_NAK = 0x0060
+
+
 @dataclass(frozen=True, slots=True)
 class BvllMessage:
     function: BvlcFunction
@@ -163,19 +174,28 @@ class BIPTransport:
         if self._transport:
             self._transport.close()
 
-    async def send_unicast(self, npdu: bytes, destination: BIPAddress) -> None:
-        """Send a directed message (Original-Unicast-NPDU)."""
+    def send_unicast(self, npdu: bytes, destination: BIPAddress) -> None:
+        """Send a directed message (Original-Unicast-NPDU).
+
+        Synchronous: transport.sendto() is non-blocking, no await needed.
+        """
         bvll = encode_bvll(BvlcFunction.ORIGINAL_UNICAST_NPDU, npdu)
         self._transport.sendto(bvll, (destination.host, destination.port))
 
-    async def send_broadcast(self, npdu: bytes) -> None:
-        """Send a local broadcast (Original-Broadcast-NPDU)."""
+    def send_broadcast(self, npdu: bytes) -> None:
+        """Send a local broadcast (Original-Broadcast-NPDU).
+
+        Synchronous: transport.sendto() is non-blocking, no await needed.
+        """
         bvll = encode_bvll(BvlcFunction.ORIGINAL_BROADCAST_NPDU, npdu)
         broadcast_addr = self._get_broadcast_address()
         self._transport.sendto(bvll, (broadcast_addr, self._port))
 
-    async def send_distribute_broadcast(self, npdu: bytes) -> None:
-        """Send via BBMD (Distribute-Broadcast-To-Network) for foreign devices."""
+    def send_distribute_broadcast(self, npdu: bytes) -> None:
+        """Send via BBMD (Distribute-Broadcast-To-Network) for foreign devices.
+
+        Synchronous: transport.sendto() is non-blocking, no await needed.
+        """
         if not self._bbmd_address:
             raise RuntimeError("Not registered as a foreign device")
         bvll = encode_bvll(BvlcFunction.DISTRIBUTE_BROADCAST_TO_NETWORK, npdu)
@@ -276,10 +296,13 @@ class BDTEntry:
 
 @dataclass(frozen=True, slots=True)
 class FDTEntry:
-    """Foreign Device Table entry."""
+    """Foreign Device Table entry (Clause J.5.2.1)."""
     address: BIPAddress
-    ttl: int
-    remaining: float  # Seconds remaining before purge
+    ttl: int               # Time-to-Live supplied at registration
+    remaining: float       # Seconds remaining before purge
+
+# Per Clause J.5.2.3, the BBMD adds a 30-second grace period to the TTL
+FDT_GRACE_PERIOD_SECONDS = 30
 
 
 class BBMDManager:
@@ -338,13 +361,20 @@ The Network Protocol Data Unit provides routing information between BACnet netwo
 └──────────┴─────────────┴──────┴──────┴──────┴──────┴──────┴──────┴───────────┴──────┴────────────┘
 ```
 
-Control octet bits:
+Control octet bits (Clause 6.2.2):
 
 - Bit 7: 1 = network layer message, 0 = APDU follows
+- Bit 6: Reserved — shall be zero
 - Bit 5: 1 = DNET/DLEN/Hop Count present
+- Bit 4: Reserved — shall be zero
 - Bit 3: 1 = SNET/SLEN/SADR present
 - Bit 2: 1 = data expecting reply
 - Bits 1,0: Network priority (0=Normal, 1=Urgent, 2=Critical, 3=Life Safety)
+
+Network number constraints (Clause 6.2.2.1):
+- DNET: 1-65535 (0xFFFF = global broadcast)
+- SNET: 1-65534 (0xFFFF is NOT valid as a source)
+- SLEN: must be > 0 when source is present (SLEN=0 is invalid per spec)
 
 ### 4.2 NPDU Data Structures
 
@@ -434,7 +464,7 @@ def encode_npdu(npdu: NPDU) -> bytes:
     buf = bytearray()
     buf.append(BACNET_PROTOCOL_VERSION)
 
-    # Build control octet
+    # Build control octet (bits 6 and 4 are reserved, always zero)
     control = 0
     if npdu.is_network_message:
         control |= 0x80
@@ -449,16 +479,24 @@ def encode_npdu(npdu: NPDU) -> bytes:
 
     # Destination (if present)
     if npdu.destination is not None:
-        buf.extend(npdu.destination.network.to_bytes(2, 'big') if npdu.destination.network is not None else (0xFFFF).to_bytes(2, 'big'))
+        dnet = npdu.destination.network if npdu.destination.network is not None else 0xFFFF
+        buf.extend(dnet.to_bytes(2, 'big'))
         dlen = len(npdu.destination.mac_address)
         buf.append(dlen)
         if dlen > 0:
             buf.extend(npdu.destination.mac_address)
 
-    # Source (if present)
+    # Source (if present) — validate per Clause 6.2.2.1
     if npdu.source is not None:
-        buf.extend((npdu.source.network or 0).to_bytes(2, 'big'))
+        snet = npdu.source.network or 0
+        if snet == 0xFFFF:
+            raise ValueError("SNET cannot be 0xFFFF (global broadcast is not a valid source)")
+        if snet == 0:
+            raise ValueError("SNET cannot be 0 (must be 1-65534)")
         slen = len(npdu.source.mac_address)
+        if slen == 0:
+            raise ValueError("SLEN cannot be 0 when source is present")
+        buf.extend(snet.to_bytes(2, 'big'))
         buf.append(slen)
         buf.extend(npdu.source.mac_address)
 
