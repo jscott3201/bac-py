@@ -94,9 +94,13 @@ src/
     │   ├── server.py           # BACnet server application
     │   └── device.py           # Local device management
     │
-    └── segmentation/           # Message segmentation (Clause 5.2)
-        ├── __init__.py
-        └── manager.py          # Segmentation state machine
+    ├── segmentation/           # Message segmentation (Clause 5.2)
+    │   ├── __init__.py
+    │   └── manager.py          # Segmentation state machine
+    │
+    └── serialization/          # External format serialization (JSON, etc.)
+        ├── __init__.py         # Serializer protocol, serialize()/deserialize() API
+        └── json.py             # JsonSerializer using orjson
 ```
 
 ## 3. Core Design Principles
@@ -291,10 +295,43 @@ All are subclasses of `BACnetException`, which is itself a subclass of `Exceptio
 
 ## 10. Dependency Strategy
 
-The library targets zero mandatory external dependencies beyond the Python 3.13+ standard library. `asyncio`, `struct`, `enum`, `dataclasses`, and `typing` provide everything needed for protocol implementation. Optional dependencies may include:
+The library targets zero mandatory external dependencies beyond the Python 3.13+ standard library for the core protocol implementation. `asyncio`, `struct`, `enum`, `dataclasses`, and `typing` provide everything needed for protocol encoding, transport, and services. Optional dependencies extend functionality without burdening minimal deployments:
 
-- `cryptography` - if/when BACnet network security (Clause 24) is implemented
-- `pytest` + `pytest-asyncio` - for testing
+| Dependency     | Type     | Purpose                                                                                                   |
+| -------------- | -------- | --------------------------------------------------------------------------------------------------------- |
+| `orjson`       | Optional | JSON serialization for external system integration (see doc 08). Default JSON backend when installed.     |
+| `cryptography` | Optional | BACnet Secure Connect (Clause 24), if/when implemented                                                    |
+| `pytest`       | Dev      | Test framework                                                                                            |
+| `pytest-asyncio` | Dev    | Async test support                                                                                        |
+| `sphinx`       | Dev      | API documentation generation                                                                              |
+| `furo`         | Dev      | Sphinx HTML theme                                                                                         |
+| `sphinx-autodoc-typehints` | Dev | Type annotation rendering in Sphinx documentation                                                  |
+
+Optional dependencies are declared as extras in `pyproject.toml` (e.g., `pip install bac-py[serialization]`).
+
+## 13. Documentation
+
+API documentation is generated with [Sphinx](https://www.sphinx-doc.org/) using the `autodoc` and `napoleon` extensions. All public APIs use Google-style docstrings, enforced by ruff's pydocstyle (`"D"`) rules with `convention = "google"`. Type annotations are pulled from code by `sphinx-autodoc-typehints`, so docstrings document behavior without repeating type information.
+
+```
+docs/
+├── conf.py           # Sphinx configuration (furo theme, napoleon, intersphinx)
+├── index.rst         # Root document
+├── api/
+│   ├── index.rst     # API reference landing page
+│   ├── types.rst     # automodule for each subpackage
+│   ├── encoding.rst
+│   ├── network.rst
+│   ├── transport.rst
+│   ├── services.rst
+│   ├── objects.rst
+│   ├── app.rst
+│   ├── segmentation.rst
+│   └── serialization.rst
+└── _static/          # Custom static assets
+```
+
+Documentation is built in CI with `sphinx-build -W` (warnings-as-errors) to catch broken references and missing docstrings early.
 
 ## 11. Logging and Observability
 

@@ -837,3 +837,14 @@ def decode_any_tagged(data: memoryview) -> Any:
 ### 9.4 Charset handling for CharacterString
 
 BACnet supports multiple character sets. Our default and primary implementation targets UTF-8 (charset 0x00), which covers the vast majority of modern deployments. ISO 8859-1 (charset 0x05) support is straightforward. The less common IBM/DBCS and JIS encodings can be added as needed.
+
+### 9.5 External Serialization (`to_dict()` / `from_dict()`)
+
+All primitive wrapper types (`ObjectIdentifier`, `BACnetDate`, `BACnetTime`, `BitString`) and APDU dataclasses implement `to_dict()` and `from_dict()` methods for conversion to/from JSON-friendly dicts. These methods are format-agnostic and independent of any serialization library. The full type mapping, implementation details, and JSON output examples are specified in **Document 08 — Serialization**.
+
+Key design points:
+
+- `to_dict()` returns plain Python dicts, lists, strings, ints, floats, bools, and `None` — no custom types that require special handling by a JSON encoder.
+- `IntEnum` values serialize as `{"value": int, "name": str}` for both machine and human consumption.
+- `from_dict()` is lenient on input: enums accept int, string name, or the full dict form.
+- Wildcard fields (`0xFF`) in `BACnetDate`/`BACnetTime` map to `null` in JSON.

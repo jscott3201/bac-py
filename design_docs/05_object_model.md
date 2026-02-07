@@ -579,3 +579,13 @@ class AnalogInputObject(BACnetObject):
     OBJECT_TYPE = ObjectType.ANALOG_INPUT
     ...
 ```
+
+## 9. External Serialization
+
+`BACnetObject` and `ObjectDatabase` implement `to_dict()` / `from_dict()` for JSON export and import. This enables integration with REST APIs, databases, dashboards, and other external systems without requiring those systems to understand the BACnet wire protocol.
+
+- **Object serialization** produces a flat dict with property names as lowercase-hyphenated keys and values converted recursively via each type's `to_dict()`.
+- **Database serialization** produces a dict containing an array of serialized objects plus a count.
+- **Deserialization** uses the object factory registry to reconstruct the correct subclass.
+
+Full implementation details, type mapping, JSON output examples, and the `Serializer` protocol are specified in **Document 08 — Serialization**.

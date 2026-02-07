@@ -10,19 +10,21 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 
 ### 2.1 Deliverables
 
-| Item                | What                                                                                                  |
-| ------------------- | ----------------------------------------------------------------------------------------------------- |
-| `pyproject.toml`    | Project metadata, Python 3.13+ requirement, dev dependencies (pytest, pytest-asyncio, mypy, ruff)     |
-| `src/bac_py/`       | Package directory with `__init__.py` and empty subpackage stubs for types/, encoding/, network/, etc. |
-| `tests/`            | Test directory mirroring source tree with `conftest.py`                                               |
-| `.github/workflows` | CI pipeline: lint (ruff), type check (mypy), test (pytest) on Python 3.13                             |
-| `ruff.toml`         | Linter/formatter configuration                                                                        |
+| Item                | What                                                                                                                  |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `pyproject.toml`    | Project metadata, Python 3.13+ requirement, dev dependencies (pytest, pytest-asyncio, mypy, ruff)                     |
+| `src/bac_py/`       | Package directory with `__init__.py` and empty subpackage stubs for types/, encoding/, network/, serialization/, etc. |
+| `tests/`            | Test directory mirroring source tree with `conftest.py`                                                               |
+| `.github/workflows` | CI pipeline: lint (ruff), type check (mypy), test (pytest), docs build (sphinx) on Python 3.13                        |
+| `ruff.toml`         | Linter/formatter configuration with pydocstyle (Google convention)                                                     |
+| `docs/`             | Sphinx documentation: conf.py, index.rst, API reference stubs for all subpackages (furo theme, autodoc, napoleon)     |
 
 ### 2.2 Testing
 
 - Verify `uv run pytest` runs successfully with zero tests
 - Verify `uv run mypy src/` passes with no errors
 - Verify `uv run ruff check src/` passes
+- Verify `uv run sphinx-build -W -b html docs docs/_build/html` builds without warnings
 
 ---
 
@@ -42,7 +44,9 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 | `network/address.py`     | Addressing       | `BACnetAddress`, `BIPAddress`, broadcast constants                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `network/npdu.py`        | NPDU codec       | `encode_npdu`, `decode_npdu`, `NPDU` dataclass                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `transport/bvll.py`      | BVLL codec       | `encode_bvll`, `decode_bvll`, `BvllMessage`, `BvlcFunction`                                                                                                                                                                                                                                                                                                                                                                                        |
-| `transport/bip.py`       | UDP transport    | `BIPTransport` with `asyncio.DatagramProtocol`, send/receive                                                                                                                                                                                                                                                                                                                                                                                       |
+| `transport/bip.py`       | UDP transport       | `BIPTransport` with `asyncio.DatagramProtocol`, send/receive                                                                                                                                                                                                                                                                                                                                                                                       |
+| `serialization/__init__.py` | Serialization API | `Serializer` protocol, `serialize()`, `deserialize()`, `get_serializer()` convenience functions                                                                                                                                                                                                                                                                                                                                                    |
+| `serialization/json.py`  | JSON backend        | `JsonSerializer` using orjson with `default` handler for BACnet types. `to_dict()` / `from_dict()` on all primitives and APDU dataclasses (see doc 08)                                                                                                                                                                                                                                                                                             |
 
 ### 3.2 Testing
 
@@ -52,6 +56,7 @@ This document defines the phased implementation plan for bac-py. Each phase prod
 - **BVLL round-trip**: All function codes, Forwarded-NPDU with originating address
 - **APDU round-trip**: All 8 PDU types, segmented and non-segmented variants
 - **Integration test**: Send/receive a raw UDP datagram on localhost, verify BVLL+NPDU framing
+- **Serialization round-trip**: `to_dict()` → `orjson.dumps()` → `orjson.loads()` → `from_dict()` equals original for all primitive types, enums, APDU dataclasses
 
 ### 3.3 Spec References
 
@@ -342,7 +347,23 @@ class MockTransport:
 ```
 bac-py/
 ├── pyproject.toml
+├── ruff.toml
 ├── design_docs/              # This directory
+├── docs/                     # Sphinx documentation
+│   ├── conf.py
+│   ├── index.rst
+│   ├── api/
+│   │   ├── index.rst
+│   │   ├── types.rst
+│   │   ├── encoding.rst
+│   │   ├── network.rst
+│   │   ├── transport.rst
+│   │   ├── services.rst
+│   │   ├── objects.rst
+│   │   ├── app.rst
+│   │   ├── segmentation.rst
+│   │   └── serialization.rst
+│   └── _static/
 ├── src/
 │   └── bac_py/
 │       ├── __init__.py
@@ -406,9 +427,12 @@ bac-py/
 │       │   ├── client.py
 │       │   ├── server.py
 │       │   └── device.py
-│       └── segmentation/
+│       ├── segmentation/
+│       │   ├── __init__.py
+│       │   └── manager.py
+│       └── serialization/
 │           ├── __init__.py
-│           └── manager.py
+│           └── json.py
 └── tests/
     ├── conftest.py            # Shared fixtures, MockTransport
     ├── encoding/
@@ -435,6 +459,9 @@ bac-py/
     │   ├── test_tsm.py
     │   ├── test_client.py
     │   └── test_server.py
+    ├── serialization/
+    │   ├── test_json.py
+    │   └── test_round_trip.py
     └── integration/
         ├── test_discovery.py
         ├── test_read_write.py
@@ -451,4 +478,8 @@ bac-py/
 | mypy                | Dev      | 0      | Static type checking                       |
 | ruff                | Dev      | 0      | Linting and formatting                     |
 | coverage            | Dev      | 0      | Test coverage reporting                    |
+| sphinx              | Dev      | 0      | API documentation generation               |
+| furo                | Dev      | 0      | Sphinx HTML theme                          |
+| sphinx-autodoc-typehints | Dev | 0      | Type annotation rendering in docs          |
+| orjson              | Optional | 1      | JSON serialization (serialization extra)   |
 | cryptography        | Optional | Future | BACnet Secure Connect (Clause 24)          |
