@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from bac_py.network.address import BACnetAddress
-from bac_py.types.enums import NetworkMessageType, NetworkPriority
+from bac_py.types.enums import NetworkPriority
 
 BACNET_PROTOCOL_VERSION = 1
 
@@ -21,7 +21,8 @@ class NPDU:
     destination: BACnetAddress | None = None
     source: BACnetAddress | None = None
     hop_count: int = 255
-    message_type: NetworkMessageType | None = None
+    message_type: int | None = None
+    vendor_id: int | None = None
     apdu: bytes = b""
     network_message_data: bytes = b""
 
@@ -86,7 +87,12 @@ def encode_npdu(npdu: NPDU) -> bytes:
 
     # Message type or APDU
     if npdu.is_network_message:
-        buf.append(npdu.message_type or 0)
+        msg_type = npdu.message_type or 0
+        buf.append(msg_type)
+        # Proprietary message types (0x80-0xFF) include a 2-byte vendor ID
+        if msg_type >= 0x80:
+            vid = npdu.vendor_id or 0
+            buf.extend(vid.to_bytes(2, "big"))
         buf.extend(npdu.network_message_data)
     else:
         buf.extend(npdu.apdu)
@@ -102,6 +108,9 @@ def decode_npdu(data: memoryview | bytes) -> NPDU:
 
     Returns:
         Decoded NPDU dataclass.
+
+    Raises:
+        ValueError: If the protocol version is not 1.
     """
     if isinstance(data, bytes):
         data = memoryview(data)
@@ -109,6 +118,11 @@ def decode_npdu(data: memoryview | bytes) -> NPDU:
     offset = 0
     version = data[offset]
     offset += 1
+
+    if version != BACNET_PROTOCOL_VERSION:
+        msg = f"Unsupported BACnet protocol version: {version}"
+        raise ValueError(msg)
+
     control = data[offset]
     offset += 1
 
@@ -145,12 +159,17 @@ def decode_npdu(data: memoryview | bytes) -> NPDU:
         offset += 1
 
     message_type = None
+    vendor_id = None
     network_message_data = b""
     apdu = b""
 
     if is_network_message:
-        message_type = NetworkMessageType(data[offset])
+        message_type = data[offset]
         offset += 1
+        # Proprietary message types (0x80-0xFF) include a 2-byte vendor ID
+        if message_type >= 0x80:
+            vendor_id = int.from_bytes(data[offset : offset + 2], "big")
+            offset += 2
         network_message_data = bytes(data[offset:])
     else:
         apdu = bytes(data[offset:])
@@ -164,6 +183,7 @@ def decode_npdu(data: memoryview | bytes) -> NPDU:
         source=source,
         hop_count=hop_count,
         message_type=message_type,
+        vendor_id=vendor_id,
         apdu=apdu,
         network_message_data=network_message_data,
     )

@@ -7,8 +7,8 @@ from dataclasses import dataclass
 from bac_py.types.enums import AbortReason, ErrorClass, ErrorCode, PduType, RejectReason
 
 # Max-segments encoding table (Clause 20.1.2.4)
+# B'000' = unspecified, B'001' = 2, ... B'110' = 64, B'111' = >64
 _MAX_SEGMENTS_ENCODE: dict[int, int] = {
-    0: 0,
     2: 1,
     4: 2,
     8: 3,
@@ -16,17 +16,18 @@ _MAX_SEGMENTS_ENCODE: dict[int, int] = {
     32: 5,
     64: 6,
 }
-_MAX_SEGMENTS_UNSPECIFIED = 7
+_MAX_SEGMENTS_UNSPECIFIED = 0  # B'000'
+_MAX_SEGMENTS_OVER_64 = 7  # B'111'
 
 _MAX_SEGMENTS_DECODE: dict[int, int | None] = {
-    0: 0,
+    0: None,  # Unspecified
     1: 2,
     2: 4,
     3: 8,
     4: 16,
     5: 32,
     6: 64,
-    7: None,  # Unspecified / greater than 64
+    7: None,  # Greater than 64 (also treated as unlimited)
 }
 
 # Max-APDU-length encoding table (Clause 20.1.2.5)

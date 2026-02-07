@@ -219,7 +219,7 @@ class TestDecodeTagRoundTrip:
 
     def test_decode_from_memoryview(self):
         encoded = encode_tag(5, TagClass.CONTEXT, 3)
-        tag, offset = decode_tag(memoryview(encoded), 0)
+        tag, _offset = decode_tag(memoryview(encoded), 0)
         assert tag.number == 5
         assert tag.cls == TagClass.CONTEXT
         assert tag.length == 3

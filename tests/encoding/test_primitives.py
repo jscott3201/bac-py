@@ -221,11 +221,11 @@ class TestCharacterString:
 
     def test_unsupported_charset_encode_raises(self):
         with pytest.raises(ValueError, match="Unsupported BACnet character set"):
-            encode_character_string("hello", charset=0x02)
+            encode_character_string("hello", charset=0x01)
 
     def test_unsupported_charset_decode_raises(self):
         with pytest.raises(ValueError, match="Unsupported BACnet character set"):
-            decode_character_string(b"\x02hello")
+            decode_character_string(b"\x01hello")
 
     def test_iso_8859_1(self):
         encoded = encode_character_string("caf\u00e9", charset=0x05)
@@ -388,21 +388,21 @@ class TestBoolean:
 class TestApplicationTaggedConvenience:
     def test_encode_application_null(self):
         result = encode_application_null()
-        tag, offset = decode_tag(result, 0)
+        tag, _offset = decode_tag(result, 0)
         assert tag.number == 0
         assert tag.cls == TagClass.APPLICATION
         assert tag.length == 0
 
     def test_encode_application_boolean_true(self):
         result = encode_application_boolean(True)
-        tag, offset = decode_tag(result, 0)
+        tag, _offset = decode_tag(result, 0)
         assert tag.number == 1
         assert tag.cls == TagClass.APPLICATION
         assert tag.length == 1
 
     def test_encode_application_boolean_false(self):
         result = encode_application_boolean(False)
-        tag, offset = decode_tag(result, 0)
+        tag, _offset = decode_tag(result, 0)
         assert tag.number == 1
         assert tag.cls == TagClass.APPLICATION
         assert tag.length == 0
@@ -434,7 +434,7 @@ class TestApplicationTaggedConvenience:
 
     def test_encode_application_double(self):
         result = encode_application_double(3.14)
-        tag, offset = decode_tag(result, 0)
+        tag, _offset = decode_tag(result, 0)
         assert tag.number == 5
         assert tag.cls == TagClass.APPLICATION
         assert tag.length == 8
@@ -465,7 +465,7 @@ class TestApplicationTaggedConvenience:
     def test_encode_application_date(self):
         date = BACnetDate(2024, 1, 1, 1)
         result = encode_application_date(date)
-        tag, offset = decode_tag(result, 0)
+        tag, _offset = decode_tag(result, 0)
         assert tag.number == 10
         assert tag.cls == TagClass.APPLICATION
         assert tag.length == 4
@@ -473,7 +473,7 @@ class TestApplicationTaggedConvenience:
     def test_encode_application_time(self):
         t = BACnetTime(12, 0, 0, 0)
         result = encode_application_time(t)
-        tag, offset = decode_tag(result, 0)
+        tag, _offset = decode_tag(result, 0)
         assert tag.number == 11
         assert tag.cls == TagClass.APPLICATION
         assert tag.length == 4
@@ -492,6 +492,6 @@ class TestApplicationTaggedConvenience:
     def test_encode_application_bit_string(self):
         bs = BitString(b"\xf0", 4)
         result = encode_application_bit_string(bs)
-        tag, offset = decode_tag(result, 0)
+        tag, _offset = decode_tag(result, 0)
         assert tag.number == 8
         assert tag.cls == TagClass.APPLICATION
