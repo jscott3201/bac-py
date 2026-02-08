@@ -905,9 +905,7 @@ class TestHandleReinitializeDevice:
         )
 
         async def run():
-            result = await handlers.handle_reinitialize_device(
-                20, request.encode(), SOURCE
-            )
+            result = await handlers.handle_reinitialize_device(20, request.encode(), SOURCE)
             assert result is None
 
         asyncio.get_event_loop().run_until_complete(run())
@@ -925,9 +923,7 @@ class TestHandleReinitializeDevice:
         )
 
         async def run():
-            result = await handlers.handle_reinitialize_device(
-                20, request.encode(), SOURCE
-            )
+            result = await handlers.handle_reinitialize_device(20, request.encode(), SOURCE)
             assert result is None
 
         asyncio.get_event_loop().run_until_complete(run())
@@ -947,9 +943,7 @@ class TestHandleTimeSynchronization:
         )
 
         async def run():
-            result = await handlers.handle_time_synchronization(
-                6, request.encode(), SOURCE
-            )
+            result = await handlers.handle_time_synchronization(6, request.encode(), SOURCE)
             assert result is None
 
         asyncio.get_event_loop().run_until_complete(run())
@@ -967,9 +961,7 @@ class TestHandleTimeSynchronization:
         )
 
         async def run():
-            result = await handlers.handle_utc_time_synchronization(
-                9, request.encode(), SOURCE
-            )
+            result = await handlers.handle_utc_time_synchronization(9, request.encode(), SOURCE)
             assert result is None
 
         asyncio.get_event_loop().run_until_complete(run())

@@ -138,7 +138,10 @@ class TestLoopObject:
     def test_output_units_writable(self):
         loop = LoopObject(1)
         loop.write_property(PropertyIdentifier.OUTPUT_UNITS, EngineeringUnits.DEGREES_FAHRENHEIT)
-        assert loop.read_property(PropertyIdentifier.OUTPUT_UNITS) == EngineeringUnits.DEGREES_FAHRENHEIT
+        assert (
+            loop.read_property(PropertyIdentifier.OUTPUT_UNITS)
+            == EngineeringUnits.DEGREES_FAHRENHEIT
+        )
 
     def test_factory_creation(self):
         import bac_py.objects  # noqa: F401
