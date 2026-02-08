@@ -1,31 +1,49 @@
 [project]
 name = "bac-py"
 version = "0.1.0"
-description = "Asynchronous BACnet library for Python"
+description = "Asynchronous BACnet/IP protocol library for Python"
 readme = "README.md"
 requires-python = ">=3.13"
+license = "MIT"
+authors = [{ name = "Justin Scott", email = "jscott3201@gmail.com" }]
+keywords = [
+    "bacnet",
+    "building-automation",
+    "hvac",
+    "ashrae",
+    "bacnet-ip",
+    "iot",
+    "asyncio",
+    "scada",
+    "bms",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Home Automation",
+    "Topic :: System :: Networking",
+    "Typing :: Typed",
+    "Framework :: AsyncIO",
+]
 dependencies = []
 
 [project.optional-dependencies]
 serialization = ["orjson>=3.10"]
 
+[project.urls]
+Repository = "https://github.com/jscott3201/bac-py"
+Documentation = "https://jscott3201.github.io/bac-py"
+Issues = "https://github.com/jscott3201/bac-py/issues"
+
 [dependency-groups]
-test = [
-    "pytest>=8.0",
-    "pytest-asyncio>=0.24",
-    "coverage>=7.0",
-]
-lint = [
-    "ruff>=0.8",
-]
-type-check = [
-    "mypy>=1.13",
-]
-docs = [
-    "sphinx>=8.0",
-    "furo>=2024.8",
-    "sphinx-autodoc-typehints>=2.0",
-]
+test = ["pytest>=8.0", "pytest-asyncio>=0.24", "coverage>=7.0"]
+lint = ["ruff>=0.8"]
+type-check = ["mypy>=1.13"]
+docs = ["sphinx>=8.0", "furo>=2024.8", "sphinx-autodoc-typehints>=2.0"]
 dev = [
     { include-group = "test" },
     { include-group = "lint" },

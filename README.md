@@ -162,7 +162,7 @@ async def serve():
 
 ## Architecture
 
-```
+```text
 src/bac_py/
   app/            High-level application, client API, server handlers, TSM
   encoding/       ASN.1/BER tag-length-value encoding and APDU codec
