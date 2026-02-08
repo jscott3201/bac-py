@@ -31,3 +31,10 @@ Transaction State Machine
 .. automodule:: bac_py.app.tsm
    :members:
    :undoc-members:
+
+COV Manager
+-----------
+
+.. automodule:: bac_py.app.cov
+   :members:
+   :undoc-members:

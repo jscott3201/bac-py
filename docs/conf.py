@@ -1,12 +1,21 @@
 """Sphinx configuration for bac-py documentation."""
 
-import importlib.metadata
+import sys
+from pathlib import Path
+
+# -- Path setup --------------------------------------------------------------
+# Add the source directory so autodoc can import modules without requiring
+# the package to be installed.
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
+
+from bac_py import __version__
 
 project = "bac-py"
 author = "bac-py contributors"
 copyright = "2025, bac-py contributors"
 
-version = importlib.metadata.version("bac_py")
+version = __version__
 release = version
 
 # -- General configuration ---------------------------------------------------
@@ -35,13 +44,18 @@ napoleon_preprocess_types = True
 # -- Autodoc -----------------------------------------------------------------
 
 autodoc_member_order = "bysource"
-autodoc_typehints = "none"
+autodoc_typehints = "description"
 autodoc_typehints_format = "short"
 autodoc_default_options = {
     "members": True,
     "show-inheritance": True,
     "undoc-members": False,
 }
+
+# -- sphinx-autodoc-typehints ------------------------------------------------
+
+always_use_bars_union = True
+typehints_defaults = "braces"
 
 # -- Intersphinx -------------------------------------------------------------
 
