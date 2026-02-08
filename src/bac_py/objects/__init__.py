@@ -4,4 +4,5 @@
 from bac_py.objects import analog as _analog  # noqa: F401
 from bac_py.objects import binary as _binary  # noqa: F401
 from bac_py.objects import device as _device  # noqa: F401
+from bac_py.objects import file as _file  # noqa: F401
 from bac_py.objects import multistate as _multistate  # noqa: F401

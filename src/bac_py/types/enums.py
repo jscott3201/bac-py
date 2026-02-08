@@ -909,3 +909,31 @@ class EngineeringUnits(IntEnum):
     REVOLUTIONS_PER_MINUTE = 104
     DEGREES_ANGULAR = 90
     DEGREES_PHASE = 14
+
+
+class EnableDisable(IntEnum):
+    """BACnetEnableDisable values (Clause 16.4)."""
+
+    ENABLE = 0
+    DISABLE = 1
+    DISABLE_INITIATION = 2
+
+
+class ReinitializedState(IntEnum):
+    """BACnetReinitializedStateOfDevice values (Clause 16.5)."""
+
+    COLDSTART = 0
+    WARMSTART = 1
+    START_BACKUP = 2
+    END_BACKUP = 3
+    START_RESTORE = 4
+    END_RESTORE = 5
+    ABORT_RESTORE = 6
+    ACTIVATE_CHANGES = 7
+
+
+class FileAccessMethod(IntEnum):
+    """BACnetFileAccessMethod values (Clause 12.12)."""
+
+    STREAM_ACCESS = 0
+    RECORD_ACCESS = 1

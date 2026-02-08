@@ -19,8 +19,28 @@ from bac_py.encoding.primitives import (
     encode_application_real,
     encode_application_unsigned,
 )
+from bac_py.objects.base import create_object
+from bac_py.objects.file import FileObject
 from bac_py.services.cov import SubscribeCOVRequest
+from bac_py.services.device_mgmt import (
+    DeviceCommunicationControlRequest,
+    ReinitializeDeviceRequest,
+    TimeSynchronizationRequest,
+    UTCTimeSynchronizationRequest,
+)
 from bac_py.services.errors import BACnetError, BACnetRejectError
+from bac_py.services.file_access import (
+    AtomicReadFileACK,
+    AtomicReadFileRequest,
+    AtomicWriteFileACK,
+    AtomicWriteFileRequest,
+    RecordReadACK,
+    StreamReadAccess,
+    StreamReadACK,
+    StreamWriteAccess,
+)
+from bac_py.services.list_element import AddListElementRequest, RemoveListElementRequest
+from bac_py.services.object_mgmt import CreateObjectRequest, DeleteObjectRequest
 from bac_py.services.read_property import ReadPropertyACK, ReadPropertyRequest
 from bac_py.services.read_property_multiple import (
     PropertyReference,
@@ -35,6 +55,7 @@ from bac_py.services.read_range import (
     ReadRangeRequest,
     ResultFlags,
 )
+from bac_py.services.who_has import IHaveRequest, WhoHasRequest
 from bac_py.services.who_is import IAmRequest, WhoIsRequest
 from bac_py.services.write_property import WritePropertyRequest
 from bac_py.services.write_property_multiple import WritePropertyMultipleRequest
@@ -135,9 +156,53 @@ class DefaultServerHandlers:
             ConfirmedServiceChoice.SUBSCRIBE_COV,
             self.handle_subscribe_cov,
         )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.DEVICE_COMMUNICATION_CONTROL,
+            self.handle_device_communication_control,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.REINITIALIZE_DEVICE,
+            self.handle_reinitialize_device,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.ATOMIC_READ_FILE,
+            self.handle_atomic_read_file,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.ATOMIC_WRITE_FILE,
+            self.handle_atomic_write_file,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.CREATE_OBJECT,
+            self.handle_create_object,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.DELETE_OBJECT,
+            self.handle_delete_object,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.ADD_LIST_ELEMENT,
+            self.handle_add_list_element,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.REMOVE_LIST_ELEMENT,
+            self.handle_remove_list_element,
+        )
         registry.register_unconfirmed(
             UnconfirmedServiceChoice.WHO_IS,
             self.handle_who_is,
+        )
+        registry.register_unconfirmed(
+            UnconfirmedServiceChoice.WHO_HAS,
+            self.handle_who_has,
+        )
+        registry.register_unconfirmed(
+            UnconfirmedServiceChoice.TIME_SYNCHRONIZATION,
+            self.handle_time_synchronization,
+        )
+        registry.register_unconfirmed(
+            UnconfirmedServiceChoice.UTC_TIME_SYNCHRONIZATION,
+            self.handle_utc_time_synchronization,
         )
 
     async def handle_read_property(
@@ -567,3 +632,350 @@ class DefaultServerHandlers:
             property_array_index=request.property_array_index,
         )
         return ack.encode()
+
+    # --- Device management handlers ---
+
+    async def handle_device_communication_control(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle DeviceCommunicationControl-Request per Clause 16.1.
+
+        Logs the communication control state change. Does not actually
+        disable communication in this implementation.
+
+        Returns:
+            None (SimpleACK response).
+        """
+        request = DeviceCommunicationControlRequest.decode(data)
+        logger.info(
+            "DeviceCommunicationControl from %s: enable_disable=%s, duration=%s",
+            source,
+            request.enable_disable,
+            request.time_duration,
+        )
+        return None
+
+    async def handle_reinitialize_device(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle ReinitializeDevice-Request per Clause 16.4.
+
+        Logs the reinitialize request. Does not actually restart
+        the device in this implementation.
+
+        Returns:
+            None (SimpleACK response).
+        """
+        request = ReinitializeDeviceRequest.decode(data)
+        logger.info(
+            "ReinitializeDevice from %s: state=%s",
+            source,
+            request.reinitialized_state,
+        )
+        return None
+
+    async def handle_time_synchronization(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Handle TimeSynchronization-Request per Clause 16.7.
+
+        Logs the received time. Does not update the local clock.
+        """
+        request = TimeSynchronizationRequest.decode(data)
+        logger.info(
+            "TimeSynchronization from %s: date=%s, time=%s",
+            source,
+            request.date,
+            request.time,
+        )
+
+    async def handle_utc_time_synchronization(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Handle UTCTimeSynchronization-Request per Clause 16.8.
+
+        Logs the received UTC time. Does not update the local clock.
+        """
+        request = UTCTimeSynchronizationRequest.decode(data)
+        logger.info(
+            "UTCTimeSynchronization from %s: date=%s, time=%s",
+            source,
+            request.date,
+            request.time,
+        )
+
+    # --- File access handlers ---
+
+    async def handle_atomic_read_file(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes:
+        """Handle AtomicReadFile-Request per Clause 14.1.
+
+        Returns:
+            Encoded AtomicReadFile-ACK service data.
+
+        Raises:
+            BACnetError: If the object is not found or is not a File object.
+        """
+        request = AtomicReadFileRequest.decode(data)
+        obj_id = self._resolve_object_id(request.file_identifier)
+
+        obj = self._db.get(obj_id)
+        if obj is None:
+            raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
+        if not isinstance(obj, FileObject):
+            raise BACnetError(ErrorClass.OBJECT, ErrorCode.INCONSISTENT_OBJECT_TYPE)
+
+        if isinstance(request.access_method, StreamReadAccess):
+            file_data, eof = obj.read_stream(
+                request.access_method.file_start_position,
+                request.access_method.requested_octet_count,
+            )
+            ack = AtomicReadFileACK(
+                end_of_file=eof,
+                access_method=StreamReadACK(
+                    file_start_position=request.access_method.file_start_position,
+                    file_data=file_data,
+                ),
+            )
+        else:
+            records, eof = obj.read_records(
+                request.access_method.file_start_record,
+                request.access_method.requested_record_count,
+            )
+            ack = AtomicReadFileACK(
+                end_of_file=eof,
+                access_method=RecordReadACK(
+                    file_start_record=request.access_method.file_start_record,
+                    returned_record_count=len(records),
+                    file_record_data=records,
+                ),
+            )
+        return ack.encode()
+
+    async def handle_atomic_write_file(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes:
+        """Handle AtomicWriteFile-Request per Clause 14.2.
+
+        Returns:
+            Encoded AtomicWriteFile-ACK service data.
+
+        Raises:
+            BACnetError: If the object is not found or is not a File object.
+        """
+        request = AtomicWriteFileRequest.decode(data)
+        obj_id = self._resolve_object_id(request.file_identifier)
+
+        obj = self._db.get(obj_id)
+        if obj is None:
+            raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
+        if not isinstance(obj, FileObject):
+            raise BACnetError(ErrorClass.OBJECT, ErrorCode.INCONSISTENT_OBJECT_TYPE)
+
+        if isinstance(request.access_method, StreamWriteAccess):
+            actual_start = obj.write_stream(
+                request.access_method.file_start_position,
+                request.access_method.file_data,
+            )
+            ack = AtomicWriteFileACK(is_stream=True, file_start=actual_start)
+        else:
+            actual_start = obj.write_records(
+                request.access_method.file_start_record,
+                request.access_method.file_record_data,
+            )
+            ack = AtomicWriteFileACK(is_stream=False, file_start=actual_start)
+        return ack.encode()
+
+    # --- Object management handlers ---
+
+    async def handle_create_object(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes:
+        """Handle CreateObject-Request per Clause 15.3.
+
+        Creates a new object in the database and returns the
+        encoded object identifier.
+
+        Returns:
+            Encoded APPLICATION-tagged ObjectIdentifier.
+
+        Raises:
+            BACnetError: If the object type is unsupported or the
+                object identifier already exists.
+        """
+        request = CreateObjectRequest.decode(data)
+
+        if request.object_identifier is not None:
+            obj_type = request.object_identifier.object_type
+            instance = request.object_identifier.instance_number
+        elif request.object_type is not None:
+            obj_type = request.object_type
+            # Auto-assign instance number by finding max + 1
+            existing = self._db.get_objects_of_type(obj_type)
+            if existing:
+                instance = max(o.object_identifier.instance_number for o in existing) + 1
+            else:
+                instance = 1
+        else:
+            raise BACnetError(ErrorClass.SERVICES, ErrorCode.MISSING_REQUIRED_PARAMETER)
+
+        # Build initial properties from the request
+        kwargs: dict[str, Any] = {}
+        if request.list_of_initial_values:
+            for pv in request.list_of_initial_values:
+                prop_name = pv.property_identifier.name.lower()
+                kwargs[prop_name] = pv.property_value
+
+        obj = create_object(obj_type, instance, **kwargs)
+        self._db.add(obj)
+
+        return encode_application_object_id(obj_type, instance)
+
+    async def handle_delete_object(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle DeleteObject-Request per Clause 15.4.
+
+        Removes the object from the database.
+
+        Returns:
+            None (SimpleACK response).
+
+        Raises:
+            BACnetError: If the object doesn't exist or is a Device object.
+        """
+        request = DeleteObjectRequest.decode(data)
+        obj_id = self._resolve_object_id(request.object_identifier)
+        self._db.remove(obj_id)
+        return None
+
+    async def handle_add_list_element(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle AddListElement-Request per Clause 15.1.
+
+        Raises:
+            BACnetError: If the object or property is not found,
+                or list manipulation is not supported.
+        """
+        request = AddListElementRequest.decode(data)
+        obj_id = self._resolve_object_id(request.object_identifier)
+
+        obj = self._db.get(obj_id)
+        if obj is None:
+            raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
+
+        prop_def = obj.PROPERTY_DEFINITIONS.get(request.property_identifier)
+        if prop_def is None:
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
+
+        raise BACnetError(ErrorClass.SERVICES, ErrorCode.OPTIONAL_FUNCTIONALITY_NOT_SUPPORTED)
+
+    async def handle_remove_list_element(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle RemoveListElement-Request per Clause 15.2.
+
+        Raises:
+            BACnetError: If the object or property is not found,
+                or list manipulation is not supported.
+        """
+        request = RemoveListElementRequest.decode(data)
+        obj_id = self._resolve_object_id(request.object_identifier)
+
+        obj = self._db.get(obj_id)
+        if obj is None:
+            raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
+
+        prop_def = obj.PROPERTY_DEFINITIONS.get(request.property_identifier)
+        if prop_def is None:
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
+
+        raise BACnetError(ErrorClass.SERVICES, ErrorCode.OPTIONAL_FUNCTIONALITY_NOT_SUPPORTED)
+
+    # --- Discovery handlers ---
+
+    async def handle_who_has(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Handle Who-Has-Request per Clause 16.9.
+
+        Searches the local object database for a matching object
+        and responds with I-Have if found.
+        """
+        request = WhoHasRequest.decode(data)
+        instance = self._device.object_identifier.instance_number
+
+        # Check if we are in the requested device instance range
+        if (
+            request.low_limit is not None
+            and request.high_limit is not None
+            and not (request.low_limit <= instance <= request.high_limit)
+        ):
+            return
+
+        # Search for the object
+        found_obj = None
+        if request.object_identifier is not None:
+            found_obj = self._db.get(request.object_identifier)
+        elif request.object_name is not None:
+            for obj_id in self._db.object_list:
+                obj = self._db.get(obj_id)
+                if obj is not None:
+                    try:
+                        name = obj.read_property(PropertyIdentifier.OBJECT_NAME)
+                        if name == request.object_name:
+                            found_obj = obj
+                            break
+                    except BACnetError:
+                        continue
+
+        if found_obj is None:
+            return
+
+        # Send I-Have response
+        obj_name = found_obj.read_property(PropertyIdentifier.OBJECT_NAME)
+        ihave = IHaveRequest(
+            device_identifier=ObjectIdentifier(ObjectType.DEVICE, instance),
+            object_identifier=found_obj.object_identifier,
+            object_name=obj_name,
+        )
+        self._app.unconfirmed_request(
+            destination=source,
+            service_choice=UnconfirmedServiceChoice.I_HAVE,
+            service_data=ihave.encode(),
+        )

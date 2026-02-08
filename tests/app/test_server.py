@@ -340,8 +340,8 @@ class TestDefaultServerHandlersRegister:
         handlers.register()
 
         registry = app.service_registry
-        assert registry.register_confirmed.call_count == 6
-        assert registry.register_unconfirmed.call_count == 1
+        assert registry.register_confirmed.call_count == 14
+        assert registry.register_unconfirmed.call_count == 4
 
 
 class TestHandleReadPropertyMultiple:
@@ -846,5 +846,668 @@ class TestHandleReadRange:
             with pytest.raises(BACnetError) as exc_info:
                 await handlers.handle_read_range(26, request.encode(), SOURCE)
             assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+
+class TestHandleDeviceCommunicationControl:
+    def test_dcc_returns_simple_ack(self):
+        from bac_py.services.device_mgmt import DeviceCommunicationControlRequest
+        from bac_py.types.enums import EnableDisable
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = DeviceCommunicationControlRequest(
+            enable_disable=EnableDisable.ENABLE,
+        )
+
+        async def run():
+            result = await handlers.handle_device_communication_control(
+                17, request.encode(), SOURCE
+            )
+            assert result is None
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_dcc_with_duration_and_password(self):
+        from bac_py.services.device_mgmt import DeviceCommunicationControlRequest
+        from bac_py.types.enums import EnableDisable
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = DeviceCommunicationControlRequest(
+            enable_disable=EnableDisable.DISABLE,
+            time_duration=60,
+            password="secret",
+        )
+
+        async def run():
+            result = await handlers.handle_device_communication_control(
+                17, request.encode(), SOURCE
+            )
+            assert result is None
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+
+class TestHandleReinitializeDevice:
+    def test_reinitialize_returns_simple_ack(self):
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import ReinitializedState
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.COLDSTART,
+        )
+
+        async def run():
+            result = await handlers.handle_reinitialize_device(
+                20, request.encode(), SOURCE
+            )
+            assert result is None
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_reinitialize_warmstart(self):
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import ReinitializedState
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.WARMSTART,
+            password="mypass",
+        )
+
+        async def run():
+            result = await handlers.handle_reinitialize_device(
+                20, request.encode(), SOURCE
+            )
+            assert result is None
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+
+class TestHandleTimeSynchronization:
+    def test_time_sync_processes(self):
+        from bac_py.services.device_mgmt import TimeSynchronizationRequest
+        from bac_py.types.primitives import BACnetDate, BACnetTime
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = TimeSynchronizationRequest(
+            date=BACnetDate(2025, 1, 15, 3),
+            time=BACnetTime(10, 30, 0, 0),
+        )
+
+        async def run():
+            result = await handlers.handle_time_synchronization(
+                6, request.encode(), SOURCE
+            )
+            assert result is None
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_utc_time_sync_processes(self):
+        from bac_py.services.device_mgmt import UTCTimeSynchronizationRequest
+        from bac_py.types.primitives import BACnetDate, BACnetTime
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = UTCTimeSynchronizationRequest(
+            date=BACnetDate(2025, 1, 15, 3),
+            time=BACnetTime(18, 30, 0, 0),
+        )
+
+        async def run():
+            result = await handlers.handle_utc_time_synchronization(
+                9, request.encode(), SOURCE
+            )
+            assert result is None
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+
+class TestHandleAtomicReadFile:
+    def test_stream_read(self):
+        from bac_py.objects.file import FileObject
+        from bac_py.services.file_access import (
+            AtomicReadFileACK,
+            AtomicReadFileRequest,
+            StreamReadAccess,
+            StreamReadACK,
+        )
+        from bac_py.types.enums import FileAccessMethod
+
+        app, db, device = _make_app()
+        f = FileObject(1, file_access_method=FileAccessMethod.STREAM_ACCESS)
+        f.write_stream(0, b"Hello BACnet")
+        db.add(f)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = AtomicReadFileRequest(
+            file_identifier=ObjectIdentifier(ObjectType.FILE, 1),
+            access_method=StreamReadAccess(
+                file_start_position=0,
+                requested_octet_count=100,
+            ),
+        )
+
+        async def run():
+            result = await handlers.handle_atomic_read_file(6, request.encode(), SOURCE)
+            ack = AtomicReadFileACK.decode(result)
+            assert ack.end_of_file is True
+            assert isinstance(ack.access_method, StreamReadACK)
+            assert ack.access_method.file_data == b"Hello BACnet"
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_record_read(self):
+        from bac_py.objects.file import FileObject
+        from bac_py.services.file_access import (
+            AtomicReadFileACK,
+            AtomicReadFileRequest,
+            RecordReadAccess,
+            RecordReadACK,
+        )
+        from bac_py.types.enums import FileAccessMethod
+
+        app, db, device = _make_app()
+        f = FileObject(1, file_access_method=FileAccessMethod.RECORD_ACCESS)
+        f.write_records(0, [b"rec1", b"rec2"])
+        db.add(f)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = AtomicReadFileRequest(
+            file_identifier=ObjectIdentifier(ObjectType.FILE, 1),
+            access_method=RecordReadAccess(
+                file_start_record=0,
+                requested_record_count=10,
+            ),
+        )
+
+        async def run():
+            result = await handlers.handle_atomic_read_file(6, request.encode(), SOURCE)
+            ack = AtomicReadFileACK.decode(result)
+            assert ack.end_of_file is True
+            assert isinstance(ack.access_method, RecordReadACK)
+            assert ack.access_method.file_record_data == [b"rec1", b"rec2"]
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_unknown_object_raises(self):
+        from bac_py.services.file_access import AtomicReadFileRequest, StreamReadAccess
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = AtomicReadFileRequest(
+            file_identifier=ObjectIdentifier(ObjectType.FILE, 999),
+            access_method=StreamReadAccess(
+                file_start_position=0,
+                requested_octet_count=10,
+            ),
+        )
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_atomic_read_file(6, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_non_file_object_raises(self):
+        from bac_py.services.file_access import AtomicReadFileRequest, StreamReadAccess
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = AtomicReadFileRequest(
+            file_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            access_method=StreamReadAccess(
+                file_start_position=0,
+                requested_octet_count=10,
+            ),
+        )
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_atomic_read_file(6, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.INCONSISTENT_OBJECT_TYPE
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+
+class TestHandleAtomicWriteFile:
+    def test_stream_write(self):
+        from bac_py.objects.file import FileObject
+        from bac_py.services.file_access import (
+            AtomicWriteFileACK,
+            AtomicWriteFileRequest,
+            StreamWriteAccess,
+        )
+        from bac_py.types.enums import FileAccessMethod
+
+        app, db, device = _make_app()
+        f = FileObject(1, file_access_method=FileAccessMethod.STREAM_ACCESS)
+        db.add(f)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = AtomicWriteFileRequest(
+            file_identifier=ObjectIdentifier(ObjectType.FILE, 1),
+            access_method=StreamWriteAccess(
+                file_start_position=0,
+                file_data=b"Hello",
+            ),
+        )
+
+        async def run():
+            result = await handlers.handle_atomic_write_file(7, request.encode(), SOURCE)
+            ack = AtomicWriteFileACK.decode(result)
+            assert ack.is_stream is True
+            assert ack.file_start == 0
+            data, _ = f.read_stream(0, 100)
+            assert data == b"Hello"
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_stream_append(self):
+        from bac_py.objects.file import FileObject
+        from bac_py.services.file_access import (
+            AtomicWriteFileACK,
+            AtomicWriteFileRequest,
+            StreamWriteAccess,
+        )
+        from bac_py.types.enums import FileAccessMethod
+
+        app, db, device = _make_app()
+        f = FileObject(1, file_access_method=FileAccessMethod.STREAM_ACCESS)
+        f.write_stream(0, b"Hello ")
+        db.add(f)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = AtomicWriteFileRequest(
+            file_identifier=ObjectIdentifier(ObjectType.FILE, 1),
+            access_method=StreamWriteAccess(
+                file_start_position=-1,
+                file_data=b"World",
+            ),
+        )
+
+        async def run():
+            result = await handlers.handle_atomic_write_file(7, request.encode(), SOURCE)
+            ack = AtomicWriteFileACK.decode(result)
+            assert ack.file_start == 6
+            data, _ = f.read_stream(0, 100)
+            assert data == b"Hello World"
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_record_write(self):
+        from bac_py.objects.file import FileObject
+        from bac_py.services.file_access import (
+            AtomicWriteFileACK,
+            AtomicWriteFileRequest,
+            RecordWriteAccess,
+        )
+        from bac_py.types.enums import FileAccessMethod
+
+        app, db, device = _make_app()
+        f = FileObject(1, file_access_method=FileAccessMethod.RECORD_ACCESS)
+        db.add(f)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = AtomicWriteFileRequest(
+            file_identifier=ObjectIdentifier(ObjectType.FILE, 1),
+            access_method=RecordWriteAccess(
+                file_start_record=0,
+                record_count=2,
+                file_record_data=[b"rec1", b"rec2"],
+            ),
+        )
+
+        async def run():
+            result = await handlers.handle_atomic_write_file(7, request.encode(), SOURCE)
+            ack = AtomicWriteFileACK.decode(result)
+            assert ack.is_stream is False
+            assert ack.file_start == 0
+            records, _ = f.read_records(0, 10)
+            assert records == [b"rec1", b"rec2"]
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+
+class TestHandleCreateObject:
+    def test_create_by_type(self):
+        import bac_py.objects  # noqa: F401
+        from bac_py.encoding.primitives import decode_object_identifier
+        from bac_py.encoding.tags import decode_tag
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        from bac_py.services.object_mgmt import CreateObjectRequest
+
+        request = CreateObjectRequest(object_type=ObjectType.ANALOG_INPUT)
+
+        async def run():
+            result = await handlers.handle_create_object(10, request.encode(), SOURCE)
+            tag, offset = decode_tag(result, 0)
+            obj_type, instance = decode_object_identifier(result[offset : offset + tag.length])
+            assert obj_type == ObjectType.ANALOG_INPUT
+            assert instance == 1
+            oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+            assert db.get(oid) is not None
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_create_by_identifier(self):
+        import bac_py.objects  # noqa: F401
+        from bac_py.encoding.primitives import decode_object_identifier
+        from bac_py.encoding.tags import decode_tag
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        from bac_py.services.object_mgmt import CreateObjectRequest
+
+        request = CreateObjectRequest(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 42),
+        )
+
+        async def run():
+            result = await handlers.handle_create_object(10, request.encode(), SOURCE)
+            tag, offset = decode_tag(result, 0)
+            obj_type, instance = decode_object_identifier(result[offset : offset + tag.length])
+            assert obj_type == ObjectType.ANALOG_INPUT
+            assert instance == 42
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_create_duplicate_raises(self):
+        import bac_py.objects  # noqa: F401
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        from bac_py.objects.analog import AnalogInputObject
+        from bac_py.services.object_mgmt import CreateObjectRequest
+
+        db.add(AnalogInputObject(1, object_name="AI-1"))
+
+        request = CreateObjectRequest(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+        )
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_create_object(10, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.OBJECT_IDENTIFIER_ALREADY_EXISTS
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_create_unsupported_type_raises(self):
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        from bac_py.services.object_mgmt import CreateObjectRequest
+
+        request = CreateObjectRequest(object_type=ObjectType.LIFE_SAFETY_POINT)
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_create_object(10, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.UNSUPPORTED_OBJECT_TYPE
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+
+class TestHandleDeleteObject:
+    def test_delete_object(self):
+        import bac_py.objects  # noqa: F401
+        from bac_py.objects.analog import AnalogInputObject
+
+        app, db, device = _make_app()
+        ai = AnalogInputObject(1, object_name="AI-1")
+        db.add(ai)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        from bac_py.services.object_mgmt import DeleteObjectRequest
+
+        request = DeleteObjectRequest(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+        )
+
+        async def run():
+            result = await handlers.handle_delete_object(11, request.encode(), SOURCE)
+            assert result is None
+            assert db.get(ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)) is None
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_delete_device_raises(self):
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        from bac_py.services.object_mgmt import DeleteObjectRequest
+
+        request = DeleteObjectRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+        )
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_delete_object(11, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.OBJECT_DELETION_NOT_PERMITTED
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_delete_unknown_object_raises(self):
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        from bac_py.services.object_mgmt import DeleteObjectRequest
+
+        request = DeleteObjectRequest(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 999),
+        )
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_delete_object(11, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+
+class TestHandleListElement:
+    def test_add_list_element_unknown_object_raises(self):
+        from bac_py.services.list_element import AddListElementRequest
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = AddListElementRequest(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 999),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            list_of_elements=b"\xc4\x00\x00\x00\x01",
+        )
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_add_list_element(8, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_add_list_element_unknown_property_raises(self):
+        from bac_py.services.list_element import AddListElementRequest
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = AddListElementRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            list_of_elements=b"\xc4\x00\x00\x00\x01",
+        )
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_add_list_element(8, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.UNKNOWN_PROPERTY
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_add_list_element_not_supported(self):
+        from bac_py.services.list_element import AddListElementRequest
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = AddListElementRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            list_of_elements=b"\xc4\x00\x00\x00\x01",
+        )
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_add_list_element(8, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.OPTIONAL_FUNCTIONALITY_NOT_SUPPORTED
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_remove_list_element_unknown_object_raises(self):
+        from bac_py.services.list_element import RemoveListElementRequest
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = RemoveListElementRequest(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 999),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            list_of_elements=b"\xc4\x00\x00\x00\x01",
+        )
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_remove_list_element(9, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+
+class TestHandleWhoHas:
+    def test_who_has_by_id_found(self):
+        import bac_py.objects  # noqa: F401
+        from bac_py.objects.analog import AnalogInputObject
+
+        app, db, device = _make_app(device_instance=100)
+        ai = AnalogInputObject(1, object_name="AI-1")
+        db.add(ai)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        from bac_py.services.who_has import WhoHasRequest
+
+        request = WhoHasRequest(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+        )
+
+        async def run():
+            await handlers.handle_who_has(7, request.encode(), SOURCE)
+            app.unconfirmed_request.assert_called_once()
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_who_has_by_name_found(self):
+        import bac_py.objects  # noqa: F401
+        from bac_py.objects.analog import AnalogInputObject
+
+        app, db, device = _make_app(device_instance=100)
+        ai = AnalogInputObject(1, object_name="AI-1")
+        db.add(ai)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        from bac_py.services.who_has import WhoHasRequest
+
+        request = WhoHasRequest(object_name="AI-1")
+
+        async def run():
+            await handlers.handle_who_has(7, request.encode(), SOURCE)
+            app.unconfirmed_request.assert_called_once()
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_who_has_not_found(self):
+        app, db, device = _make_app(device_instance=100)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        from bac_py.services.who_has import WhoHasRequest
+
+        request = WhoHasRequest(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 999),
+        )
+
+        async def run():
+            await handlers.handle_who_has(7, request.encode(), SOURCE)
+            app.unconfirmed_request.assert_not_called()
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_who_has_out_of_range(self):
+        import bac_py.objects  # noqa: F401
+        from bac_py.objects.analog import AnalogInputObject
+
+        app, db, device = _make_app(device_instance=5000)
+        ai = AnalogInputObject(1, object_name="AI-1")
+        db.add(ai)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        from bac_py.services.who_has import WhoHasRequest
+
+        request = WhoHasRequest(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            low_limit=1,
+            high_limit=100,
+        )
+
+        async def run():
+            await handlers.handle_who_has(7, request.encode(), SOURCE)
+            app.unconfirmed_request.assert_not_called()
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_who_has_i_have_response(self):
+        import bac_py.objects  # noqa: F401
+        from bac_py.objects.analog import AnalogInputObject
+        from bac_py.services.who_has import IHaveRequest, WhoHasRequest
+
+        app, db, device = _make_app(device_instance=100)
+        ai = AnalogInputObject(1, object_name="AI-1")
+        db.add(ai)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = WhoHasRequest(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+        )
+
+        async def run():
+            await handlers.handle_who_has(7, request.encode(), SOURCE)
+            call_args = app.unconfirmed_request.call_args
+            service_data = call_args.kwargs.get(
+                "service_data", call_args[1].get("service_data") if len(call_args) > 1 else None
+            )
+            ihave = IHaveRequest.decode(service_data)
+            assert ihave.device_identifier == ObjectIdentifier(ObjectType.DEVICE, 100)
+            assert ihave.object_identifier == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+            assert ihave.object_name == "AI-1"
 
         asyncio.get_event_loop().run_until_complete(run())
