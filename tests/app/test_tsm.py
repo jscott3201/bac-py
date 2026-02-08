@@ -3,6 +3,7 @@ import asyncio
 import pytest
 
 from bac_py.app.tsm import ClientTransaction, ClientTSM, ServerTransaction, ServerTSM
+from bac_py.encoding.apdu import ConfirmedRequestPDU
 from bac_py.network.address import BACnetAddress
 from bac_py.services.errors import (
     BACnetAbortError,
@@ -24,6 +25,26 @@ class FakeNetworkLayer:
 
 
 PEER = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+
+def _make_non_segmented_pdu(
+    invoke_id: int = 1,
+    service_choice: int = 12,
+    service_request: bytes = b"\x01\x02",
+) -> ConfirmedRequestPDU:
+    """Create a non-segmented ConfirmedRequestPDU for testing."""
+    return ConfirmedRequestPDU(
+        segmented=False,
+        more_follows=False,
+        segmented_response_accepted=True,
+        max_segments=None,
+        max_apdu_length=1476,
+        invoke_id=invoke_id,
+        sequence_number=None,
+        proposed_window_size=None,
+        service_choice=service_choice,
+        service_request=service_request,
+    )
 
 
 class TestClientTSM:
@@ -160,24 +181,29 @@ class TestServerTSM:
 
     def test_receive_new_request(self, tsm):
         async def run():
-            txn = tsm.receive_confirmed_request(1, PEER, 12)
-            assert txn is not None
+            pdu = _make_non_segmented_pdu(invoke_id=1)
+            result = tsm.receive_confirmed_request(pdu, PEER)
+            assert result is not None
+            txn, data = result
             assert isinstance(txn, ServerTransaction)
             assert txn.invoke_id == 1
             assert txn.source == PEER
             assert txn.service_choice == 12
+            assert data == b"\x01\x02"
 
         asyncio.get_event_loop().run_until_complete(run())
 
     def test_duplicate_request_returns_none(self, tsm, network):
         async def run():
-            txn = tsm.receive_confirmed_request(1, PEER, 12)
-            assert txn is not None
+            pdu = _make_non_segmented_pdu(invoke_id=1)
+            result = tsm.receive_confirmed_request(pdu, PEER)
+            assert result is not None
+            txn, _data = result
             # Complete the transaction so it has a cached response
             tsm.complete_transaction(txn, b"\x20\x01\x0c")
             # Now send a duplicate
-            result = tsm.receive_confirmed_request(1, PEER, 12)
-            assert result is None
+            result2 = tsm.receive_confirmed_request(pdu, PEER)
+            assert result2 is None
             # Should have resent the cached response
             assert len(network.sent) == 1
             assert network.sent[0][0] == b"\x20\x01\x0c"
@@ -186,11 +212,12 @@ class TestServerTSM:
 
     def test_duplicate_before_completion_returns_none_no_resend(self, tsm, network):
         async def run():
-            txn = tsm.receive_confirmed_request(1, PEER, 12)
-            assert txn is not None
+            pdu = _make_non_segmented_pdu(invoke_id=1)
+            result = tsm.receive_confirmed_request(pdu, PEER)
+            assert result is not None
             # Duplicate without completing
-            result = tsm.receive_confirmed_request(1, PEER, 12)
-            assert result is None
+            result2 = tsm.receive_confirmed_request(pdu, PEER)
+            assert result2 is None
             # No cached response to resend
             assert len(network.sent) == 0
 
@@ -198,7 +225,10 @@ class TestServerTSM:
 
     def test_complete_caches_response(self, tsm):
         async def run():
-            txn = tsm.receive_confirmed_request(1, PEER, 12)
+            pdu = _make_non_segmented_pdu(invoke_id=1)
+            result = tsm.receive_confirmed_request(pdu, PEER)
+            assert result is not None
+            txn, _data = result
             tsm.complete_transaction(txn, b"\x20\x01\x0c")
             assert txn.cached_response == b"\x20\x01\x0c"
 
@@ -208,22 +238,55 @@ class TestServerTSM:
         tsm = ServerTSM(network, request_timeout=0.05)
 
         async def run():
-            txn = tsm.receive_confirmed_request(1, PEER, 12)
+            pdu = _make_non_segmented_pdu(invoke_id=1)
+            result = tsm.receive_confirmed_request(pdu, PEER)
+            assert result is not None
+            txn, _data = result
             tsm.complete_transaction(txn, b"\x20\x01\x0c")
             await asyncio.sleep(0.1)
             # After timeout, a new request with same invoke_id should succeed
-            txn2 = tsm.receive_confirmed_request(1, PEER, 12)
+            result2 = tsm.receive_confirmed_request(pdu, PEER)
+            assert result2 is not None
+            txn2, _data2 = result2
             assert txn2 is not None
 
         asyncio.get_event_loop().run_until_complete(run())
 
     def test_different_peers_same_invoke_id(self, tsm):
         async def run():
+            pdu = _make_non_segmented_pdu(invoke_id=1)
             peer2 = BACnetAddress(mac_address=b"\xc0\xa8\x01\x02\xba\xc0")
-            txn1 = tsm.receive_confirmed_request(1, PEER, 12)
-            txn2 = tsm.receive_confirmed_request(1, peer2, 12)
-            assert txn1 is not None
-            assert txn2 is not None
+            result1 = tsm.receive_confirmed_request(pdu, PEER)
+            result2 = tsm.receive_confirmed_request(pdu, peer2)
+            assert result1 is not None
+            assert result2 is not None
+            txn1, _data1 = result1
+            txn2, _data2 = result2
             assert txn1.source != txn2.source
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_client_capabilities_stored(self, tsm):
+        """Verify client max_apdu_length and segmentation prefs are stored."""
+
+        async def run():
+            pdu = ConfirmedRequestPDU(
+                segmented=False,
+                more_follows=False,
+                segmented_response_accepted=True,
+                max_segments=64,
+                max_apdu_length=480,
+                invoke_id=1,
+                sequence_number=None,
+                proposed_window_size=None,
+                service_choice=12,
+                service_request=b"\x01",
+            )
+            result = tsm.receive_confirmed_request(pdu, PEER)
+            assert result is not None
+            txn, _data = result
+            assert txn.client_max_apdu_length == 480
+            assert txn.client_max_segments == 64
+            assert txn.segmented_response_accepted is True
 
         asyncio.get_event_loop().run_until_complete(run())

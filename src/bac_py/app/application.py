@@ -11,8 +11,10 @@ from bac_py.app.tsm import ClientTSM, ServerTSM
 from bac_py.encoding.apdu import (
     AbortPDU,
     ComplexAckPDU,
+    ConfirmedRequestPDU,
     ErrorPDU,
     RejectPDU,
+    SegmentAckPDU,
     SimpleAckPDU,
     UnconfirmedRequestPDU,
     decode_apdu,
@@ -20,6 +22,7 @@ from bac_py.encoding.apdu import (
 )
 from bac_py.network.layer import NetworkLayer
 from bac_py.objects.base import ObjectDatabase
+from bac_py.segmentation.manager import compute_max_segment_payload
 from bac_py.services.base import ServiceRegistry
 from bac_py.services.errors import BACnetAbortError, BACnetError, BACnetRejectError
 from bac_py.transport.bip import BIPTransport
@@ -28,6 +31,7 @@ from bac_py.types.enums import AbortReason, PduType
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from bac_py.app.tsm import ServerTransaction
     from bac_py.network.address import BACnetAddress
 
 logger = logging.getLogger(__name__)
@@ -47,6 +51,7 @@ class DeviceConfig:
     interface: str = "0.0.0.0"
     port: int = 0xBAC0
     apdu_timeout: int = 6000  # milliseconds
+    apdu_segment_timeout: int = 2000  # milliseconds
     apdu_retries: int = 3
     max_apdu_length: int = 1476
     max_segments: int | None = None
@@ -95,14 +100,21 @@ class BACnetApplication:
             port=self._config.port,
         )
         self._network = NetworkLayer(self._transport)
+        segment_timeout = self._config.apdu_segment_timeout / 1000
         self._client_tsm = ClientTSM(
             self._network,
             apdu_timeout=self._config.apdu_timeout / 1000,
             apdu_retries=self._config.apdu_retries,
             max_apdu_length=self._config.max_apdu_length,
             max_segments=self._config.max_segments,
+            segment_timeout=segment_timeout,
         )
-        self._server_tsm = ServerTSM(self._network)
+        self._server_tsm = ServerTSM(
+            self._network,
+            segment_timeout=segment_timeout,
+            max_apdu_length=self._config.max_apdu_length,
+            max_segments=self._config.max_segments,
+        )
         self._network.on_receive(self._on_apdu_received)
         await self._transport.start()
         self._running = True
@@ -215,7 +227,11 @@ class BACnetApplication:
 
         match pdu_type:
             case PduType.CONFIRMED_REQUEST:
-                self._spawn_task(self._handle_confirmed_request(pdu, source))
+                assert isinstance(pdu, ConfirmedRequestPDU)
+                if pdu.segmented:
+                    self._handle_segmented_request(pdu, source)
+                else:
+                    self._spawn_task(self._handle_confirmed_request(pdu, source))
             case PduType.UNCONFIRMED_REQUEST:
                 self._spawn_task(self._handle_unconfirmed_request(pdu, source))
             case PduType.SIMPLE_ACK:
@@ -224,21 +240,11 @@ class BACnetApplication:
                     self._client_tsm.handle_simple_ack(source, pdu.invoke_id, pdu.service_choice)
             case PduType.COMPLEX_ACK:
                 assert isinstance(pdu, ComplexAckPDU)
-                if self._client_tsm and not pdu.segmented:
+                if self._client_tsm and pdu.segmented:
+                    self._client_tsm.handle_segmented_complex_ack(source, pdu)
+                elif self._client_tsm:
                     self._client_tsm.handle_complex_ack(
                         source, pdu.invoke_id, pdu.service_choice, pdu.service_ack
-                    )
-                elif self._client_tsm and pdu.segmented:
-                    # Segmentation not yet supported; abort the transaction
-                    abort = AbortPDU(
-                        sent_by_server=False,
-                        invoke_id=pdu.invoke_id,
-                        abort_reason=AbortReason.SEGMENTATION_NOT_SUPPORTED,
-                    )
-                    if self._network:
-                        self._network.send(encode_apdu(abort), source, expecting_reply=False)
-                    self._client_tsm.handle_abort(
-                        source, pdu.invoke_id, AbortReason.SEGMENTATION_NOT_SUPPORTED
                     )
             case PduType.ERROR:
                 assert isinstance(pdu, ErrorPDU)
@@ -255,67 +261,116 @@ class BACnetApplication:
                 if self._client_tsm:
                     self._client_tsm.handle_abort(source, pdu.invoke_id, pdu.abort_reason)
             case PduType.SEGMENT_ACK:
-                pass  # Segmentation handled in Phase 5
+                assert isinstance(pdu, SegmentAckPDU)
+                if pdu.sent_by_server:
+                    # Server sent ACK -> we are the client receiving it
+                    if self._client_tsm:
+                        self._client_tsm.handle_segment_ack(source, pdu)
+                else:
+                    # Client sent ACK -> we are the server receiving it
+                    if self._server_tsm:
+                        self._server_tsm.handle_segment_ack_for_response(source, pdu)
 
-    async def _handle_confirmed_request(
+    def _handle_segmented_request(
         self,
-        pdu: Any,
+        pdu: ConfirmedRequestPDU,
         source: BACnetAddress,
     ) -> None:
-        """Process incoming confirmed request through server TSM."""
-        from bac_py.encoding.apdu import ConfirmedRequestPDU
-
-        assert isinstance(pdu, ConfirmedRequestPDU)
+        """Handle a segmented confirmed request (first or subsequent segment)."""
         if self._server_tsm is None or self._network is None:
             return
 
-        txn = self._server_tsm.receive_confirmed_request(pdu.invoke_id, source, pdu.service_choice)
-        if txn is None:
+        result = self._server_tsm.receive_confirmed_request(pdu, source)
+        if result is None:
+            return  # Duplicate or segment processed, waiting for more
+
+        txn, service_data = result
+        if service_data is not None:
+            # All segments received, dispatch to service handler
+            self._spawn_task(self._dispatch_request(txn, pdu.service_choice, service_data, source))
+
+    async def _handle_confirmed_request(
+        self,
+        pdu: ConfirmedRequestPDU,
+        source: BACnetAddress,
+    ) -> None:
+        """Process incoming non-segmented confirmed request through server TSM."""
+        if self._server_tsm is None or self._network is None:
+            return
+
+        result = self._server_tsm.receive_confirmed_request(pdu, source)
+        if result is None:
             return  # Duplicate, response already resent
+
+        txn, service_data = result
+        if service_data is None:
+            return  # Should not happen for non-segmented requests
+
+        await self._dispatch_request(txn, pdu.service_choice, service_data, source)
+
+    async def _dispatch_request(
+        self,
+        txn: ServerTransaction,
+        service_choice: int,
+        service_data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Dispatch a confirmed request to the service handler and send the response."""
+        if self._server_tsm is None or self._network is None:
+            return
 
         response_pdu: SimpleAckPDU | ComplexAckPDU | ErrorPDU | RejectPDU | AbortPDU
         try:
             result = await self._service_registry.dispatch_confirmed(
-                pdu.service_choice, pdu.service_request, source
+                service_choice, service_data, source
             )
             if result is None:
                 response_pdu = SimpleAckPDU(
-                    invoke_id=pdu.invoke_id,
-                    service_choice=pdu.service_choice,
+                    invoke_id=txn.invoke_id,
+                    service_choice=service_choice,
                 )
             else:
+                # Check if response needs segmentation
+                max_payload = compute_max_segment_payload(
+                    txn.client_max_apdu_length, "complex_ack"
+                )
+                if len(result) > max_payload:
+                    # Response is too large for a single APDU; segment it
+                    self._server_tsm.start_segmented_response(txn, service_choice, result)
+                    return
+
                 response_pdu = ComplexAckPDU(
                     segmented=False,
                     more_follows=False,
-                    invoke_id=pdu.invoke_id,
+                    invoke_id=txn.invoke_id,
                     sequence_number=None,
                     proposed_window_size=None,
-                    service_choice=pdu.service_choice,
+                    service_choice=service_choice,
                     service_ack=result,
                 )
         except BACnetError as e:
             response_pdu = ErrorPDU(
-                invoke_id=pdu.invoke_id,
-                service_choice=pdu.service_choice,
+                invoke_id=txn.invoke_id,
+                service_choice=service_choice,
                 error_class=e.error_class,
                 error_code=e.error_code,
             )
         except BACnetRejectError as e:
             response_pdu = RejectPDU(
-                invoke_id=pdu.invoke_id,
+                invoke_id=txn.invoke_id,
                 reject_reason=e.reason,
             )
         except BACnetAbortError as e:
             response_pdu = AbortPDU(
                 sent_by_server=True,
-                invoke_id=pdu.invoke_id,
+                invoke_id=txn.invoke_id,
                 abort_reason=e.reason,
             )
         except Exception:
             logger.exception("Unhandled error in service handler")
             response_pdu = AbortPDU(
                 sent_by_server=True,
-                invoke_id=pdu.invoke_id,
+                invoke_id=txn.invoke_id,
                 abort_reason=AbortReason.OTHER,
             )
 
@@ -329,8 +384,6 @@ class BACnetApplication:
         source: BACnetAddress,
     ) -> None:
         """Dispatch unconfirmed request to handlers."""
-        from bac_py.encoding.apdu import UnconfirmedRequestPDU
-
         assert isinstance(pdu, UnconfirmedRequestPDU)
 
         # Dispatch to permanent handlers

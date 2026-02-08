@@ -9,8 +9,18 @@ from enum import IntEnum
 from typing import TYPE_CHECKING
 
 from bac_py.encoding.apdu import (
+    AbortPDU,
+    ComplexAckPDU,
     ConfirmedRequestPDU,
+    SegmentAckPDU,
     encode_apdu,
+)
+from bac_py.segmentation.manager import (
+    SegmentAction,
+    SegmentationError,
+    SegmentReceiver,
+    SegmentSender,
+    compute_max_segment_payload,
 )
 from bac_py.services.errors import (
     BACnetAbortError,
@@ -18,12 +28,12 @@ from bac_py.services.errors import (
     BACnetRejectError,
     BACnetTimeoutError,
 )
+from bac_py.types.enums import AbortReason
 
 if TYPE_CHECKING:
     from bac_py.network.address import BACnetAddress
     from bac_py.network.layer import NetworkLayer
     from bac_py.types.enums import (
-        AbortReason,
         ErrorClass,
         ErrorCode,
         RejectReason,
@@ -39,7 +49,9 @@ class ClientTransactionState(IntEnum):
     """Client TSM states per Clause 5.4.4."""
 
     IDLE = 0
+    SEGMENTED_REQUEST = 1
     AWAIT_CONFIRMATION = 2
+    SEGMENTED_CONFIRMATION = 3
 
 
 @dataclass
@@ -53,6 +65,10 @@ class ClientTransaction:
     future: asyncio.Future[bytes]
     retry_count: int = 0
     timeout_handle: asyncio.TimerHandle | None = None
+    state: ClientTransactionState = ClientTransactionState.IDLE
+    segment_sender: SegmentSender | None = None
+    segment_receiver: SegmentReceiver | None = None
+    seg_retry_count: int = 0
 
 
 class ClientTSM:
@@ -70,12 +86,16 @@ class ClientTSM:
         apdu_retries: int = 3,
         max_apdu_length: int = 1476,
         max_segments: int | None = None,
+        segment_timeout: float = 2.0,
+        proposed_window_size: int = 16,
     ) -> None:
         self._network = network
         self._timeout = apdu_timeout
         self._retries = apdu_retries
         self._max_apdu_length = max_apdu_length
         self._max_segments = max_segments
+        self._segment_timeout = segment_timeout
+        self._proposed_window_size = proposed_window_size
         self._transactions: dict[tuple[BACnetAddress, int], ClientTransaction] = {}
         self._next_invoke_id = 0
 
@@ -96,6 +116,9 @@ class ClientTSM:
         destination: BACnetAddress,
     ) -> bytes:
         """Send a confirmed request and await the response.
+
+        If the request data exceeds the max segment payload, the request
+        is automatically segmented per Clause 5.2.
 
         Returns the service-ack data from ComplexACK,
         or empty bytes for SimpleACK.
@@ -121,7 +144,11 @@ class ClientTSM:
         self._transactions[key] = txn
 
         try:
-            self._send_confirmed_request(txn)
+            max_payload = compute_max_segment_payload(self._max_apdu_length, "confirmed_request")
+            if len(request_data) > max_payload:
+                self._send_segmented_request(txn)
+            else:
+                self._send_confirmed_request(txn)
             return await future
         finally:
             self._transactions.pop(key, None)
@@ -195,6 +222,101 @@ class ClientTSM:
             self._cancel_timeout(txn)
             txn.future.set_exception(BACnetAbortError(reason))
 
+    def handle_segment_ack(
+        self,
+        source: BACnetAddress,
+        pdu: SegmentAckPDU,
+    ) -> None:
+        """Handle SegmentACK during segmented request sending."""
+        key = (source, pdu.invoke_id)
+        txn = self._transactions.get(key)
+        if not txn or txn.future.done():
+            return
+
+        if txn.state != ClientTransactionState.SEGMENTED_REQUEST:
+            return
+
+        sender = txn.segment_sender
+        if sender is None:
+            return
+
+        if pdu.actual_window_size < 1 or pdu.actual_window_size > 127:
+            self._abort_transaction(txn, AbortReason.WINDOW_SIZE_OUT_OF_RANGE)
+            return
+
+        complete = sender.handle_segment_ack(
+            pdu.sequence_number, pdu.actual_window_size, pdu.negative_ack
+        )
+        txn.seg_retry_count = 0
+
+        if complete:
+            txn.state = ClientTransactionState.AWAIT_CONFIRMATION
+            txn.segment_sender = None
+            self._start_timeout(txn)
+        else:
+            self._fill_and_send_request_window(txn)
+
+    def handle_segmented_complex_ack(
+        self,
+        source: BACnetAddress,
+        pdu: ComplexAckPDU,
+    ) -> None:
+        """Handle a segmented ComplexACK response."""
+        key = (source, pdu.invoke_id)
+        txn = self._transactions.get(key)
+        if not txn or txn.future.done():
+            return
+
+        if pdu.sequence_number == 0 and txn.state == ClientTransactionState.AWAIT_CONFIRMATION:
+            # First segment of segmented response
+            self._cancel_timeout(txn)
+            receiver = SegmentReceiver.create(
+                first_segment_data=pdu.service_ack,
+                service_choice=pdu.service_choice,
+                proposed_window_size=pdu.proposed_window_size or 1,
+                more_follows=pdu.more_follows,
+                our_window_size=self._proposed_window_size,
+            )
+            txn.segment_receiver = receiver
+            txn.state = ClientTransactionState.SEGMENTED_CONFIRMATION
+
+            if not pdu.more_follows:
+                # Single-segment "segmented" response (edge case)
+                txn.future.set_result(receiver.reassemble())
+                return
+
+            self._send_client_segment_ack(txn, seq=0, negative=False)
+            self._start_segment_timeout(txn)
+            return
+
+        if txn.state != ClientTransactionState.SEGMENTED_CONFIRMATION:
+            return
+
+        seg_receiver = txn.segment_receiver
+        if seg_receiver is None:
+            return
+
+        if pdu.sequence_number is None:
+            return
+
+        action, ack_seq = seg_receiver.receive_segment(
+            pdu.sequence_number, pdu.service_ack, pdu.more_follows
+        )
+
+        match action:
+            case SegmentAction.COMPLETE:
+                self._cancel_timeout(txn)
+                self._send_client_segment_ack(txn, seq=ack_seq, negative=False)
+                txn.future.set_result(seg_receiver.reassemble())
+            case SegmentAction.SEND_ACK:
+                self._send_client_segment_ack(txn, seq=ack_seq, negative=False)
+                self._start_segment_timeout(txn)
+            case SegmentAction.RESEND_LAST_ACK:
+                self._send_client_segment_ack(txn, seq=ack_seq, negative=False)
+                self._start_segment_timeout(txn)
+            case SegmentAction.ABORT:
+                self._abort_transaction(txn, AbortReason.INVALID_APDU_IN_THIS_STATE)
+
     def active_transactions(self) -> list[ClientTransaction]:
         """Return all active transactions (for shutdown)."""
         return list(self._transactions.values())
@@ -206,7 +328,7 @@ class ClientTSM:
             txn.timeout_handle = None
 
     def _send_confirmed_request(self, txn: ClientTransaction) -> None:
-        """Encode and send a confirmed request APDU."""
+        """Encode and send a non-segmented confirmed request APDU."""
         pdu = ConfirmedRequestPDU(
             segmented=False,
             more_follows=False,
@@ -221,18 +343,109 @@ class ClientTSM:
         )
         apdu_bytes = encode_apdu(pdu)
         self._network.send(apdu_bytes, txn.destination, expecting_reply=True)
+        txn.state = ClientTransactionState.AWAIT_CONFIRMATION
         self._start_timeout(txn)
 
+    def _send_segmented_request(self, txn: ClientTransaction) -> None:
+        """Begin sending a segmented request."""
+        try:
+            sender = SegmentSender.create(
+                payload=txn.request_data,
+                invoke_id=txn.invoke_id,
+                service_choice=txn.service_choice,
+                max_apdu_length=self._max_apdu_length,
+                pdu_type="confirmed_request",
+                proposed_window_size=self._proposed_window_size,
+            )
+        except SegmentationError as e:
+            txn.future.set_exception(BACnetAbortError(e.abort_reason))
+            return
+
+        txn.segment_sender = sender
+        txn.state = ClientTransactionState.SEGMENTED_REQUEST
+        self._fill_and_send_request_window(txn)
+
+    def _fill_and_send_request_window(self, txn: ClientTransaction) -> None:
+        """Send the current window of request segments."""
+        sender = txn.segment_sender
+        if sender is None:
+            return
+        segments = sender.fill_window()
+        for seq_num, seg_data, more_follows in segments:
+            pdu = ConfirmedRequestPDU(
+                segmented=True,
+                more_follows=more_follows,
+                segmented_response_accepted=True,
+                max_segments=self._max_segments,
+                max_apdu_length=self._max_apdu_length,
+                invoke_id=txn.invoke_id,
+                sequence_number=seq_num,
+                proposed_window_size=sender.proposed_window_size,
+                service_choice=txn.service_choice,
+                service_request=seg_data,
+            )
+            self._network.send(encode_apdu(pdu), txn.destination, expecting_reply=True)
+        # Wait for SegmentACK: use T_wait_for_seg = 4 * T_seg
+        self._start_segment_timeout(txn, wait_for_seg=True)
+
+    def _send_client_segment_ack(
+        self,
+        txn: ClientTransaction,
+        seq: int,
+        negative: bool,
+    ) -> None:
+        """Send a SegmentACK PDU (as client)."""
+        receiver = txn.segment_receiver
+        if receiver is None:
+            return
+        ack = SegmentAckPDU(
+            negative_ack=negative,
+            sent_by_server=False,
+            invoke_id=txn.invoke_id,
+            sequence_number=seq,
+            actual_window_size=receiver.actual_window_size,
+        )
+        self._network.send(encode_apdu(ack), txn.destination, expecting_reply=True)
+
+    def _abort_transaction(self, txn: ClientTransaction, reason: AbortReason) -> None:
+        """Abort a transaction by sending Abort PDU and failing the future."""
+        abort = AbortPDU(
+            sent_by_server=False,
+            invoke_id=txn.invoke_id,
+            abort_reason=reason,
+        )
+        self._network.send(encode_apdu(abort), txn.destination, expecting_reply=False)
+        if not txn.future.done():
+            self._cancel_timeout(txn)
+            txn.future.set_exception(BACnetAbortError(reason))
+
     def _start_timeout(self, txn: ClientTransaction) -> None:
-        """Start or restart the timeout timer for a transaction."""
+        """Start or restart the APDU timeout timer (T_arr)."""
         if txn.timeout_handle:
             txn.timeout_handle.cancel()
         loop = asyncio.get_running_loop()
         key = (txn.destination, txn.invoke_id)
         txn.timeout_handle = loop.call_later(self._timeout, self._on_timeout, key)
 
+    def _start_segment_timeout(
+        self, txn: ClientTransaction, *, wait_for_seg: bool = False
+    ) -> None:
+        """Start a segment timeout timer.
+
+        Args:
+            txn: The transaction.
+            wait_for_seg: If True, use T_wait_for_seg (4 * T_seg) instead
+                of T_seg. Used when waiting for a SegmentACK after sending.
+        """
+        if txn.timeout_handle:
+            txn.timeout_handle.cancel()
+        timeout = 4 * self._segment_timeout if wait_for_seg else self._segment_timeout
+        loop = asyncio.get_running_loop()
+        key = (txn.destination, txn.invoke_id)
+        txn.timeout_handle = loop.call_later(timeout, self._on_segment_timeout, key)
+
     def _on_timeout(self, key: tuple[BACnetAddress, int]) -> None:
-        """Handle transaction timeout."""
+        """Handle APDU transaction timeout."""
         txn = self._transactions.get(key)
         if not txn or txn.future.done():
             return
@@ -249,6 +462,38 @@ class ClientTSM:
             txn.future.set_exception(
                 BACnetTimeoutError(f"No response after {self._retries} retries")
             )
+
+    def _on_segment_timeout(self, key: tuple[BACnetAddress, int]) -> None:
+        """Handle segment timeout during segmented transactions."""
+        txn = self._transactions.get(key)
+        if not txn or txn.future.done():
+            return
+
+        if txn.state == ClientTransactionState.SEGMENTED_REQUEST:
+            # Waiting for SegmentACK from server
+            if txn.seg_retry_count < self._retries:
+                txn.seg_retry_count += 1
+                logger.debug(
+                    "Segment timeout, re-filling window invoke_id=%d (attempt %d/%d)",
+                    txn.invoke_id,
+                    txn.seg_retry_count,
+                    self._retries,
+                )
+                self._fill_and_send_request_window(txn)
+            else:
+                self._abort_transaction(txn, AbortReason.TSM_TIMEOUT)
+
+        elif txn.state == ClientTransactionState.SEGMENTED_CONFIRMATION:
+            # Waiting for more segments from server
+            if txn.seg_retry_count < self._retries:
+                txn.seg_retry_count += 1
+                # Send negative SegmentACK requesting retransmission
+                receiver = txn.segment_receiver
+                if receiver is not None:
+                    self._send_client_segment_ack(txn, seq=receiver._last_ack_seq, negative=True)
+                    self._start_segment_timeout(txn)
+            else:
+                self._abort_transaction(txn, AbortReason.TSM_TIMEOUT)
 
 
 # --- Server TSM ---
@@ -273,6 +518,12 @@ class ServerTransaction:
     state: ServerTransactionState = ServerTransactionState.IDLE
     cached_response: bytes | None = None
     timeout_handle: asyncio.TimerHandle | None = None
+    segment_receiver: SegmentReceiver | None = None
+    segment_sender: SegmentSender | None = None
+    seg_retry_count: int = 0
+    client_max_apdu_length: int = 1476
+    client_max_segments: int | None = None
+    segmented_response_accepted: bool = False
 
 
 class ServerTSM:
@@ -287,26 +538,39 @@ class ServerTSM:
         network: NetworkLayer,
         *,
         request_timeout: float = 6.0,
+        segment_timeout: float = 2.0,
+        max_apdu_length: int = 1476,
+        max_segments: int | None = None,
+        proposed_window_size: int = 16,
     ) -> None:
         self._network = network
         self._timeout = request_timeout
+        self._segment_timeout = segment_timeout
+        self._max_apdu_length = max_apdu_length
+        self._max_segments = max_segments
+        self._proposed_window_size = proposed_window_size
         self._transactions: dict[tuple[BACnetAddress, int], ServerTransaction] = {}
 
     def receive_confirmed_request(
         self,
-        invoke_id: int,
+        pdu: ConfirmedRequestPDU,
         source: BACnetAddress,
-        service_choice: int,
-    ) -> ServerTransaction | None:
+    ) -> tuple[ServerTransaction, bytes | None] | None:
         """Register an incoming confirmed request.
 
-        Returns the transaction if this is a new request,
-        or None if it is a duplicate (cached response is resent).
+        Returns ``(txn, service_data)`` for new requests. ``service_data``
+        is the complete request payload for non-segmented requests, or
+        ``None`` for segmented requests that need more segments.
+
+        Returns ``None`` for duplicates (cached response is resent).
         """
-        key = (source, invoke_id)
+        key = (source, pdu.invoke_id)
         existing = self._transactions.get(key)
 
         if existing is not None:
+            if existing.state == ServerTransactionState.SEGMENTED_REQUEST:
+                # Subsequent segment of an in-progress segmented request
+                return self.handle_request_segment(pdu, source)
             # Duplicate request - resend cached response if available
             if existing.cached_response is not None:
                 self._network.send(
@@ -317,14 +581,153 @@ class ServerTSM:
             return None
 
         txn = ServerTransaction(
-            invoke_id=invoke_id,
+            invoke_id=pdu.invoke_id,
             source=source,
-            service_choice=service_choice,
+            service_choice=pdu.service_choice,
             state=ServerTransactionState.AWAIT_RESPONSE,
+            client_max_apdu_length=pdu.max_apdu_length,
+            client_max_segments=pdu.max_segments,
+            segmented_response_accepted=pdu.segmented_response_accepted,
         )
         self._transactions[key] = txn
         self._start_timeout(txn)
-        return txn
+
+        if pdu.segmented:
+            # First segment of a segmented request
+            txn.state = ServerTransactionState.SEGMENTED_REQUEST
+            receiver = SegmentReceiver.create(
+                first_segment_data=pdu.service_request,
+                service_choice=pdu.service_choice,
+                proposed_window_size=pdu.proposed_window_size or 1,
+                more_follows=pdu.more_follows,
+                our_window_size=self._proposed_window_size,
+            )
+            txn.segment_receiver = receiver
+
+            if not pdu.more_follows:
+                # Single-segment "segmented" request (unusual)
+                txn.state = ServerTransactionState.AWAIT_RESPONSE
+                self._send_server_segment_ack(txn, 0, negative=False)
+                return (txn, receiver.reassemble())
+
+            self._send_server_segment_ack(txn, 0, negative=False)
+            self._start_segment_timeout(txn)
+            return (txn, None)
+
+        return (txn, pdu.service_request)
+
+    def handle_request_segment(
+        self,
+        pdu: ConfirmedRequestPDU,
+        source: BACnetAddress,
+    ) -> tuple[ServerTransaction, bytes | None] | None:
+        """Handle a subsequent segment of a segmented confirmed request.
+
+        Returns ``(txn, complete_data)`` when all segments are received,
+        ``(txn, None)`` when more segments expected,
+        or ``None`` if no matching transaction.
+        """
+        key = (source, pdu.invoke_id)
+        txn = self._transactions.get(key)
+        if txn is None or txn.state != ServerTransactionState.SEGMENTED_REQUEST:
+            return None
+
+        receiver = txn.segment_receiver
+        if receiver is None:
+            return None
+
+        if pdu.sequence_number is None:
+            return None
+
+        action, ack_seq = receiver.receive_segment(
+            pdu.sequence_number, pdu.service_request, pdu.more_follows
+        )
+
+        match action:
+            case SegmentAction.COMPLETE:
+                self._cancel_timeout(txn)
+                self._send_server_segment_ack(txn, ack_seq, negative=False)
+                txn.state = ServerTransactionState.AWAIT_RESPONSE
+                return (txn, receiver.reassemble())
+            case SegmentAction.SEND_ACK:
+                self._send_server_segment_ack(txn, ack_seq, negative=False)
+                self._restart_segment_timeout(txn)
+                return (txn, None)
+            case SegmentAction.RESEND_LAST_ACK:
+                self._send_server_segment_ack(txn, ack_seq, negative=False)
+                self._restart_segment_timeout(txn)
+                return (txn, None)
+            case SegmentAction.ABORT:
+                self._abort_server_transaction(txn, AbortReason.INVALID_APDU_IN_THIS_STATE)
+                return None
+
+        return None  # pragma: no cover
+
+    def start_segmented_response(
+        self,
+        txn: ServerTransaction,
+        service_choice: int,
+        response_data: bytes,
+    ) -> None:
+        """Begin sending a segmented ComplexACK response.
+
+        Args:
+            txn: The server transaction.
+            service_choice: Service choice for the response.
+            response_data: The complete service-ack data to segment.
+        """
+        if not txn.segmented_response_accepted:
+            self._abort_server_transaction(txn, AbortReason.SEGMENTATION_NOT_SUPPORTED)
+            return
+
+        try:
+            sender = SegmentSender.create(
+                payload=response_data,
+                invoke_id=txn.invoke_id,
+                service_choice=service_choice,
+                max_apdu_length=txn.client_max_apdu_length,
+                pdu_type="complex_ack",
+                proposed_window_size=self._proposed_window_size,
+                peer_max_segments=txn.client_max_segments,
+            )
+        except SegmentationError:
+            self._abort_server_transaction(txn, AbortReason.APDU_TOO_LONG)
+            return
+
+        txn.segment_sender = sender
+        txn.state = ServerTransactionState.SEGMENTED_RESPONSE
+        self._fill_and_send_response_window(txn)
+
+    def handle_segment_ack_for_response(
+        self,
+        source: BACnetAddress,
+        pdu: SegmentAckPDU,
+    ) -> None:
+        """Handle SegmentACK from client during segmented response sending."""
+        key = (source, pdu.invoke_id)
+        txn = self._transactions.get(key)
+        if txn is None or txn.state != ServerTransactionState.SEGMENTED_RESPONSE:
+            return
+
+        sender = txn.segment_sender
+        if sender is None:
+            return
+
+        if pdu.actual_window_size < 1 or pdu.actual_window_size > 127:
+            self._abort_server_transaction(txn, AbortReason.WINDOW_SIZE_OUT_OF_RANGE)
+            return
+
+        complete = sender.handle_segment_ack(
+            pdu.sequence_number, pdu.actual_window_size, pdu.negative_ack
+        )
+        txn.seg_retry_count = 0
+
+        if complete:
+            txn.state = ServerTransactionState.IDLE
+            txn.segment_sender = None
+            self._restart_timeout(txn)
+        else:
+            self._fill_and_send_response_window(txn)
 
     def complete_transaction(
         self,
@@ -335,6 +738,56 @@ class ServerTSM:
         txn.cached_response = response_apdu
         txn.state = ServerTransactionState.IDLE
         self._restart_timeout(txn)
+
+    def _fill_and_send_response_window(self, txn: ServerTransaction) -> None:
+        """Send the current window of response segments."""
+        sender = txn.segment_sender
+        if sender is None:
+            return
+        segments = sender.fill_window()
+        for seq_num, seg_data, more_follows in segments:
+            pdu = ComplexAckPDU(
+                segmented=True,
+                more_follows=more_follows,
+                invoke_id=txn.invoke_id,
+                sequence_number=seq_num,
+                proposed_window_size=sender.proposed_window_size,
+                service_choice=sender.service_choice,
+                service_ack=seg_data,
+            )
+            self._network.send(encode_apdu(pdu), txn.source, expecting_reply=True)
+        # Wait for SegmentACK: use T_wait_for_seg = 4 * T_seg
+        self._start_server_segment_timeout(txn)
+
+    def _send_server_segment_ack(
+        self,
+        txn: ServerTransaction,
+        seq: int,
+        negative: bool,
+    ) -> None:
+        """Send a SegmentACK PDU (as server)."""
+        receiver = txn.segment_receiver
+        actual_ws = receiver.actual_window_size if receiver else self._proposed_window_size
+        ack = SegmentAckPDU(
+            negative_ack=negative,
+            sent_by_server=True,
+            invoke_id=txn.invoke_id,
+            sequence_number=seq,
+            actual_window_size=actual_ws,
+        )
+        self._network.send(encode_apdu(ack), txn.source, expecting_reply=True)
+
+    def _abort_server_transaction(self, txn: ServerTransaction, reason: AbortReason) -> None:
+        """Abort a server transaction by sending Abort PDU."""
+        abort = AbortPDU(
+            sent_by_server=True,
+            invoke_id=txn.invoke_id,
+            abort_reason=reason,
+        )
+        self._network.send(encode_apdu(abort), txn.source, expecting_reply=False)
+        key = (txn.source, txn.invoke_id)
+        self._cancel_timeout(txn)
+        self._transactions.pop(key, None)
 
     def _start_timeout(self, txn: ServerTransaction) -> None:
         """Start the cleanup timer for a transaction."""
@@ -348,6 +801,65 @@ class ServerTSM:
             txn.timeout_handle.cancel()
         self._start_timeout(txn)
 
+    def _start_segment_timeout(self, txn: ServerTransaction) -> None:
+        """Start a segment receive timeout (T_seg)."""
+        if txn.timeout_handle:
+            txn.timeout_handle.cancel()
+        loop = asyncio.get_running_loop()
+        key = (txn.source, txn.invoke_id)
+        txn.timeout_handle = loop.call_later(
+            self._segment_timeout, self._on_server_segment_timeout, key
+        )
+
+    def _restart_segment_timeout(self, txn: ServerTransaction) -> None:
+        """Restart the segment receive timeout."""
+        if txn.timeout_handle:
+            txn.timeout_handle.cancel()
+        self._start_segment_timeout(txn)
+
+    def _start_server_segment_timeout(self, txn: ServerTransaction) -> None:
+        """Start T_wait_for_seg timeout (4 * T_seg) for response sending."""
+        if txn.timeout_handle:
+            txn.timeout_handle.cancel()
+        loop = asyncio.get_running_loop()
+        key = (txn.source, txn.invoke_id)
+        txn.timeout_handle = loop.call_later(
+            4 * self._segment_timeout,
+            self._on_server_segment_timeout,
+            key,
+        )
+
+    def _cancel_timeout(self, txn: ServerTransaction) -> None:
+        """Cancel the timeout timer for a transaction."""
+        if txn.timeout_handle:
+            txn.timeout_handle.cancel()
+            txn.timeout_handle = None
+
     def _on_timeout(self, key: tuple[BACnetAddress, int]) -> None:
         """Remove transaction on timeout."""
         self._transactions.pop(key, None)
+
+    def _on_server_segment_timeout(self, key: tuple[BACnetAddress, int]) -> None:
+        """Handle segment timeout during segmented server transactions."""
+        txn = self._transactions.get(key)
+        if txn is None:
+            return
+
+        if txn.state == ServerTransactionState.SEGMENTED_REQUEST:
+            # Waiting for more request segments from client
+            if txn.seg_retry_count < 3:
+                txn.seg_retry_count += 1
+                receiver = txn.segment_receiver
+                if receiver is not None:
+                    self._send_server_segment_ack(txn, seq=receiver._last_ack_seq, negative=True)
+                    self._start_segment_timeout(txn)
+            else:
+                self._abort_server_transaction(txn, AbortReason.TSM_TIMEOUT)
+
+        elif txn.state == ServerTransactionState.SEGMENTED_RESPONSE:
+            # Waiting for SegmentACK from client
+            if txn.seg_retry_count < 3:
+                txn.seg_retry_count += 1
+                self._fill_and_send_response_window(txn)
+            else:
+                self._abort_server_transaction(txn, AbortReason.TSM_TIMEOUT)
