@@ -33,6 +33,7 @@ dependencies = []
 
 [project.optional-dependencies]
 serialization = ["orjson>=3.10"]
+cli = ["click>=8.1"]
 
 [project.urls]
 Repository = "https://github.com/jscott3201/bac-py"
