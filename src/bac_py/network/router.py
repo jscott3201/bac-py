@@ -15,8 +15,28 @@ from functools import partial
 from typing import TYPE_CHECKING
 
 from bac_py.network.address import BACnetAddress
+from bac_py.network.messages import (
+    IAmRouterToNetwork,
+    InitializeRoutingTable,
+    InitializeRoutingTableAck,
+    NetworkMessage,
+    NetworkNumberIs,
+    RejectMessageToNetwork,
+    RouterAvailableToNetwork,
+    RouterBusyToNetwork,
+    RoutingTablePort,
+    WhatIsNetworkNumber,
+    WhoIsRouterToNetwork,
+    decode_network_message,
+    encode_network_message,
+)
 from bac_py.network.npdu import NPDU, decode_npdu, encode_npdu
-from bac_py.types.enums import NetworkPriority, NetworkReachability
+from bac_py.types.enums import (
+    NetworkMessageType,
+    NetworkPriority,
+    NetworkReachability,
+    RejectMessageReason,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -165,17 +185,28 @@ class RoutingTable:
             return None
         return self._ports.get(entry.port_id)
 
-    def get_reachable_networks(self, *, exclude_port: int | None = None) -> list[int]:
-        """Return network numbers of all REACHABLE entries.
+    def get_reachable_networks(
+        self,
+        *,
+        exclude_port: int | None = None,
+        include_busy: bool = False,
+    ) -> list[int]:
+        """Return network numbers of reachable entries.
 
         Args:
             exclude_port: If given, exclude networks reachable through
                 this port.  Used when responding to Who-Is-Router so we
                 don't advertise networks back to the port that asked.
+            include_busy: If ``True``, include networks marked BUSY
+                (temporarily unreachable due to congestion).  Per
+                Clause 6.6.3.2, Who-Is-Router responses must include
+                temporarily unreachable networks.
         """
         result: list[int] = []
         for entry in self._entries.values():
-            if entry.reachability != NetworkReachability.REACHABLE:
+            if entry.reachability == NetworkReachability.UNREACHABLE:
+                continue
+            if entry.reachability == NetworkReachability.BUSY and not include_busy:
                 continue
             if exclude_port is not None and entry.port_id == exclude_port:
                 continue
@@ -308,6 +339,31 @@ class RoutingTable:
 
 
 # ---------------------------------------------------------------------------
+# Message-type mapping helper
+# ---------------------------------------------------------------------------
+
+_MSG_TYPE_MAP: dict[type[NetworkMessage], int] = {
+    WhoIsRouterToNetwork: NetworkMessageType.WHO_IS_ROUTER_TO_NETWORK,
+    IAmRouterToNetwork: NetworkMessageType.I_AM_ROUTER_TO_NETWORK,
+    RejectMessageToNetwork: NetworkMessageType.REJECT_MESSAGE_TO_NETWORK,
+    RouterBusyToNetwork: NetworkMessageType.ROUTER_BUSY_TO_NETWORK,
+    RouterAvailableToNetwork: NetworkMessageType.ROUTER_AVAILABLE_TO_NETWORK,
+    InitializeRoutingTable: NetworkMessageType.INITIALIZE_ROUTING_TABLE,
+    InitializeRoutingTableAck: NetworkMessageType.INITIALIZE_ROUTING_TABLE_ACK,
+    WhatIsNetworkNumber: NetworkMessageType.WHAT_IS_NETWORK_NUMBER,
+    NetworkNumberIs: NetworkMessageType.NETWORK_NUMBER_IS,
+}
+
+
+def _message_type_for(msg: NetworkMessage) -> int:
+    """Return the ``NetworkMessageType`` value for a message dataclass."""
+    mt = _MSG_TYPE_MAP.get(type(msg))
+    if mt is None:
+        raise TypeError(f"No message type mapping for {type(msg).__name__}")
+    return mt
+
+
+# ---------------------------------------------------------------------------
 # NetworkRouter
 # ---------------------------------------------------------------------------
 
@@ -330,18 +386,17 @@ class NetworkRouter:
         application_port_id: int | None = None,
         application_callback: Callable[[bytes, BACnetAddress], None] | None = None,
     ) -> None:
-        """
-        Args:
-            ports: Router ports to manage.  Each port must have a
-                unique *port_id* and *network_number*.
-            application_port_id: If given, the port on which the
-                router's own application entity resides.  Local
-                traffic (and the local copy of global broadcasts)
-                will be delivered to *application_callback* via this
-                port.
-            application_callback: Called with ``(apdu_bytes,
-                source_address)`` when an APDU is delivered to the
-                local application entity.
+        """Args:
+        ports: Router ports to manage.  Each port must have a
+            unique *port_id* and *network_number*.
+        application_port_id: If given, the port on which the
+            router's own application entity resides.  Local
+            traffic (and the local copy of global broadcasts)
+            will be delivered to *application_callback* via this
+            port.
+        application_callback: Called with ``(apdu_bytes,
+            source_address)`` when an APDU is delivered to the
+            local application entity.
         """
         self._routing_table = RoutingTable()
         self._application_port_id = application_port_id
@@ -353,12 +408,33 @@ class NetworkRouter:
     # -- Lifecycle ----------------------------------------------------------
 
     async def start(self) -> None:
-        """Start all port transports and wire receive callbacks."""
+        """Start all port transports, wire callbacks, and perform startup broadcasts.
+
+        Per Clause 6.6.2, after starting transports, each port receives:
+        1. A ``Network-Number-Is`` broadcast (if the port's network
+           number is configured).
+        2. An ``I-Am-Router-To-Network`` broadcast listing all networks
+           reachable through *other* ports.
+        """
         for port in self._routing_table.get_all_ports():
-            port.transport.on_receive(
-                partial(self._on_port_receive, port.port_id)
-            )
+            port.transport.on_receive(partial(self._on_port_receive, port.port_id))
             await port.transport.start()
+
+        # Startup broadcasts per Clause 6.6.2.
+        for port in self._routing_table.get_all_ports():
+            if port.network_number_configured:
+                self._send_network_message_on_port(
+                    port.port_id,
+                    NetworkNumberIs(network=port.network_number, configured=True),
+                    broadcast=True,
+                )
+            networks = self._routing_table.get_reachable_networks(exclude_port=port.port_id)
+            if networks:
+                self._send_network_message_on_port(
+                    port.port_id,
+                    IAmRouterToNetwork(networks=networks),
+                    broadcast=True,
+                )
 
     async def stop(self) -> None:
         """Stop all port transports."""
@@ -374,9 +450,7 @@ class NetworkRouter:
 
     # -- Receive path -------------------------------------------------------
 
-    def _on_port_receive(
-        self, port_id: int, data: bytes, source_mac: bytes
-    ) -> None:
+    def _on_port_receive(self, port_id: int, data: bytes, source_mac: bytes) -> None:
         """Transport callback: raw NPDU received on a port."""
         try:
             npdu = decode_npdu(memoryview(data))
@@ -386,9 +460,7 @@ class NetworkRouter:
 
         self._process_npdu(port_id, npdu, source_mac)
 
-    def _process_npdu(
-        self, port_id: int, npdu: NPDU, source_mac: bytes
-    ) -> None:
+    def _process_npdu(self, port_id: int, npdu: NPDU, source_mac: bytes) -> None:
         """Implement the forwarding flowchart (Figure 6-12).
 
         Steps:
@@ -397,7 +469,7 @@ class NetworkRouter:
         3. DNET == 0xFFFF? -> local delivery + flood all other ports
         4. DNET directly connected? -> deliver on that port
         5. DNET in routing table? -> forward to next-hop router
-        6. Unknown DNET -> log (discovery deferred to Phase 5)
+        6. Unknown DNET -> discard with warning
         """
         if npdu.is_network_message:
             self._handle_network_message(port_id, npdu, source_mac)
@@ -423,9 +495,7 @@ class NetworkRouter:
 
     # -- Local application delivery -----------------------------------------
 
-    def _deliver_to_application(
-        self, port_id: int, npdu: NPDU, source_mac: bytes
-    ) -> None:
+    def _deliver_to_application(self, port_id: int, npdu: NPDU, source_mac: bytes) -> None:
         """Deliver an APDU to the local application entity (if present)."""
         if self._application_callback is None:
             return
@@ -446,9 +516,7 @@ class NetworkRouter:
         self, arrival_port_id: int, npdu: NPDU, source_mac: bytes
     ) -> None:
         """Forward a global broadcast to all ports except the arrival port."""
-        forwarded_npdu = self._prepare_forwarded_npdu(
-            arrival_port_id, npdu, source_mac
-        )
+        forwarded_npdu = self._prepare_forwarded_npdu(arrival_port_id, npdu, source_mac)
         if forwarded_npdu is None:
             return
         encoded = encode_npdu(forwarded_npdu)
@@ -467,22 +535,16 @@ class NetworkRouter:
         """Forward an NPDU toward *dnet*."""
         result = self._routing_table.get_port_for_network(dnet)
         if result is None:
-            logger.debug(
-                "No route to network %d, discarding", dnet
-            )
+            logger.debug("No route to network %d, discarding", dnet)
             return
 
         dest_port, entry = result
 
         # Check if DNET is directly connected
         if entry.next_router_mac is None:
-            self._deliver_to_directly_connected(
-                arrival_port_id, npdu, source_mac, dest_port
-            )
+            self._deliver_to_directly_connected(arrival_port_id, npdu, source_mac, dest_port)
         else:
-            self._forward_via_next_hop(
-                arrival_port_id, npdu, source_mac, dest_port, entry
-            )
+            self._forward_via_next_hop(arrival_port_id, npdu, source_mac, dest_port, entry)
 
     def _deliver_to_directly_connected(
         self,
@@ -542,15 +604,11 @@ class NetworkRouter:
         entry: RoutingTableEntry,
     ) -> None:
         """Forward to a remote network via a next-hop router."""
-        forwarded = self._prepare_forwarded_npdu(
-            arrival_port_id, npdu, source_mac
-        )
+        forwarded = self._prepare_forwarded_npdu(arrival_port_id, npdu, source_mac)
         if forwarded is None:
             return
         assert entry.next_router_mac is not None
-        dest_port.transport.send_unicast(
-            encode_npdu(forwarded), entry.next_router_mac
-        )
+        dest_port.transport.send_unicast(encode_npdu(forwarded), entry.next_router_mac)
 
     # -- NPDU manipulation helpers ------------------------------------------
 
@@ -607,19 +665,344 @@ class NetworkRouter:
             mac_address=source_mac,
         )
 
-    # -- Network message handling (stub for Phase 5) ------------------------
+    # -- Network message send helpers ---------------------------------------
 
-    def _handle_network_message(
-        self, port_id: int, npdu: NPDU, source_mac: bytes
+    def _send_network_message_on_port(
+        self,
+        port_id: int,
+        msg: NetworkMessage,
+        *,
+        broadcast: bool = True,
+        dest_mac: bytes | None = None,
     ) -> None:
-        """Process a network layer message.
+        """Build and send a network-layer message on a specific port.
 
-        Full handler implementations are added in Phase 5.
+        Args:
+            port_id: The port to send on.
+            msg: The network message dataclass to encode.
+            broadcast: If ``True``, send as local broadcast.
+            dest_mac: If *broadcast* is ``False``, the destination
+                MAC address for unicast delivery.
         """
+        port = self._routing_table.get_port(port_id)
+        if port is None:
+            return
+        msg_type = _message_type_for(msg)
+        data = encode_network_message(msg)
+        npdu = NPDU(
+            is_network_message=True,
+            message_type=msg_type,
+            network_message_data=data,
+        )
+        encoded = encode_npdu(npdu)
+        if broadcast:
+            port.transport.send_broadcast(encoded)
+        elif dest_mac is not None:
+            port.transport.send_unicast(encoded, dest_mac)
+
+    def _broadcast_network_message_all_except(
+        self,
+        exclude_port_id: int,
+        msg: NetworkMessage,
+    ) -> None:
+        """Broadcast a network-layer message on all ports except one."""
+        for port in self._routing_table.get_all_ports():
+            if port.port_id == exclude_port_id:
+                continue
+            self._send_network_message_on_port(port.port_id, msg, broadcast=True)
+
+    # -- Network message handling -------------------------------------------
+
+    def _handle_network_message(self, port_id: int, npdu: NPDU, source_mac: bytes) -> None:
+        """Process a network layer message per Clauses 6.6.3.1-6.6.3.9.
+
+        Decodes the message data and dispatches to the appropriate
+        handler.  Unknown standard message types generate a
+        Reject-Message-To-Network with reason UNKNOWN_MESSAGE_TYPE.
+        """
+        msg_type = npdu.message_type
+        if msg_type is None:
+            return
+
+        try:
+            msg = decode_network_message(msg_type, npdu.network_message_data)
+        except ValueError:
+            logger.warning(
+                "Malformed network message type 0x%02X on port %d",
+                msg_type,
+                port_id,
+            )
+            return
+
+        if isinstance(msg, WhoIsRouterToNetwork):
+            self._handle_who_is_router(port_id, msg, npdu, source_mac)
+        elif isinstance(msg, IAmRouterToNetwork):
+            self._handle_i_am_router(port_id, msg, source_mac)
+        elif isinstance(msg, RejectMessageToNetwork):
+            self._handle_reject_message(port_id, msg, npdu, source_mac)
+        elif isinstance(msg, RouterBusyToNetwork):
+            self._handle_router_busy(port_id, msg, source_mac)
+        elif isinstance(msg, RouterAvailableToNetwork):
+            self._handle_router_available(port_id, msg, source_mac)
+        elif isinstance(msg, InitializeRoutingTable):
+            self._handle_init_routing_table(port_id, msg, source_mac)
+        elif isinstance(msg, InitializeRoutingTableAck):
+            self._handle_init_routing_table_ack(msg)
+        elif isinstance(msg, WhatIsNetworkNumber):
+            self._handle_what_is_network_number(port_id, npdu)
+        elif isinstance(msg, NetworkNumberIs):
+            self._handle_network_number_is(port_id, msg, npdu)
+        else:
+            # Unknown or unsupported standard message type (Clause 6.4.4, reason 3).
+            self._send_reject(port_id, source_mac, RejectMessageReason.UNKNOWN_MESSAGE_TYPE, 0)
+
+    # -- Who-Is-Router-To-Network (Clause 6.6.3.2) -------------------------
+
+    def _handle_who_is_router(
+        self,
+        port_id: int,
+        msg: WhoIsRouterToNetwork,
+        npdu: NPDU,
+        source_mac: bytes,
+    ) -> None:
+        if msg.network is not None:
+            # Specific DNET requested.
+            result = self._routing_table.get_port_for_network(msg.network)
+            if result is not None:
+                _, entry = result
+                if entry.port_id != port_id:
+                    # Reachable via a different port -- respond.
+                    self._send_network_message_on_port(
+                        port_id,
+                        IAmRouterToNetwork(networks=[msg.network]),
+                        broadcast=True,
+                    )
+                # If reachable through the same port, don't reply.
+            else:
+                # Not found -- forward Who-Is out all other ports.
+                # Inject SNET/SADR if the message came from a directly
+                # connected device (no source in NPCI).
+                forwarded = self._prepare_forwarded_npdu(port_id, npdu, source_mac)
+                if forwarded is not None:
+                    encoded = encode_npdu(forwarded)
+                    for port in self._routing_table.get_all_ports():
+                        if port.port_id == port_id:
+                            continue
+                        port.transport.send_broadcast(encoded)
+        else:
+            # Query all reachable networks.  Per Clause 6.6.3.2,
+            # include temporarily unreachable (BUSY) networks.
+            networks = self._routing_table.get_reachable_networks(
+                exclude_port=port_id, include_busy=True
+            )
+            if networks:
+                self._send_network_message_on_port(
+                    port_id,
+                    IAmRouterToNetwork(networks=networks),
+                    broadcast=True,
+                )
+
+    # -- I-Am-Router-To-Network (Clause 6.6.3.3) ---------------------------
+
+    def _handle_i_am_router(
+        self,
+        port_id: int,
+        msg: IAmRouterToNetwork,
+        source_mac: bytes,
+    ) -> None:
+        for dnet in msg.networks:
+            self._routing_table.update_route(dnet, port_id=port_id, next_router_mac=source_mac)
+        # Re-broadcast on all other ports per Clause 6.6.3.3.
+        self._broadcast_network_message_all_except(
+            port_id, IAmRouterToNetwork(networks=msg.networks)
+        )
+
+    # -- Reject-Message-To-Network (Clause 6.6.3.5) ------------------------
+
+    def _handle_reject_message(
+        self,
+        port_id: int,
+        msg: RejectMessageToNetwork,
+        npdu: NPDU,
+        source_mac: bytes,
+    ) -> None:
+        # Update routing table based on reason.
+        if msg.reason == RejectMessageReason.NOT_DIRECTLY_CONNECTED:
+            self._routing_table.mark_unreachable(msg.network)
+        elif msg.reason == RejectMessageReason.ROUTER_BUSY:
+            self._routing_table.mark_busy(
+                msg.network,
+                partial(self._routing_table.mark_available, msg.network),
+            )
+
+        # Relay toward the originator using normal routing (Clause 6.5).
+        # The NPDU carries DNET/DADR addressing the original sender.
+        if npdu.destination is not None:
+            dest = npdu.destination
+            dnet = dest.network if dest.network is not None else 0xFFFF
+            if dnet == 0xFFFF:
+                self._forward_global_broadcast(port_id, npdu, source_mac)
+            else:
+                self._forward_to_network(port_id, npdu, source_mac, dnet)
+
+    # -- Router-Busy-To-Network (Clause 6.6.3.6) --------------------------
+
+    def _handle_router_busy(
+        self,
+        port_id: int,
+        msg: RouterBusyToNetwork,
+        source_mac: bytes,
+    ) -> None:
+        dnets = msg.networks
+        if not dnets:
+            # Empty list means all networks served by the sending router.
+            dnets = [
+                e.network_number
+                for e in self._routing_table.get_all_entries()
+                if e.port_id == port_id and e.next_router_mac == source_mac
+            ]
+        for dnet in dnets:
+            self._routing_table.mark_busy(
+                dnet,
+                partial(self._routing_table.mark_available, dnet),
+            )
+        # Re-broadcast on all other ports (Clause 6.6.3.6).
+        self._broadcast_network_message_all_except(
+            port_id, RouterBusyToNetwork(networks=msg.networks)
+        )
+
+    # -- Router-Available-To-Network (Clause 6.6.3.7) ---------------------
+
+    def _handle_router_available(
+        self,
+        port_id: int,
+        msg: RouterAvailableToNetwork,
+        source_mac: bytes,
+    ) -> None:
+        dnets = msg.networks
+        if not dnets:
+            # Empty list means all previously busy networks.
+            dnets = [
+                e.network_number
+                for e in self._routing_table.get_all_entries()
+                if e.reachability == NetworkReachability.BUSY
+            ]
+        for dnet in dnets:
+            self._routing_table.mark_available(dnet)
+        # Re-broadcast on all other ports (Clause 6.6.3.7).
+        self._broadcast_network_message_all_except(
+            port_id, RouterAvailableToNetwork(networks=msg.networks)
+        )
+
+    # -- Initialize-Routing-Table (Clause 6.6.3.8) ------------------------
+
+    def _handle_init_routing_table(
+        self,
+        port_id: int,
+        msg: InitializeRoutingTable,
+        source_mac: bytes,
+    ) -> None:
+        if len(msg.ports) == 0:
+            # Query: return full routing table.
+            reply_ports: list[RoutingTablePort] = []
+            for entry in self._routing_table.get_all_entries():
+                reply_ports.append(
+                    RoutingTablePort(
+                        network=entry.network_number,
+                        port_id=entry.port_id,
+                        port_info=b"",
+                    )
+                )
+            self._send_network_message_on_port(
+                port_id,
+                InitializeRoutingTableAck(ports=reply_ports),
+                broadcast=False,
+                dest_mac=source_mac,
+            )
+        else:
+            # Update: modify routing table per provided entries.
+            for port_entry in msg.ports:
+                if port_entry.port_id == 0:
+                    self._routing_table.remove_entry(port_entry.network)
+                else:
+                    # Only update if the port_id is valid; silently
+                    # skip unknown port IDs to avoid ValueError.
+                    if self._routing_table.get_port(port_entry.port_id) is not None:
+                        self._routing_table.update_route(
+                            port_entry.network,
+                            port_entry.port_id,
+                            None,
+                        )
+            # Acknowledge without routing table data.
+            self._send_network_message_on_port(
+                port_id,
+                InitializeRoutingTableAck(ports=[]),
+                broadcast=False,
+                dest_mac=source_mac,
+            )
+
+    # -- Initialize-Routing-Table-Ack (Clause 6.6.3.9) --------------------
+
+    def _handle_init_routing_table_ack(
+        self,
+        msg: InitializeRoutingTableAck,
+    ) -> None:
+        # Response to a prior query.  Log for diagnostics.
         logger.debug(
-            "Network message type 0x%02X on port %d (handlers pending)",
-            npdu.message_type or 0,
+            "Received Initialize-Routing-Table-Ack with %d port(s)",
+            len(msg.ports),
+        )
+
+    # -- What-Is-Network-Number (Clause 6.4.19) ----------------------------
+
+    def _handle_what_is_network_number(
+        self,
+        port_id: int,
+        npdu: NPDU,
+    ) -> None:
+        # Never routed -- ignore if SNET/SADR or DNET/DADR present.
+        if npdu.source is not None or npdu.destination is not None:
+            return
+        port = self._routing_table.get_port(port_id)
+        if port is not None and port.network_number_configured:
+            self._send_network_message_on_port(
+                port_id,
+                NetworkNumberIs(network=port.network_number, configured=True),
+                broadcast=True,
+            )
+
+    # -- Network-Number-Is (Clause 6.4.20) ---------------------------------
+
+    def _handle_network_number_is(
+        self,
+        port_id: int,
+        msg: NetworkNumberIs,
+        npdu: NPDU,
+    ) -> None:
+        # Never routed -- ignore if SNET/SADR or DNET/DADR present.
+        if npdu.source is not None or npdu.destination is not None:
+            return
+        port = self._routing_table.get_port(port_id)
+        if port is not None and not port.network_number_configured:
+            # Learn the network number from a configured source.
+            if msg.configured:
+                port.network_number = msg.network
+
+    # -- Reject helper ------------------------------------------------------
+
+    def _send_reject(
+        self,
+        port_id: int,
+        dest_mac: bytes,
+        reason: RejectMessageReason,
+        dnet: int,
+    ) -> None:
+        """Send a Reject-Message-To-Network to a specific station."""
+        self._send_network_message_on_port(
             port_id,
+            RejectMessageToNetwork(reason=reason, network=dnet),
+            broadcast=False,
+            dest_mac=dest_mac,
         )
 
     # -- Application-layer send ---------------------------------------------
@@ -686,9 +1069,7 @@ class NetworkRouter:
                 priority=priority,
                 apdu=apdu,
             )
-            app_port.transport.send_unicast(
-                encode_npdu(npdu), destination.mac_address
-            )
+            app_port.transport.send_unicast(encode_npdu(npdu), destination.mac_address)
             return
 
         # Remote destination (has network number)
@@ -720,14 +1101,10 @@ class NetworkRouter:
                 if len(destination.mac_address) == 0:
                     dest_port.transport.send_broadcast(encoded)
                 else:
-                    dest_port.transport.send_unicast(
-                        encoded, destination.mac_address
-                    )
+                    dest_port.transport.send_unicast(encoded, destination.mac_address)
             else:
                 # Via next-hop router
-                dest_port.transport.send_unicast(
-                    encoded, entry.next_router_mac
-                )
+                dest_port.transport.send_unicast(encoded, entry.next_router_mac)
         else:
             # Different port from application: send toward destination
             if entry.next_router_mac is None:
@@ -735,10 +1112,6 @@ class NetworkRouter:
                 if len(destination.mac_address) == 0:
                     dest_port.transport.send_broadcast(encoded)
                 else:
-                    dest_port.transport.send_unicast(
-                        encoded, destination.mac_address
-                    )
+                    dest_port.transport.send_unicast(encoded, destination.mac_address)
             else:
-                dest_port.transport.send_unicast(
-                    encoded, entry.next_router_mac
-                )
+                dest_port.transport.send_unicast(encoded, entry.next_router_mac)

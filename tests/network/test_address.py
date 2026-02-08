@@ -165,3 +165,25 @@ class TestHelpers:
         assert addr.mac_address == mac
         assert addr.is_broadcast is False
         assert addr.is_local is False
+
+
+class TestIsRemoteBroadcast:
+    def test_remote_broadcast_true(self):
+        addr = BACnetAddress(network=20, mac_address=b"")
+        assert addr.is_remote_broadcast is True
+
+    def test_local_broadcast_false(self):
+        addr = BACnetAddress()
+        assert addr.is_remote_broadcast is False
+
+    def test_global_broadcast_false(self):
+        addr = BACnetAddress(network=0xFFFF)
+        assert addr.is_remote_broadcast is False
+
+    def test_remote_unicast_false(self):
+        addr = BACnetAddress(network=20, mac_address=b"\x01")
+        assert addr.is_remote_broadcast is False
+
+    def test_local_unicast_false(self):
+        addr = BACnetAddress(mac_address=b"\x01\x02\x03\x04\x05\x06")
+        assert addr.is_remote_broadcast is False

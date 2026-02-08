@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from bac_py.app.cov import COVManager
@@ -22,6 +22,7 @@ from bac_py.encoding.apdu import (
     encode_apdu,
 )
 from bac_py.network.layer import NetworkLayer
+from bac_py.network.router import NetworkRouter, RouterPort
 from bac_py.objects.base import ObjectDatabase
 from bac_py.segmentation.manager import compute_max_segment_payload
 from bac_py.services.base import ServiceRegistry
@@ -45,6 +46,24 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class RouterPortConfig:
+    """Configuration for a single router port."""
+
+    port_id: int
+    network_number: int
+    interface: str = "0.0.0.0"
+    port: int = 0xBAC0
+
+
+@dataclass
+class RouterConfig:
+    """Configuration for a router device."""
+
+    ports: list[RouterPortConfig] = field(default_factory=list)
+    application_port_id: int = 1
+
+
+@dataclass
 class DeviceConfig:
     """Configuration for a BACnet device."""
 
@@ -62,6 +81,7 @@ class DeviceConfig:
     apdu_retries: int = 3
     max_apdu_length: int = 1476
     max_segments: int | None = None
+    router_config: RouterConfig | None = None
 
 
 class BACnetApplication:
@@ -74,6 +94,8 @@ class BACnetApplication:
         self._config = config
         self._transport: BIPTransport | None = None
         self._network: NetworkLayer | None = None
+        self._router: NetworkRouter | None = None
+        self._transports: list[BIPTransport] = []
         self._client_tsm: ClientTSM | None = None
         self._server_tsm: ServerTSM | None = None
         self._service_registry = ServiceRegistry()
@@ -122,14 +144,17 @@ class BACnetApplication:
 
     async def start(self) -> None:
         """Start the transport and initialize all layers."""
-        self._transport = BIPTransport(
-            interface=self._config.interface,
-            port=self._config.port,
-        )
-        self._network = NetworkLayer(self._transport)
+        if self._config.router_config:
+            await self._start_router_mode()
+        else:
+            await self._start_non_router_mode()
+
+        # Common: create TSMs with whichever network sender is active
+        network = self._router or self._network
+        assert network is not None
         segment_timeout = self._config.apdu_segment_timeout / 1000
         self._client_tsm = ClientTSM(
-            self._network,
+            network,
             apdu_timeout=self._config.apdu_timeout / 1000,
             apdu_retries=self._config.apdu_retries,
             max_apdu_length=self._config.max_apdu_length,
@@ -137,13 +162,11 @@ class BACnetApplication:
             segment_timeout=segment_timeout,
         )
         self._server_tsm = ServerTSM(
-            self._network,
+            network,
             segment_timeout=segment_timeout,
             max_apdu_length=self._config.max_apdu_length,
             max_segments=self._config.max_segments,
         )
-        self._network.on_receive(self._on_apdu_received)
-        await self._transport.start()
         self._running = True
 
         # Initialize COV manager and register notification handlers
@@ -156,6 +179,39 @@ class BACnetApplication:
             UnconfirmedServiceChoice.UNCONFIRMED_COV_NOTIFICATION,
             self._handle_unconfirmed_cov_notification,
         )
+
+    async def _start_non_router_mode(self) -> None:
+        """Start in non-router (simple device) mode."""
+        self._transport = BIPTransport(
+            interface=self._config.interface,
+            port=self._config.port,
+        )
+        self._network = NetworkLayer(self._transport)
+        self._network.on_receive(self._on_apdu_received)
+        await self._transport.start()
+
+    async def _start_router_mode(self) -> None:
+        """Start in router mode with multiple ports."""
+        assert self._config.router_config is not None
+        ports: list[RouterPort] = []
+        for pc in self._config.router_config.ports:
+            transport = BIPTransport(interface=pc.interface, port=pc.port)
+            await transport.start()
+            self._transports.append(transport)
+            port = RouterPort(
+                port_id=pc.port_id,
+                network_number=pc.network_number,
+                transport=transport,  # type: ignore[arg-type]  # BIPTransport on_receive callback uses BIPAddress, not bytes
+                mac_address=transport.local_mac,
+                max_npdu_length=transport.max_npdu_length,
+            )
+            ports.append(port)
+        self._router = NetworkRouter(
+            ports,
+            application_port_id=self._config.router_config.application_port_id,
+            application_callback=self._on_apdu_received,
+        )
+        await self._router.start()
 
     async def stop(self) -> None:
         """Stop the application and clean up resources."""
@@ -173,7 +229,9 @@ class BACnetApplication:
         if self._stop_event:
             self._stop_event.set()
 
-        if self._transport:
+        if self._router:
+            await self._router.stop()
+        elif self._transport:
             await self._transport.stop()
 
         self._running = False
@@ -220,7 +278,8 @@ class BACnetApplication:
         service_data: bytes,
     ) -> None:
         """Send an unconfirmed request."""
-        if self._network is None:
+        network = self._router or self._network
+        if network is None:
             msg = "Application not started"
             raise RuntimeError(msg)
         pdu = UnconfirmedRequestPDU(
@@ -228,7 +287,7 @@ class BACnetApplication:
             service_request=service_data,
         )
         apdu_bytes = encode_apdu(pdu)
-        self._network.send(apdu_bytes, destination, expecting_reply=False)
+        network.send(apdu_bytes, destination, expecting_reply=False)
 
     def send_confirmed_cov_notification(
         self,
@@ -374,7 +433,7 @@ class BACnetApplication:
         source: BACnetAddress,
     ) -> None:
         """Handle a segmented confirmed request (first or subsequent segment)."""
-        if self._server_tsm is None or self._network is None:
+        if self._server_tsm is None:
             return
 
         result = self._server_tsm.receive_confirmed_request(pdu, source)
@@ -392,7 +451,7 @@ class BACnetApplication:
         source: BACnetAddress,
     ) -> None:
         """Process incoming non-segmented confirmed request through server TSM."""
-        if self._server_tsm is None or self._network is None:
+        if self._server_tsm is None:
             return
 
         result = self._server_tsm.receive_confirmed_request(pdu, source)
@@ -413,7 +472,11 @@ class BACnetApplication:
         source: BACnetAddress,
     ) -> None:
         """Dispatch a confirmed request to the service handler and send the response."""
-        if self._server_tsm is None or self._network is None:
+        if self._server_tsm is None:
+            return
+
+        network = self._router or self._network
+        if network is None:
             return
 
         response_pdu: SimpleAckPDU | ComplexAckPDU | ErrorPDU | RejectPDU | AbortPDU
@@ -472,7 +535,7 @@ class BACnetApplication:
             )
 
         response_bytes = encode_apdu(response_pdu)
-        self._network.send(response_bytes, source, expecting_reply=False)
+        network.send(response_bytes, source, expecting_reply=False)
         self._server_tsm.complete_transaction(txn, response_bytes)
 
     async def _handle_unconfirmed_request(

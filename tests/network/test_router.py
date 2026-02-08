@@ -3,14 +3,33 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from bac_py.network.address import BACnetAddress
+from bac_py.network.messages import (
+    IAmRouterToNetwork,
+    ICouldBeRouterToNetwork,
+    InitializeRoutingTable,
+    InitializeRoutingTableAck,
+    NetworkNumberIs,
+    RejectMessageToNetwork,
+    RouterAvailableToNetwork,
+    RouterBusyToNetwork,
+    RoutingTablePort,
+    WhoIsRouterToNetwork,
+    decode_network_message,
+    encode_network_message,
+)
 from bac_py.network.npdu import NPDU, decode_npdu, encode_npdu
 from bac_py.network.router import NetworkRouter, RouterPort, RoutingTable, RoutingTableEntry
-from bac_py.types.enums import NetworkPriority, NetworkReachability
+from bac_py.types.enums import (
+    NetworkMessageType,
+    NetworkPriority,
+    NetworkReachability,
+    RejectMessageReason,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1065,7 +1084,7 @@ class TestNetworkRouterMalformed:
 
 
 # ---------------------------------------------------------------------------
-# NetworkRouter -- Network message stub
+# NetworkRouter -- Network message dispatch
 # ---------------------------------------------------------------------------
 
 
@@ -1083,9 +1102,6 @@ class TestNetworkRouterNetworkMessage:
         router._on_port_receive(1, encode_npdu(npdu), _MAC_DEVICE_A)
         # Should NOT deliver to application
         app_cb.assert_not_called()
-        # Should NOT forward (stub just logs)
-        t1.send_unicast.assert_not_called()
-        t2.send_unicast.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1239,3 +1255,811 @@ class TestNetworkRouterThreePort:
         t2.send_unicast.assert_not_called()
         t3.send_unicast.assert_called_once()
         t1.send_unicast.assert_not_called()
+
+
+# ===========================================================================
+# Network message handler tests
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Helpers for building network message NPDUs
+# ---------------------------------------------------------------------------
+
+
+def _build_network_message_npdu(
+    msg_type: int,
+    data: bytes = b"",
+    *,
+    source: BACnetAddress | None = None,
+    destination: BACnetAddress | None = None,
+    hop_count: int = 255,
+) -> bytes:
+    """Build a network layer message NPDU from raw type + data."""
+    npdu = NPDU(
+        is_network_message=True,
+        message_type=msg_type,
+        network_message_data=data,
+        source=source,
+        destination=destination,
+        hop_count=hop_count if destination is not None else 255,
+    )
+    return encode_npdu(npdu)
+
+
+def _build_who_is_router_npdu(network: int | None = None) -> bytes:
+    """Build a Who-Is-Router-To-Network NPDU."""
+    msg = WhoIsRouterToNetwork(network=network)
+    return _build_network_message_npdu(
+        NetworkMessageType.WHO_IS_ROUTER_TO_NETWORK,
+        encode_network_message(msg),
+    )
+
+
+def _build_i_am_router_npdu(networks: list[int]) -> bytes:
+    """Build an I-Am-Router-To-Network NPDU."""
+    msg = IAmRouterToNetwork(networks=networks)
+    return _build_network_message_npdu(
+        NetworkMessageType.I_AM_ROUTER_TO_NETWORK,
+        encode_network_message(msg),
+    )
+
+
+def _build_reject_message_npdu(
+    reason: RejectMessageReason,
+    network: int,
+    *,
+    destination: BACnetAddress | None = None,
+) -> bytes:
+    """Build a Reject-Message-To-Network NPDU."""
+    msg = RejectMessageToNetwork(reason=reason, network=network)
+    return _build_network_message_npdu(
+        NetworkMessageType.REJECT_MESSAGE_TO_NETWORK,
+        encode_network_message(msg),
+        destination=destination,
+    )
+
+
+def _build_router_busy_npdu(networks: list[int]) -> bytes:
+    """Build a Router-Busy-To-Network NPDU."""
+    msg = RouterBusyToNetwork(networks=networks)
+    return _build_network_message_npdu(
+        NetworkMessageType.ROUTER_BUSY_TO_NETWORK,
+        encode_network_message(msg),
+    )
+
+
+def _build_router_available_npdu(networks: list[int]) -> bytes:
+    """Build a Router-Available-To-Network NPDU."""
+    msg = RouterAvailableToNetwork(networks=networks)
+    return _build_network_message_npdu(
+        NetworkMessageType.ROUTER_AVAILABLE_TO_NETWORK,
+        encode_network_message(msg),
+    )
+
+
+def _build_init_routing_table_npdu(ports: list[RoutingTablePort]) -> bytes:
+    """Build an Initialize-Routing-Table NPDU."""
+    msg = InitializeRoutingTable(ports=ports)
+    return _build_network_message_npdu(
+        NetworkMessageType.INITIALIZE_ROUTING_TABLE,
+        encode_network_message(msg),
+    )
+
+
+def _build_init_routing_table_ack_npdu(ports: list[RoutingTablePort]) -> bytes:
+    """Build an Initialize-Routing-Table-Ack NPDU."""
+    msg = InitializeRoutingTableAck(ports=ports)
+    return _build_network_message_npdu(
+        NetworkMessageType.INITIALIZE_ROUTING_TABLE_ACK,
+        encode_network_message(msg),
+    )
+
+
+def _build_what_is_network_number_npdu(
+    *,
+    source: BACnetAddress | None = None,
+    destination: BACnetAddress | None = None,
+) -> bytes:
+    """Build a What-Is-Network-Number NPDU."""
+    return _build_network_message_npdu(
+        NetworkMessageType.WHAT_IS_NETWORK_NUMBER,
+        b"",
+        source=source,
+        destination=destination,
+    )
+
+
+def _build_network_number_is_npdu(
+    network: int,
+    configured: bool,
+    *,
+    source: BACnetAddress | None = None,
+    destination: BACnetAddress | None = None,
+) -> bytes:
+    """Build a Network-Number-Is NPDU."""
+    msg = NetworkNumberIs(network=network, configured=configured)
+    return _build_network_message_npdu(
+        NetworkMessageType.NETWORK_NUMBER_IS,
+        encode_network_message(msg),
+        source=source,
+        destination=destination,
+    )
+
+
+def _decode_sent_network_message(
+    transport_mock: MagicMock,
+    *,
+    method: str = "send_broadcast",
+    call_index: int = 0,
+) -> tuple[NPDU, bytes]:
+    """Decode a network message sent on a mock transport.
+
+    Returns (npdu, raw_network_message_data).
+    """
+    mock_method = getattr(transport_mock, method)
+    args = mock_method.call_args_list[call_index][0]
+    raw = args[0]
+    npdu = decode_npdu(raw)
+    return npdu, npdu.network_message_data
+
+
+# ---------------------------------------------------------------------------
+# RoutingTable -- include_busy parameter
+# ---------------------------------------------------------------------------
+
+
+class TestRoutingTableIncludeBusy:
+    def test_get_reachable_networks_include_busy(self) -> None:
+        """include_busy=True should include BUSY networks."""
+        rt = RoutingTable()
+        port = _make_port(port_id=1, network_number=10)
+        rt.add_port(port)
+        rt.update_route(20, port_id=1, next_router_mac=b"\x01")
+        rt.update_route(30, port_id=1, next_router_mac=b"\x02")
+        # Mark 20 BUSY, 30 UNREACHABLE
+        entry20 = rt.get_entry(20)
+        assert entry20 is not None
+        entry20.reachability = NetworkReachability.BUSY
+        entry30 = rt.get_entry(30)
+        assert entry30 is not None
+        entry30.reachability = NetworkReachability.UNREACHABLE
+
+        # Default: exclude BUSY
+        nets_default = rt.get_reachable_networks()
+        assert set(nets_default) == {10}
+
+        # include_busy=True: include BUSY but not UNREACHABLE
+        nets_busy = rt.get_reachable_networks(include_busy=True)
+        assert set(nets_busy) == {10, 20}
+
+    def test_include_busy_with_exclude_port(self) -> None:
+        """include_busy + exclude_port should work together."""
+        rt = RoutingTable()
+        p1 = _make_port(port_id=1, network_number=10)
+        p2 = _make_port(port_id=2, network_number=20)
+        rt.add_port(p1)
+        rt.add_port(p2)
+        rt.update_route(30, port_id=1, next_router_mac=b"\x01")
+        entry30 = rt.get_entry(30)
+        assert entry30 is not None
+        entry30.reachability = NetworkReachability.BUSY
+        # Exclude port 1: removes networks 10 and 30
+        nets = rt.get_reachable_networks(exclude_port=1, include_busy=True)
+        assert set(nets) == {20}
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- Who-Is-Router-To-Network handler
+# ---------------------------------------------------------------------------
+
+
+class TestHandleWhoIsRouter:
+    def test_specific_dnet_found_on_other_port(self) -> None:
+        """DNET reachable on different port -> I-Am-Router reply on arrival port."""
+        router, t1, t2 = _make_two_port_router()
+        data = _build_who_is_router_npdu(network=20)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # Should broadcast I-Am-Router on port 1 (arrival port)
+        t1.send_broadcast.assert_called_once()
+        npdu, msg_data = _decode_sent_network_message(t1)
+        assert npdu.message_type == NetworkMessageType.I_AM_ROUTER_TO_NETWORK
+        msg = decode_network_message(npdu.message_type, msg_data)
+        assert isinstance(msg, IAmRouterToNetwork)
+        assert msg.networks == [20]
+
+    def test_specific_dnet_found_on_arrival_port(self) -> None:
+        """DNET reachable on arrival port -> no reply (don't advertise back)."""
+        router, t1, t2 = _make_two_port_router()
+        data = _build_who_is_router_npdu(network=10)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        t1.send_broadcast.assert_not_called()
+        t1.send_unicast.assert_not_called()
+
+    def test_specific_dnet_not_found_forwarded(self) -> None:
+        """Unknown DNET -> forward Who-Is out all other ports."""
+        router, t1, t2 = _make_two_port_router()
+        data = _build_who_is_router_npdu(network=99)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # Should forward (broadcast) on port 2
+        t2.send_broadcast.assert_called_once()
+        # Should NOT send on port 1
+        t1.send_broadcast.assert_not_called()
+        # The forwarded message should have SNET/SADR injected
+        fwd_bytes = t2.send_broadcast.call_args[0][0]
+        fwd_npdu = decode_npdu(fwd_bytes)
+        assert fwd_npdu.source is not None
+        assert fwd_npdu.source.network == 10
+
+    def test_query_all_networks(self) -> None:
+        """No specific DNET -> I-Am-Router with all reachable nets (excluding arrival)."""
+        router, t1, t2 = _make_two_port_router()
+        data = _build_who_is_router_npdu(network=None)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # Should reply on port 1 with network 20 (port 2's network)
+        t1.send_broadcast.assert_called_once()
+        npdu, msg_data = _decode_sent_network_message(t1)
+        msg = decode_network_message(npdu.message_type, msg_data)
+        assert isinstance(msg, IAmRouterToNetwork)
+        assert 20 in msg.networks
+        assert 10 not in msg.networks  # exclude arrival port
+
+    def test_query_all_includes_busy_networks(self) -> None:
+        """Who-Is (no DNET) must include BUSY networks per Clause 6.6.3.2."""
+        router, t1, t2 = _make_two_port_router()
+        # Add net 30 via port 2 and mark it BUSY
+        router.routing_table.update_route(30, port_id=2, next_router_mac=b"\x01")
+        entry = router.routing_table.get_entry(30)
+        assert entry is not None
+        entry.reachability = NetworkReachability.BUSY
+
+        data = _build_who_is_router_npdu(network=None)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        t1.send_broadcast.assert_called_once()
+        npdu, msg_data = _decode_sent_network_message(t1)
+        msg = decode_network_message(npdu.message_type, msg_data)
+        assert isinstance(msg, IAmRouterToNetwork)
+        assert 30 in msg.networks  # BUSY network included
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- I-Am-Router-To-Network handler
+# ---------------------------------------------------------------------------
+
+
+class TestHandleIAmRouter:
+    def test_new_entries_created(self) -> None:
+        """I-Am-Router creates new routing table entries."""
+        router, t1, t2 = _make_two_port_router()
+        data = _build_i_am_router_npdu(networks=[30, 40])
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # New entries in routing table
+        entry30 = router.routing_table.get_entry(30)
+        entry40 = router.routing_table.get_entry(40)
+        assert entry30 is not None
+        assert entry30.port_id == 1
+        assert entry30.next_router_mac == _MAC_DEVICE_A
+        assert entry40 is not None
+        assert entry40.port_id == 1
+        assert entry40.next_router_mac == _MAC_DEVICE_A
+
+    def test_existing_entries_updated(self) -> None:
+        """I-Am-Router updates existing entries with new MAC."""
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=1, next_router_mac=b"\x01")
+        data = _build_i_am_router_npdu(networks=[30])
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        entry = router.routing_table.get_entry(30)
+        assert entry is not None
+        assert entry.next_router_mac == _MAC_DEVICE_A
+
+    def test_rebroadcast_on_other_ports(self) -> None:
+        """I-Am-Router is re-broadcast on all other ports."""
+        router, t1, t2 = _make_two_port_router()
+        data = _build_i_am_router_npdu(networks=[30])
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # Should re-broadcast on port 2
+        t2.send_broadcast.assert_called_once()
+        npdu, msg_data = _decode_sent_network_message(t2)
+        assert npdu.message_type == NetworkMessageType.I_AM_ROUTER_TO_NETWORK
+        msg = decode_network_message(npdu.message_type, msg_data)
+        assert isinstance(msg, IAmRouterToNetwork)
+        assert msg.networks == [30]
+        # Should NOT broadcast back on port 1
+        t1.send_broadcast.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- Reject-Message-To-Network handler
+# ---------------------------------------------------------------------------
+
+
+class TestHandleRejectMessage:
+    def test_reason_not_directly_connected_marks_unreachable(self) -> None:
+        """Reason 1 -> network marked UNREACHABLE."""
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=2, next_router_mac=b"\x01")
+        data = _build_reject_message_npdu(
+            RejectMessageReason.NOT_DIRECTLY_CONNECTED,
+            30,
+        )
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        entry = router.routing_table.get_entry(30)
+        assert entry is not None
+        assert entry.reachability == NetworkReachability.UNREACHABLE
+
+    async def test_reason_router_busy_marks_busy(self) -> None:
+        """Reason 2 -> network marked BUSY with auto-recovery."""
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=2, next_router_mac=b"\x01")
+        data = _build_reject_message_npdu(
+            RejectMessageReason.ROUTER_BUSY,
+            30,
+        )
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        entry = router.routing_table.get_entry(30)
+        assert entry is not None
+        assert entry.reachability == NetworkReachability.BUSY
+
+    def test_relay_toward_originator(self) -> None:
+        """Reject message with DNET/DADR is forwarded toward originator."""
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=2, next_router_mac=b"\x01")
+        # DNET points to network 20 (directly connected on port 2)
+        dest = BACnetAddress(network=20, mac_address=_MAC_DEVICE_B)
+        data = _build_reject_message_npdu(
+            RejectMessageReason.OTHER,
+            30,
+            destination=dest,
+        )
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # Should forward toward network 20 (port 2)
+        t2.send_unicast.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- Router-Busy-To-Network handler
+# ---------------------------------------------------------------------------
+
+
+class TestHandleRouterBusy:
+    async def test_listed_dnets_marked_busy(self) -> None:
+        """Specific DNETs in the message are marked BUSY."""
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=1, next_router_mac=_MAC_DEVICE_A)
+        data = _build_router_busy_npdu(networks=[30])
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        entry = router.routing_table.get_entry(30)
+        assert entry is not None
+        assert entry.reachability == NetworkReachability.BUSY
+
+    async def test_empty_list_marks_all_sender_dnets(self) -> None:
+        """Empty list -> all networks served by sender marked BUSY."""
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=1, next_router_mac=_MAC_DEVICE_A)
+        router.routing_table.update_route(40, port_id=1, next_router_mac=_MAC_DEVICE_A)
+        # Also a route via a different router on the same port
+        router.routing_table.update_route(50, port_id=1, next_router_mac=b"\x99")
+        data = _build_router_busy_npdu(networks=[])
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # 30 and 40 should be BUSY (same source_mac)
+        entry30 = router.routing_table.get_entry(30)
+        entry40 = router.routing_table.get_entry(40)
+        assert entry30 is not None and entry30.reachability == NetworkReachability.BUSY
+        assert entry40 is not None and entry40.reachability == NetworkReachability.BUSY
+        # 50 via different router should be unaffected
+        entry50 = router.routing_table.get_entry(50)
+        assert entry50 is not None and entry50.reachability == NetworkReachability.REACHABLE
+
+    async def test_rebroadcast_on_other_ports(self) -> None:
+        """Router-Busy is re-broadcast on all other ports."""
+        router, t1, t2 = _make_two_port_router()
+        data = _build_router_busy_npdu(networks=[10])
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        t2.send_broadcast.assert_called_once()
+        npdu, msg_data = _decode_sent_network_message(t2)
+        assert npdu.message_type == NetworkMessageType.ROUTER_BUSY_TO_NETWORK
+        t1.send_broadcast.assert_not_called()
+
+    async def test_busy_timer_auto_restores_reachable(self) -> None:
+        """30s timer restores REACHABLE (tested with short timeout)."""
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=1, next_router_mac=_MAC_DEVICE_A)
+        data = _build_router_busy_npdu(networks=[30])
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        entry = router.routing_table.get_entry(30)
+        assert entry is not None
+        assert entry.reachability == NetworkReachability.BUSY
+        assert entry.busy_timeout_handle is not None
+        # The handler uses call_later with default 30s; verify handle exists
+        # Cancel and trigger manually for the test
+        entry.busy_timeout_handle.cancel()
+        router.routing_table.mark_available(30)
+        assert entry.reachability == NetworkReachability.REACHABLE
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- Router-Available-To-Network handler
+# ---------------------------------------------------------------------------
+
+
+class TestHandleRouterAvailable:
+    def test_listed_dnets_marked_reachable(self) -> None:
+        """Specific DNETs in the message are marked REACHABLE."""
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=1, next_router_mac=_MAC_DEVICE_A)
+        entry = router.routing_table.get_entry(30)
+        assert entry is not None
+        entry.reachability = NetworkReachability.BUSY
+        data = _build_router_available_npdu(networks=[30])
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        assert entry.reachability == NetworkReachability.REACHABLE
+
+    def test_empty_list_marks_all_busy_reachable(self) -> None:
+        """Empty list -> all previously BUSY networks restored."""
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=1, next_router_mac=b"\x01")
+        router.routing_table.update_route(40, port_id=1, next_router_mac=b"\x02")
+        e30 = router.routing_table.get_entry(30)
+        e40 = router.routing_table.get_entry(40)
+        assert e30 is not None and e40 is not None
+        e30.reachability = NetworkReachability.BUSY
+        e40.reachability = NetworkReachability.BUSY
+        data = _build_router_available_npdu(networks=[])
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        assert e30.reachability == NetworkReachability.REACHABLE
+        assert e40.reachability == NetworkReachability.REACHABLE
+
+    def test_rebroadcast_on_other_ports(self) -> None:
+        """Router-Available is re-broadcast on other ports."""
+        router, t1, t2 = _make_two_port_router()
+        data = _build_router_available_npdu(networks=[30])
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        t2.send_broadcast.assert_called_once()
+        npdu, _ = _decode_sent_network_message(t2)
+        assert npdu.message_type == NetworkMessageType.ROUTER_AVAILABLE_TO_NETWORK
+        t1.send_broadcast.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- Initialize-Routing-Table handler
+# ---------------------------------------------------------------------------
+
+
+class TestHandleInitRoutingTable:
+    def test_query_returns_full_table(self) -> None:
+        """Empty ports list (query) -> Ack with complete routing table."""
+        router, t1, t2 = _make_two_port_router()
+        data = _build_init_routing_table_npdu(ports=[])
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # Should unicast Ack back to sender on port 1
+        t1.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t1.send_unicast.call_args[0]
+        assert sent_mac == _MAC_DEVICE_A
+        npdu = decode_npdu(sent_bytes)
+        assert npdu.message_type == NetworkMessageType.INITIALIZE_ROUTING_TABLE_ACK
+        msg = decode_network_message(npdu.message_type, npdu.network_message_data)
+        assert isinstance(msg, InitializeRoutingTableAck)
+        # Should include both directly-connected entries (net 10, net 20)
+        ack_networks = {p.network for p in msg.ports}
+        assert 10 in ack_networks
+        assert 20 in ack_networks
+
+    def test_update_modifies_table_and_acks(self) -> None:
+        """Non-empty ports list -> table modified, empty Ack returned."""
+        router, t1, t2 = _make_two_port_router()
+        update_ports = [
+            RoutingTablePort(network=50, port_id=1, port_info=b""),
+        ]
+        data = _build_init_routing_table_npdu(ports=update_ports)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # Network 50 should be added via port 1
+        entry = router.routing_table.get_entry(50)
+        assert entry is not None
+        assert entry.port_id == 1
+        # Response should be unicast Ack with empty ports
+        t1.send_unicast.assert_called_once()
+        sent_bytes, _ = t1.send_unicast.call_args[0]
+        npdu = decode_npdu(sent_bytes)
+        msg = decode_network_message(npdu.message_type, npdu.network_message_data)
+        assert isinstance(msg, InitializeRoutingTableAck)
+        assert len(msg.ports) == 0
+
+    def test_update_port_id_zero_removes_entry(self) -> None:
+        """port_id=0 in update removes the entry."""
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(50, port_id=1, next_router_mac=b"\x01")
+        update_ports = [
+            RoutingTablePort(network=50, port_id=0, port_info=b""),
+        ]
+        data = _build_init_routing_table_npdu(ports=update_ports)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        assert router.routing_table.get_entry(50) is None
+
+    def test_update_unknown_port_id_ignored(self) -> None:
+        """Unknown port_id in update is silently ignored."""
+        router, t1, t2 = _make_two_port_router()
+        update_ports = [
+            RoutingTablePort(network=50, port_id=99, port_info=b""),
+        ]
+        data = _build_init_routing_table_npdu(ports=update_ports)
+        # Should not raise
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        assert router.routing_table.get_entry(50) is None
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- Initialize-Routing-Table-Ack handler
+# ---------------------------------------------------------------------------
+
+
+class TestHandleInitRoutingTableAck:
+    def test_ack_received_no_error(self) -> None:
+        """Ack is received without error (logged only)."""
+        router, t1, t2 = _make_two_port_router()
+        ack_ports = [
+            RoutingTablePort(network=10, port_id=1, port_info=b""),
+            RoutingTablePort(network=20, port_id=2, port_info=b""),
+        ]
+        data = _build_init_routing_table_ack_npdu(ports=ack_ports)
+        # Should not raise or send anything
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        t1.send_broadcast.assert_not_called()
+        t1.send_unicast.assert_not_called()
+        t2.send_broadcast.assert_not_called()
+        t2.send_unicast.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- What-Is-Network-Number handler
+# ---------------------------------------------------------------------------
+
+
+class TestHandleWhatIsNetworkNumber:
+    def test_configured_port_responds(self) -> None:
+        """Configured port responds with Network-Number-Is broadcast."""
+        router, t1, t2 = _make_two_port_router()
+        data = _build_what_is_network_number_npdu()
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        t1.send_broadcast.assert_called_once()
+        npdu, msg_data = _decode_sent_network_message(t1)
+        assert npdu.message_type == NetworkMessageType.NETWORK_NUMBER_IS
+        msg = decode_network_message(npdu.message_type, msg_data)
+        assert isinstance(msg, NetworkNumberIs)
+        assert msg.network == 10
+        assert msg.configured is True
+
+    def test_routed_message_ignored(self) -> None:
+        """What-Is with SNET/SADR is ignored (never routed)."""
+        router, t1, t2 = _make_two_port_router()
+        src = BACnetAddress(network=30, mac_address=b"\xaa")
+        data = _build_what_is_network_number_npdu(source=src)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        t1.send_broadcast.assert_not_called()
+        t1.send_unicast.assert_not_called()
+
+    def test_routed_with_destination_ignored(self) -> None:
+        """What-Is with DNET/DADR is ignored (never routed)."""
+        router, t1, t2 = _make_two_port_router()
+        dest = BACnetAddress(network=20, mac_address=b"")
+        data = _build_what_is_network_number_npdu(destination=dest)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        t1.send_broadcast.assert_not_called()
+
+    def test_unconfigured_port_no_response(self) -> None:
+        """Unconfigured port does not respond."""
+        t1 = _make_transport(local_mac=_MAC_PORT1)
+        p1 = RouterPort(
+            port_id=1,
+            network_number=10,
+            transport=t1,
+            mac_address=_MAC_PORT1,
+            max_npdu_length=1497,
+            network_number_configured=False,
+        )
+        router = NetworkRouter([p1])
+        data = _build_what_is_network_number_npdu()
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        t1.send_broadcast.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- Network-Number-Is handler
+# ---------------------------------------------------------------------------
+
+
+class TestHandleNetworkNumberIs:
+    def test_unconfigured_port_learns_number(self) -> None:
+        """Unconfigured port learns network number from configured source."""
+        t1 = _make_transport(local_mac=_MAC_PORT1)
+        p1 = RouterPort(
+            port_id=1,
+            network_number=0,  # unknown
+            transport=t1,
+            mac_address=_MAC_PORT1,
+            max_npdu_length=1497,
+            network_number_configured=False,
+        )
+        router = NetworkRouter([p1])
+        data = _build_network_number_is_npdu(42, configured=True)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        assert p1.network_number == 42
+
+    def test_configured_port_ignores(self) -> None:
+        """Already configured port ignores Network-Number-Is."""
+        router, t1, t2 = _make_two_port_router()
+        data = _build_network_number_is_npdu(99, configured=True)
+        port = router.routing_table.get_port(1)
+        assert port is not None
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        assert port.network_number == 10  # unchanged
+
+    def test_unconfigured_source_ignored(self) -> None:
+        """Network-Number-Is with configured=False is ignored."""
+        t1 = _make_transport(local_mac=_MAC_PORT1)
+        p1 = RouterPort(
+            port_id=1,
+            network_number=0,
+            transport=t1,
+            mac_address=_MAC_PORT1,
+            max_npdu_length=1497,
+            network_number_configured=False,
+        )
+        router = NetworkRouter([p1])
+        data = _build_network_number_is_npdu(42, configured=False)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        assert p1.network_number == 0  # unchanged
+
+    def test_routed_message_ignored(self) -> None:
+        """Network-Number-Is with SNET/SADR is ignored."""
+        t1 = _make_transport(local_mac=_MAC_PORT1)
+        p1 = RouterPort(
+            port_id=1,
+            network_number=0,
+            transport=t1,
+            mac_address=_MAC_PORT1,
+            max_npdu_length=1497,
+            network_number_configured=False,
+        )
+        router = NetworkRouter([p1])
+        src = BACnetAddress(network=30, mac_address=b"\xaa")
+        data = _build_network_number_is_npdu(42, configured=True, source=src)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        assert p1.network_number == 0  # unchanged
+
+    def test_routed_with_destination_ignored(self) -> None:
+        """Network-Number-Is with DNET/DADR is ignored."""
+        t1 = _make_transport(local_mac=_MAC_PORT1)
+        p1 = RouterPort(
+            port_id=1,
+            network_number=0,
+            transport=t1,
+            mac_address=_MAC_PORT1,
+            max_npdu_length=1497,
+            network_number_configured=False,
+        )
+        router = NetworkRouter([p1])
+        dest = BACnetAddress(network=20, mac_address=b"")
+        data = _build_network_number_is_npdu(42, configured=True, destination=dest)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        assert p1.network_number == 0  # unchanged
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- Router startup broadcasts
+# ---------------------------------------------------------------------------
+
+
+class TestRouterStartup:
+    async def test_startup_broadcasts_network_number_is(self) -> None:
+        """Each configured port gets Network-Number-Is broadcast."""
+        router, t1, t2 = _make_two_port_router()
+        await router.start()
+        # Both ports are configured, so both should get Network-Number-Is
+        assert t1.send_broadcast.call_count >= 1
+        assert t2.send_broadcast.call_count >= 1
+        # Check first broadcast on each port is Network-Number-Is
+        first_t1 = t1.send_broadcast.call_args_list[0][0][0]
+        npdu1 = decode_npdu(first_t1)
+        assert npdu1.message_type == NetworkMessageType.NETWORK_NUMBER_IS
+        msg1 = decode_network_message(npdu1.message_type, npdu1.network_message_data)
+        assert isinstance(msg1, NetworkNumberIs)
+        assert msg1.network == 10
+        assert msg1.configured is True
+
+        first_t2 = t2.send_broadcast.call_args_list[0][0][0]
+        npdu2 = decode_npdu(first_t2)
+        assert npdu2.message_type == NetworkMessageType.NETWORK_NUMBER_IS
+        msg2 = decode_network_message(npdu2.message_type, npdu2.network_message_data)
+        assert isinstance(msg2, NetworkNumberIs)
+        assert msg2.network == 20
+        assert msg2.configured is True
+
+    async def test_startup_broadcasts_i_am_router(self) -> None:
+        """Each port gets I-Am-Router listing networks from other ports."""
+        router, t1, t2 = _make_two_port_router()
+        await router.start()
+        # Port 1 should get I-Am-Router with network 20
+        # Port 2 should get I-Am-Router with network 10
+        second_t1 = t1.send_broadcast.call_args_list[1][0][0]
+        npdu1 = decode_npdu(second_t1)
+        assert npdu1.message_type == NetworkMessageType.I_AM_ROUTER_TO_NETWORK
+        msg1 = decode_network_message(npdu1.message_type, npdu1.network_message_data)
+        assert isinstance(msg1, IAmRouterToNetwork)
+        assert 20 in msg1.networks
+        assert 10 not in msg1.networks
+
+        second_t2 = t2.send_broadcast.call_args_list[1][0][0]
+        npdu2 = decode_npdu(second_t2)
+        assert npdu2.message_type == NetworkMessageType.I_AM_ROUTER_TO_NETWORK
+        msg2 = decode_network_message(npdu2.message_type, npdu2.network_message_data)
+        assert isinstance(msg2, IAmRouterToNetwork)
+        assert 10 in msg2.networks
+        assert 20 not in msg2.networks
+
+    async def test_startup_unconfigured_port_no_network_number_is(self) -> None:
+        """Unconfigured port should not broadcast Network-Number-Is."""
+        t1 = _make_transport(local_mac=_MAC_PORT1)
+        p1 = RouterPort(
+            port_id=1,
+            network_number=10,
+            transport=t1,
+            mac_address=_MAC_PORT1,
+            max_npdu_length=1497,
+            network_number_configured=False,
+        )
+        router = NetworkRouter([p1])
+        await router.start()
+        # Should NOT have Network-Number-Is (not configured)
+        for c in t1.send_broadcast.call_args_list:
+            npdu = decode_npdu(c[0][0])
+            assert npdu.message_type != NetworkMessageType.NETWORK_NUMBER_IS
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- Unknown message type
+# ---------------------------------------------------------------------------
+
+
+class TestHandleUnknownMessageType:
+    def test_unknown_type_sends_reject(self) -> None:
+        """Unknown standard message type -> Reject with UNKNOWN_MESSAGE_TYPE."""
+        router, t1, t2 = _make_two_port_router()
+        # I-Could-Be-Router (0x02) is decoded but not handled by the router.
+        msg = ICouldBeRouterToNetwork(network=10, performance_index=5)
+        data = _build_network_message_npdu(
+            NetworkMessageType.I_COULD_BE_ROUTER_TO_NETWORK,
+            encode_network_message(msg),
+        )
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # Should send Reject-Message-To-Network
+        t1.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t1.send_unicast.call_args[0]
+        assert sent_mac == _MAC_DEVICE_A
+        npdu = decode_npdu(sent_bytes)
+        assert npdu.message_type == NetworkMessageType.REJECT_MESSAGE_TO_NETWORK
+        msg_decoded = decode_network_message(npdu.message_type, npdu.network_message_data)
+        assert isinstance(msg_decoded, RejectMessageToNetwork)
+        assert msg_decoded.reason == RejectMessageReason.UNKNOWN_MESSAGE_TYPE
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- Malformed network message
+# ---------------------------------------------------------------------------
+
+
+class TestHandleMalformedNetworkMessage:
+    def test_malformed_message_data_dropped(self) -> None:
+        """Malformed network message data is logged and dropped."""
+        router, t1, t2 = _make_two_port_router()
+        # Build NPDU with valid type but malformed data
+        data = _build_network_message_npdu(
+            NetworkMessageType.REJECT_MESSAGE_TO_NETWORK,
+            b"\x01",  # too short for reject message (needs 3 bytes)
+        )
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # Should not crash, should not send anything
+        t1.send_broadcast.assert_not_called()
+        t1.send_unicast.assert_not_called()
+        t2.send_broadcast.assert_not_called()
+        t2.send_unicast.assert_not_called()

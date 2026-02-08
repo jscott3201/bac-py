@@ -51,6 +51,8 @@ class BIPTransport:
 
     async def start(self) -> None:
         """Bind UDP socket and start listening."""
+        if self._transport is not None:
+            return  # Already started
         loop = asyncio.get_running_loop()
         transport, protocol = await loop.create_datagram_endpoint(
             lambda: _UDPProtocol(self._on_datagram_received),

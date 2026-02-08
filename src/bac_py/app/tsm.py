@@ -31,8 +31,8 @@ from bac_py.services.errors import (
 from bac_py.types.enums import AbortReason
 
 if TYPE_CHECKING:
+    from bac_py.network import NetworkSender
     from bac_py.network.address import BACnetAddress
-    from bac_py.network.layer import NetworkLayer
     from bac_py.types.enums import (
         ErrorClass,
         ErrorCode,
@@ -80,7 +80,7 @@ class ClientTSM:
 
     def __init__(
         self,
-        network: NetworkLayer,
+        network: NetworkSender,
         *,
         apdu_timeout: float = 6.0,
         apdu_retries: int = 3,
@@ -535,7 +535,7 @@ class ServerTSM:
 
     def __init__(
         self,
-        network: NetworkLayer,
+        network: NetworkSender,
         *,
         request_timeout: float = 6.0,
         apdu_retries: int = 3,

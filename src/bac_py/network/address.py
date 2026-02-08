@@ -57,6 +57,15 @@ class BACnetAddress:
         """True if this is a global broadcast address."""
         return self.network == 0xFFFF
 
+    @property
+    def is_remote_broadcast(self) -> bool:
+        """True if this is a broadcast on a specific remote network.
+
+        A remote broadcast has a network number set (not global 0xFFFF)
+        and an empty MAC address (DLEN=0).
+        """
+        return self.network is not None and self.network != 0xFFFF and len(self.mac_address) == 0
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-friendly dict."""
         result: dict[str, Any] = {}

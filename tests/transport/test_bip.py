@@ -280,6 +280,18 @@ class TestOnDatagramReceived:
 class TestStartStop:
     """Test start/stop lifecycle with a real asyncio UDP socket."""
 
+    async def test_start_idempotent(self):
+        """Calling start() twice should not raise or rebind."""
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        try:
+            await transport.start()
+            first_port = transport.local_address.port
+            # Second start() should be a no-op
+            await transport.start()
+            assert transport.local_address.port == first_port
+        finally:
+            await transport.stop()
+
     async def test_start_sets_local_address(self):
         transport = BIPTransport(interface="127.0.0.1", port=0)
         try:
