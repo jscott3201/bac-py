@@ -7,6 +7,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from bac_py.network.address import GLOBAL_BROADCAST
+from bac_py.services.cov import SubscribeCOVRequest
 from bac_py.services.read_property import ReadPropertyACK, ReadPropertyRequest
 from bac_py.services.read_property_multiple import (
     ReadAccessSpecification,
@@ -271,3 +272,74 @@ class BACnetClient:
             self._app.unregister_temporary_handler(UnconfirmedServiceChoice.I_AM, on_i_am)
 
         return responses
+
+    async def subscribe_cov(
+        self,
+        address: BACnetAddress,
+        object_identifier: ObjectIdentifier,
+        process_id: int,
+        confirmed: bool = True,
+        lifetime: int | None = None,
+    ) -> None:
+        """Subscribe to COV notifications from a remote device.
+
+        Sends a SubscribeCOV-Request per Clause 13.14.1. The remote
+        device will send confirmed or unconfirmed COV notifications
+        when the monitored object's value changes.
+
+        Args:
+            address: Target device address.
+            object_identifier: Object to monitor.
+            process_id: Subscriber process identifier (caller-managed).
+            confirmed: True for confirmed notifications, False for unconfirmed.
+            lifetime: Subscription lifetime in seconds, or None for indefinite.
+
+        Raises:
+            BACnetError: On Error-PDU response.
+            BACnetRejectError: On Reject-PDU response.
+            BACnetAbortError: On Abort-PDU response.
+            BACnetTimeoutError: On timeout after all retries.
+        """
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=process_id,
+            monitored_object_identifier=object_identifier,
+            issue_confirmed_notifications=confirmed,
+            lifetime=lifetime,
+        )
+        await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.SUBSCRIBE_COV,
+            service_data=request.encode(),
+        )
+
+    async def unsubscribe_cov(
+        self,
+        address: BACnetAddress,
+        object_identifier: ObjectIdentifier,
+        process_id: int,
+    ) -> None:
+        """Cancel a COV subscription on a remote device.
+
+        Per Clause 13.14, omits ``issueConfirmedNotifications`` and
+        ``lifetime`` to indicate cancellation.
+
+        Args:
+            address: Target device address.
+            object_identifier: Object being monitored.
+            process_id: Subscriber process identifier used during subscription.
+
+        Raises:
+            BACnetError: On Error-PDU response.
+            BACnetRejectError: On Reject-PDU response.
+            BACnetAbortError: On Abort-PDU response.
+            BACnetTimeoutError: On timeout after all retries.
+        """
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=process_id,
+            monitored_object_identifier=object_identifier,
+        )
+        await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.SUBSCRIBE_COV,
+            service_data=request.encode(),
+        )

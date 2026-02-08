@@ -7,6 +7,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from bac_py.app.cov import COVManager
 from bac_py.app.tsm import ClientTSM, ServerTSM
 from bac_py.encoding.apdu import (
     AbortPDU,
@@ -24,9 +25,15 @@ from bac_py.network.layer import NetworkLayer
 from bac_py.objects.base import ObjectDatabase
 from bac_py.segmentation.manager import compute_max_segment_payload
 from bac_py.services.base import ServiceRegistry
+from bac_py.services.cov import COVNotificationRequest
 from bac_py.services.errors import BACnetAbortError, BACnetError, BACnetRejectError
 from bac_py.transport.bip import BIPTransport
-from bac_py.types.enums import AbortReason, PduType
+from bac_py.types.enums import (
+    AbortReason,
+    ConfirmedServiceChoice,
+    PduType,
+    UnconfirmedServiceChoice,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -77,6 +84,8 @@ class BACnetApplication:
         self._ready_event: asyncio.Event | None = None
         self._unconfirmed_listeners: dict[int, list[Callable[..., Any]]] = {}
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._cov_manager: COVManager | None = None
+        self._cov_callbacks: dict[int, Callable[..., Any]] = {}
 
     @property
     def object_db(self) -> ObjectDatabase:
@@ -92,6 +101,24 @@ class BACnetApplication:
     def config(self) -> DeviceConfig:
         """The device configuration."""
         return self._config
+
+    @property
+    def cov_manager(self) -> COVManager | None:
+        """The COV subscription manager, or None if not started."""
+        return self._cov_manager
+
+    @property
+    def device_object_identifier(self) -> Any:
+        """The device object identifier for this application.
+
+        Returns the ObjectIdentifier of the device object from the
+        object database. Used by the COV manager to populate the
+        initiating device identifier in notifications.
+        """
+        from bac_py.types.enums import ObjectType
+        from bac_py.types.primitives import ObjectIdentifier
+
+        return ObjectIdentifier(ObjectType.DEVICE, self._config.instance_number)
 
     async def start(self) -> None:
         """Start the transport and initialize all layers."""
@@ -119,8 +146,24 @@ class BACnetApplication:
         await self._transport.start()
         self._running = True
 
+        # Initialize COV manager and register notification handlers
+        self._cov_manager = COVManager(self)
+        self._service_registry.register_confirmed(
+            ConfirmedServiceChoice.CONFIRMED_COV_NOTIFICATION,
+            self._handle_confirmed_cov_notification,
+        )
+        self._service_registry.register_unconfirmed(
+            UnconfirmedServiceChoice.UNCONFIRMED_COV_NOTIFICATION,
+            self._handle_unconfirmed_cov_notification,
+        )
+
     async def stop(self) -> None:
         """Stop the application and clean up resources."""
+        # Shutdown COV manager (cancel subscription timers)
+        if self._cov_manager:
+            self._cov_manager.shutdown()
+            self._cov_manager = None
+
         # Cancel all pending client transactions
         if self._client_tsm:
             for txn in self._client_tsm.active_transactions():
@@ -186,6 +229,60 @@ class BACnetApplication:
         )
         apdu_bytes = encode_apdu(pdu)
         self._network.send(apdu_bytes, destination, expecting_reply=False)
+
+    def send_confirmed_cov_notification(
+        self,
+        service_data: bytes,
+        destination: BACnetAddress,
+        service_choice: int,
+    ) -> None:
+        """Send a confirmed COV notification (fire-and-forget).
+
+        Unlike ``confirmed_request``, this does not await a response.
+        COV notifications are best-effort; failures are logged but
+        do not propagate.
+        """
+        self._spawn_task(self._send_confirmed_cov(service_data, destination, service_choice))
+
+    async def _send_confirmed_cov(
+        self,
+        service_data: bytes,
+        destination: BACnetAddress,
+        service_choice: int,
+    ) -> None:
+        """Background task to send a confirmed COV notification."""
+        try:
+            await self.confirmed_request(
+                destination=destination,
+                service_choice=service_choice,
+                service_data=service_data,
+            )
+        except Exception:
+            logger.debug(
+                "Confirmed COV notification to %s failed",
+                destination,
+                exc_info=True,
+            )
+
+    # --- COV callback management ---
+
+    def register_cov_callback(
+        self,
+        process_id: int,
+        callback: Callable[..., Any],
+    ) -> None:
+        """Register a callback for incoming COV notifications.
+
+        Args:
+            process_id: Subscriber process identifier to match.
+            callback: Called with ``(notification, source)`` when a
+                COV notification arrives for this process ID.
+        """
+        self._cov_callbacks[process_id] = callback
+
+    def unregister_cov_callback(self, process_id: int) -> None:
+        """Remove a COV notification callback."""
+        self._cov_callbacks.pop(process_id, None)
 
     # --- Listener management ---
 
@@ -398,3 +495,42 @@ class BACnetApplication:
                 listener(pdu.service_request, source)
             except Exception:
                 logger.debug("Error in unconfirmed listener", exc_info=True)
+
+    # --- COV notification handlers (client role) ---
+
+    async def _handle_confirmed_cov_notification(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle incoming confirmed COV notification (client role).
+
+        Dispatches to registered COV callbacks and returns SimpleACK.
+        """
+        notification = COVNotificationRequest.decode(data)
+        callback = self._cov_callbacks.get(notification.subscriber_process_identifier)
+        if callback:
+            try:
+                callback(notification, source)
+            except Exception:
+                logger.debug("Error in COV callback", exc_info=True)
+        return None  # SimpleACK
+
+    async def _handle_unconfirmed_cov_notification(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Handle incoming unconfirmed COV notification (client role).
+
+        Dispatches to registered COV callbacks.
+        """
+        notification = COVNotificationRequest.decode(data)
+        callback = self._cov_callbacks.get(notification.subscriber_process_identifier)
+        if callback:
+            try:
+                callback(notification, source)
+            except Exception:
+                logger.debug("Error in COV callback", exc_info=True)

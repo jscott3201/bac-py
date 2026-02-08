@@ -16,9 +16,11 @@ from bac_py.encoding.primitives import (
     encode_application_character_string,
     encode_application_enumerated,
     encode_application_object_id,
+    encode_application_real,
     encode_application_unsigned,
 )
-from bac_py.services.errors import BACnetError
+from bac_py.services.cov import SubscribeCOVRequest
+from bac_py.services.errors import BACnetError, BACnetRejectError
 from bac_py.services.read_property import ReadPropertyACK, ReadPropertyRequest
 from bac_py.services.read_property_multiple import (
     PropertyReference,
@@ -42,6 +44,7 @@ from bac_py.types.enums import (
     ErrorCode,
     ObjectType,
     PropertyIdentifier,
+    RejectReason,
     UnconfirmedServiceChoice,
 )
 from bac_py.types.primitives import BitString, ObjectIdentifier
@@ -74,6 +77,8 @@ def _encode_property_value(value: Any) -> bytes:
     if isinstance(value, enum.IntEnum):
         # Must check IntEnum before int since IntEnum is a subclass of int
         return encode_application_enumerated(value)
+    if isinstance(value, float):
+        return encode_application_real(value)
     if isinstance(value, int):
         return encode_application_unsigned(value)
     if isinstance(value, list):
@@ -125,6 +130,10 @@ class DefaultServerHandlers:
         registry.register_confirmed(
             ConfirmedServiceChoice.READ_RANGE,
             self.handle_read_range,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.SUBSCRIBE_COV,
+            self.handle_subscribe_cov,
         )
         registry.register_unconfirmed(
             UnconfirmedServiceChoice.WHO_IS,
@@ -219,7 +228,49 @@ class DefaultServerHandlers:
             request.property_array_index,
         )
 
+        # Trigger COV notification checks after successful write
+        cov_manager = self._app.cov_manager
+        if cov_manager is not None:
+            cov_manager.check_and_notify(obj, request.property_identifier)
+
         return None
+
+    async def handle_subscribe_cov(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle SubscribeCOV-Request per Clause 13.14.
+
+        Returns None (SimpleACK) on success.
+
+        Raises:
+            BACnetError: If the monitored object does not exist or
+                COV is not supported.
+        """
+        request = SubscribeCOVRequest.decode(data)
+        obj_id = self._resolve_object_id(request.monitored_object_identifier)
+
+        obj = self._db.get(obj_id)
+        if obj is None:
+            raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
+
+        cov_manager = self._app.cov_manager
+        if cov_manager is None:
+            raise BACnetError(ErrorClass.SERVICES, ErrorCode.SERVICE_REQUEST_DENIED)
+
+        # Per Clause 13.14.1.1.4: if Lifetime is present then
+        # Issue Confirmed Notifications shall be present.
+        if request.lifetime is not None and request.issue_confirmed_notifications is None:
+            raise BACnetRejectError(RejectReason.MISSING_REQUIRED_PARAMETER)
+
+        if request.is_cancellation:
+            cov_manager.unsubscribe(source, request.subscriber_process_identifier, obj_id)
+        else:
+            cov_manager.subscribe(source, request, self._db)
+
+        return None  # SimpleACK
 
     async def handle_who_is(
         self,
@@ -433,6 +484,10 @@ class DefaultServerHandlers:
                     pv.priority,
                     pv.property_array_index,
                 )
+                # Trigger COV notification checks after each successful write
+                cov_manager = self._app.cov_manager
+                if cov_manager is not None:
+                    cov_manager.check_and_notify(obj, pv.property_identifier)
 
         return None
 

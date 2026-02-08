@@ -340,7 +340,7 @@ class TestDefaultServerHandlersRegister:
         handlers.register()
 
         registry = app.service_registry
-        assert registry.register_confirmed.call_count == 5
+        assert registry.register_confirmed.call_count == 6
         assert registry.register_unconfirmed.call_count == 1
 
 
