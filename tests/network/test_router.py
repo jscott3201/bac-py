@@ -1060,13 +1060,23 @@ class TestNetworkRouterHopCount:
 
 
 class TestNetworkRouterUnknownDest:
-    def test_unknown_dnet_discards(self) -> None:
+    def test_unknown_dnet_sends_reject(self) -> None:
+        """Unknown DNET sends Reject-Message back to source (Clause 6.6.3.5)."""
         router, t1, t2 = _make_two_port_router()
         data = _build_routed_npdu(dnet=99, dadr=b"\xcc")
         router._on_port_receive(1, data, _MAC_DEVICE_A)
-        t1.send_unicast.assert_not_called()
+        # Reject sent back on arrival port
+        t1.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t1.send_unicast.call_args[0]
+        assert sent_mac == _MAC_DEVICE_A
+        npdu = decode_npdu(sent_bytes)
+        assert npdu.message_type == NetworkMessageType.REJECT_MESSAGE_TO_NETWORK
+        msg = decode_network_message(npdu.message_type, npdu.network_message_data)
+        assert isinstance(msg, RejectMessageToNetwork)
+        assert msg.reason == RejectMessageReason.NOT_DIRECTLY_CONNECTED
+        assert msg.network == 99
+        # Not forwarded to other port
         t2.send_unicast.assert_not_called()
-        t1.send_broadcast.assert_not_called()
         t2.send_broadcast.assert_not_called()
 
 
@@ -2063,3 +2073,186 @@ class TestHandleMalformedNetworkMessage:
         t1.send_unicast.assert_not_called()
         t2.send_broadcast.assert_not_called()
         t2.send_unicast.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# NetworkRouter -- Reject on unknown / unreachable / busy DNET (Clause 6.6.3.5)
+# ---------------------------------------------------------------------------
+
+
+class TestForwardRejectsUnknownDNET:
+    """Forwarding to an unknown DNET sends Reject-Message-To-Network."""
+
+    def test_unknown_dnet_sends_reject(self) -> None:
+        """Unknown DNET -> Reject with NOT_DIRECTLY_CONNECTED on arrival port."""
+        router, t1, t2 = _make_two_port_router()
+        # Network 99 is not in the routing table.
+        data = _build_routed_npdu(99, _MAC_DEVICE_B)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        t1.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t1.send_unicast.call_args[0]
+        assert sent_mac == _MAC_DEVICE_A
+        npdu = decode_npdu(sent_bytes)
+        assert npdu.message_type == NetworkMessageType.REJECT_MESSAGE_TO_NETWORK
+        msg = decode_network_message(npdu.message_type, npdu.network_message_data)
+        assert isinstance(msg, RejectMessageToNetwork)
+        assert msg.reason == RejectMessageReason.NOT_DIRECTLY_CONNECTED
+        assert msg.network == 99
+
+    def test_unknown_dnet_not_forwarded(self) -> None:
+        """Traffic to unknown DNET should NOT be forwarded anywhere."""
+        router, t1, t2 = _make_two_port_router()
+        data = _build_routed_npdu(99, _MAC_DEVICE_B)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # Port 2 should not receive anything.
+        t2.send_broadcast.assert_not_called()
+        t2.send_unicast.assert_not_called()
+
+
+class TestForwardRejectsUnreachableDNET:
+    """Forwarding to an UNREACHABLE DNET sends Reject-Message-To-Network."""
+
+    def test_unreachable_dnet_sends_reject(self) -> None:
+        router, t1, t2 = _make_two_port_router()
+        # Add a remote route and mark it unreachable.
+        router.routing_table.update_route(30, port_id=2, next_router_mac=b"\x01")
+        router.routing_table.mark_unreachable(30)
+
+        data = _build_routed_npdu(30, b"\x02")
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        t1.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t1.send_unicast.call_args[0]
+        assert sent_mac == _MAC_DEVICE_A
+        npdu = decode_npdu(sent_bytes)
+        assert npdu.message_type == NetworkMessageType.REJECT_MESSAGE_TO_NETWORK
+        msg = decode_network_message(npdu.message_type, npdu.network_message_data)
+        assert isinstance(msg, RejectMessageToNetwork)
+        assert msg.reason == RejectMessageReason.NOT_DIRECTLY_CONNECTED
+        assert msg.network == 30
+
+    def test_unreachable_dnet_not_forwarded(self) -> None:
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=2, next_router_mac=b"\x01")
+        router.routing_table.mark_unreachable(30)
+
+        data = _build_routed_npdu(30, b"\x02")
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        t2.send_broadcast.assert_not_called()
+        t2.send_unicast.assert_not_called()
+
+
+class TestForwardRejectsBusyDNET:
+    """Forwarding to a BUSY DNET sends Reject with ROUTER_BUSY reason."""
+
+    def test_busy_dnet_sends_reject(self) -> None:
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=2, next_router_mac=b"\x01")
+        router.routing_table.mark_busy(30)
+
+        data = _build_routed_npdu(30, b"\x02")
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        t1.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t1.send_unicast.call_args[0]
+        assert sent_mac == _MAC_DEVICE_A
+        npdu = decode_npdu(sent_bytes)
+        assert npdu.message_type == NetworkMessageType.REJECT_MESSAGE_TO_NETWORK
+        msg = decode_network_message(npdu.message_type, npdu.network_message_data)
+        assert isinstance(msg, RejectMessageToNetwork)
+        assert msg.reason == RejectMessageReason.ROUTER_BUSY
+        assert msg.network == 30
+
+    def test_busy_dnet_not_forwarded(self) -> None:
+        """Traffic should NOT be forwarded to a busy network."""
+        router, t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=2, next_router_mac=b"\x01")
+        router.routing_table.mark_busy(30)
+
+        data = _build_routed_npdu(30, b"\x02")
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        t2.send_broadcast.assert_not_called()
+        t2.send_unicast.assert_not_called()
+
+    def test_reachable_dnet_still_forwarded(self) -> None:
+        """Sanity check: REACHABLE DNET is still forwarded normally."""
+        router, t1, t2 = _make_two_port_router()
+        # Network 20 is directly connected and REACHABLE by default.
+        data = _build_routed_npdu(20, _MAC_DEVICE_B)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        t2.send_unicast.assert_called_once()
+        # No reject on arrival port.
+        t1.send_unicast.assert_not_called()
+
+
+class TestRejectRoutedBackWithSNET:
+    """When the originator is on a remote network (SNET/SADR in NPDU),
+    the Reject should be routed back via normal forwarding.
+    """
+
+    def test_reject_routed_to_snet(self) -> None:
+        """Reject for unknown DNET with SNET/SADR routes back via SNET port."""
+        # Three-port router: net 10 (port 1), net 20 (port 2), net 30 (port 3).
+        t1 = _make_transport(local_mac=_MAC_PORT1)
+        t2 = _make_transport(local_mac=_MAC_PORT2)
+        t3 = _make_transport(local_mac=b"\x0a\x00\x00\x03\xba\xc0")
+        p1 = RouterPort(
+            port_id=1,
+            network_number=10,
+            transport=t1,
+            mac_address=_MAC_PORT1,
+            max_npdu_length=1497,
+        )
+        p2 = RouterPort(
+            port_id=2,
+            network_number=20,
+            transport=t2,
+            mac_address=_MAC_PORT2,
+            max_npdu_length=1497,
+        )
+        p3 = RouterPort(
+            port_id=3,
+            network_number=30,
+            transport=t3,
+            mac_address=b"\x0a\x00\x00\x03\xba\xc0",
+            max_npdu_length=1497,
+        )
+        router = NetworkRouter([p1, p2, p3], application_port_id=1)
+
+        # Device on net 30 sends NPDU targeting unknown net 99 via port 2.
+        # SNET=30, SADR=device_mac.
+        source = BACnetAddress(network=30, mac_address=b"\xaa\xbb\xcc\xdd\xee\xff")
+        data = _build_routed_npdu(99, b"\x01\x02\x03\x04\x05\x06", source=source)
+        router._on_port_receive(2, data, _MAC_DEVICE_B)
+
+        # Reject should be sent on port 3 (toward net 30), not port 2.
+        t3.send_unicast.assert_called_once()
+        sent_bytes = t3.send_unicast.call_args[0][0]
+        sent_mac = t3.send_unicast.call_args[0][1]
+        assert sent_mac == b"\xaa\xbb\xcc\xdd\xee\xff"
+
+        npdu = decode_npdu(sent_bytes)
+        assert npdu.message_type == NetworkMessageType.REJECT_MESSAGE_TO_NETWORK
+        assert npdu.destination is not None
+        assert npdu.destination.network == 30
+        msg = decode_network_message(npdu.message_type, npdu.network_message_data)
+        assert isinstance(msg, RejectMessageToNetwork)
+        assert msg.reason == RejectMessageReason.NOT_DIRECTLY_CONNECTED
+        assert msg.network == 99
+
+    def test_reject_fallback_to_arrival_port_when_snet_unreachable(self) -> None:
+        """If SNET is not routable, fall back to sending on arrival port."""
+        router, t1, t2 = _make_two_port_router()
+        # SNET=99 has no route.
+        source = BACnetAddress(network=99, mac_address=b"\xaa\xbb")
+        data = _build_routed_npdu(88, b"\x01", source=source)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        # Falls back to arrival port (port 1).
+        t1.send_unicast.assert_called_once()
+        sent_mac = t1.send_unicast.call_args[0][1]
+        assert sent_mac == _MAC_DEVICE_A

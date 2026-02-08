@@ -532,13 +532,47 @@ class NetworkRouter:
         source_mac: bytes,
         dnet: int,
     ) -> None:
-        """Forward an NPDU toward *dnet*."""
+        """Forward an NPDU toward *dnet*.
+
+        Per Clause 6.6.3.5, sends a Reject-Message-To-Network back
+        toward the source when the DNET is unknown, unreachable, or
+        busy (congestion control per Clause 6.6.4).
+        """
         result = self._routing_table.get_port_for_network(dnet)
         if result is None:
-            logger.debug("No route to network %d, discarding", dnet)
+            logger.debug("No route to network %d, sending reject", dnet)
+            self._send_reject_toward_source(
+                arrival_port_id,
+                npdu,
+                source_mac,
+                RejectMessageReason.NOT_DIRECTLY_CONNECTED,
+                dnet,
+            )
             return
 
         dest_port, entry = result
+
+        # Reachability check (Clause 6.6.4)
+        if entry.reachability == NetworkReachability.UNREACHABLE:
+            logger.debug("Network %d unreachable, sending reject", dnet)
+            self._send_reject_toward_source(
+                arrival_port_id,
+                npdu,
+                source_mac,
+                RejectMessageReason.NOT_DIRECTLY_CONNECTED,
+                dnet,
+            )
+            return
+        if entry.reachability == NetworkReachability.BUSY:
+            logger.debug("Network %d busy, sending reject", dnet)
+            self._send_reject_toward_source(
+                arrival_port_id,
+                npdu,
+                source_mac,
+                RejectMessageReason.ROUTER_BUSY,
+                dnet,
+            )
+            return
 
         # Check if DNET is directly connected
         if entry.next_router_mac is None:
@@ -1004,6 +1038,53 @@ class NetworkRouter:
             broadcast=False,
             dest_mac=dest_mac,
         )
+
+    def _send_reject_toward_source(
+        self,
+        arrival_port_id: int,
+        npdu: NPDU,
+        source_mac: bytes,
+        reason: RejectMessageReason,
+        dnet: int,
+    ) -> None:
+        """Send a Reject-Message-To-Network back toward the originator.
+
+        Per Clause 6.6.3.5, the Reject is sent toward the device that
+        originated the request.  If the NPDU carries SNET/SADR (the
+        originator is on a remote network), the Reject is routed using
+        normal forwarding with DNET/DADR set to the originator.  If
+        there is no SNET/SADR, the originator is directly connected on
+        the arrival port so we unicast to its data-link MAC.
+        """
+        if npdu.source is not None:
+            # Originator is remote -- build a routed Reject.
+            msg = RejectMessageToNetwork(reason=reason, network=dnet)
+            msg_type = _message_type_for(msg)
+            data = encode_network_message(msg)
+            reject_npdu = NPDU(
+                is_network_message=True,
+                message_type=msg_type,
+                network_message_data=data,
+                destination=npdu.source,
+                hop_count=255,
+            )
+            encoded = encode_npdu(reject_npdu)
+            # Route via the port that can reach SNET.
+            result = self._routing_table.get_port_for_network(npdu.source.network)
+            if result is not None:
+                out_port, entry = result
+                if entry.next_router_mac is not None:
+                    out_port.transport.send_unicast(encoded, entry.next_router_mac)
+                elif len(npdu.source.mac_address) > 0:
+                    out_port.transport.send_unicast(encoded, npdu.source.mac_address)
+                else:
+                    out_port.transport.send_broadcast(encoded)
+            else:
+                # Can't route back; fall back to arrival port
+                self._send_reject(arrival_port_id, source_mac, reason, dnet)
+        else:
+            # Originator is directly connected on the arrival port.
+            self._send_reject(arrival_port_id, source_mac, reason, dnet)
 
     # -- Application-layer send ---------------------------------------------
 

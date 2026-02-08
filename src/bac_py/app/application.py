@@ -28,6 +28,7 @@ from bac_py.segmentation.manager import compute_max_segment_payload
 from bac_py.services.base import ServiceRegistry
 from bac_py.services.cov import COVNotificationRequest
 from bac_py.services.errors import BACnetAbortError, BACnetError, BACnetRejectError
+from bac_py.transport.bbmd import BDTEntry
 from bac_py.transport.bip import BIPTransport
 from bac_py.types.enums import (
     AbortReason,
@@ -46,6 +47,19 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class BBMDConfig:
+    """Configuration for BBMD on a router port.
+
+    Attributes:
+        bdt_entries: Initial Broadcast Distribution Table entries
+            (including self).  If empty, the BBMD starts with an
+            empty BDT (foreign-device-only mode).
+    """
+
+    bdt_entries: list[BDTEntry] = field(default_factory=list)
+
+
+@dataclass
 class RouterPortConfig:
     """Configuration for a single router port."""
 
@@ -53,6 +67,7 @@ class RouterPortConfig:
     network_number: int
     interface: str = "0.0.0.0"
     port: int = 0xBAC0
+    bbmd_config: BBMDConfig | None = None
 
 
 @dataclass
@@ -198,6 +213,11 @@ class BACnetApplication:
             transport = BIPTransport(interface=pc.interface, port=pc.port)
             await transport.start()
             self._transports.append(transport)
+
+            # Attach BBMD if configured for this port
+            if pc.bbmd_config is not None:
+                await transport.attach_bbmd(pc.bbmd_config.bdt_entries or None)
+
             port = RouterPort(
                 port_id=pc.port_id,
                 network_number=pc.network_number,
