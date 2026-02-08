@@ -424,6 +424,8 @@ class PropertyIdentifier(IntEnum):
     POWER = 384
     TRANSITION = 385
     EGRESS_ACTIVE = 386
+    FAULT_HIGH_LIMIT = 388
+    FAULT_LOW_LIMIT = 389
     CURRENT_COMMAND_PRIORITY = 431
 
 
@@ -937,3 +939,32 @@ class FileAccessMethod(IntEnum):
 
     STREAM_ACCESS = 0
     RECORD_ACCESS = 1
+
+
+class ProgramState(IntEnum):
+    """BACnetProgramState values (Clause 12.22)."""
+
+    IDLE = 0
+    LOADING = 1
+    RUNNING = 2
+    WAITING = 3
+    HALTED = 4
+    UNLOADING = 5
+
+
+class ProgramChange(IntEnum):
+    """BACnetProgramRequest values (Clause 12.22)."""
+
+    READY = 0
+    LOAD = 1
+    RUN = 2
+    HALT = 3
+    RESTART = 4
+    UNLOAD = 5
+
+
+class Action(IntEnum):
+    """BACnetAction values (Clause 12.17)."""
+
+    DIRECT = 0
+    REVERSE = 1

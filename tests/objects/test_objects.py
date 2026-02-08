@@ -210,9 +210,9 @@ class TestObjectFactory:
         assert dev.object_identifier.instance_number == 42
 
     def test_create_unsupported_type_raises(self):
-        # CALENDAR is not registered
+        # GROUP is not registered
         with pytest.raises(BACnetError) as exc_info:
-            create_object(ObjectType.CALENDAR, 1)
+            create_object(ObjectType.GROUP, 1)
         assert exc_info.value.error_code == ErrorCode.UNSUPPORTED_OBJECT_TYPE
 
 
