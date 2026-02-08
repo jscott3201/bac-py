@@ -464,9 +464,7 @@ class TestBBMDBroadcastForwarding:
     def test_forwarded_npdu_sent_to_foreign_devices(
         self, bbmd_with_bdt: BBMDManager, collector: SentCollector
     ):
-        """When a BBMD receives Forwarded-NPDU from another BBMD,
-        it forwards to registered foreign devices.
-        """
+        """When a BBMD receives Forwarded-NPDU from another BBMD, it forwards to registered foreign devices."""
         self._register_fd(bbmd_with_bdt, FD_ADDR)
         collector.clear()
 
@@ -499,9 +497,7 @@ class TestBBMDBroadcastForwarding:
     def test_forwarded_npdu_not_re_forwarded_to_bdt_peers(
         self, bbmd_with_bdt: BBMDManager, collector: SentCollector
     ):
-        """Forwarded-NPDU should NOT be re-forwarded to BDT peers
-        (only Original-Broadcast-NPDU triggers peer forwarding).
-        """
+        """Forwarded-NPDU should NOT be re-forwarded to BDT peers (only Original-Broadcast-NPDU triggers peer forwarding)."""
         npdu = b"\x01\x00\x10"
         collector.clear()
         bbmd_with_bdt.handle_bvlc(

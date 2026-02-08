@@ -846,7 +846,7 @@ class DefaultServerHandlers:
         if request.list_of_initial_values:
             for pv in request.list_of_initial_values:
                 prop_name = pv.property_identifier.name.lower()
-                kwargs[prop_name] = pv.property_value
+                kwargs[prop_name] = pv.value
 
         obj = create_object(obj_type, instance, **kwargs)
         self._db.add(obj)

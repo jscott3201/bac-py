@@ -44,6 +44,7 @@ class WhoHasRequest:
     high_limit: int | None = None
 
     def encode(self) -> bytes:
+        """Encode WhoHasRequest to bytes."""
         buf = bytearray()
         # Optional limits
         if self.low_limit is not None and self.high_limit is not None:
@@ -66,6 +67,7 @@ class WhoHasRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> WhoHasRequest:
+        """Decode WhoHasRequest from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 
@@ -123,6 +125,7 @@ class IHaveRequest:
     object_name: str
 
     def encode(self) -> bytes:
+        """Encode IHaveRequest to bytes."""
         buf = bytearray()
         buf.extend(
             encode_application_object_id(
@@ -141,6 +144,7 @@ class IHaveRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> IHaveRequest:
+        """Decode IHaveRequest from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 

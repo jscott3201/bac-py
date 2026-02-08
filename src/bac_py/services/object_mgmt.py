@@ -41,6 +41,7 @@ class CreateObjectRequest:
     list_of_initial_values: list[BACnetPropertyValue] | None = None
 
     def encode(self) -> bytes:
+        """Encode CreateObjectRequest to bytes."""
         buf = bytearray()
         # [0] objectSpecifier
         buf.extend(encode_opening_tag(0))
@@ -67,6 +68,7 @@ class CreateObjectRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> CreateObjectRequest:
+        """Decode CreateObjectRequest from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 
@@ -132,6 +134,7 @@ class DeleteObjectRequest:
     object_identifier: ObjectIdentifier
 
     def encode(self) -> bytes:
+        """Encode DeleteObjectRequest to bytes."""
         return encode_application_object_id(
             self.object_identifier.object_type,
             self.object_identifier.instance_number,
@@ -139,6 +142,7 @@ class DeleteObjectRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> DeleteObjectRequest:
+        """Decode DeleteObjectRequest from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 

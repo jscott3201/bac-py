@@ -57,7 +57,7 @@ class TestStreamAccess:
         f = FileObject(1, file_access_method=FileAccessMethod.STREAM_ACCESS)
         f.write_stream(0, b"Hello BACnet")
         f.write_stream(6, b"World!")
-        data, eof = f.read_stream(0, 100)
+        data, _eof = f.read_stream(0, 100)
         assert data == b"Hello World!"
 
     def test_write_append(self):
@@ -65,14 +65,14 @@ class TestStreamAccess:
         f.write_stream(0, b"Hello ")
         start = f.write_stream(-1, b"BACnet")
         assert start == 6
-        data, eof = f.read_stream(0, 100)
+        data, _eof = f.read_stream(0, 100)
         assert data == b"Hello BACnet"
 
     def test_write_beyond_eof_pads_zeros(self):
         f = FileObject(1, file_access_method=FileAccessMethod.STREAM_ACCESS)
         f.write_stream(0, b"AB")
         f.write_stream(5, b"CD")
-        data, eof = f.read_stream(0, 100)
+        data, _eof = f.read_stream(0, 100)
         assert data == b"AB\x00\x00\x00CD"
         assert f.read_property(PropertyIdentifier.FILE_SIZE) == 7
 
@@ -119,14 +119,14 @@ class TestRecordAccess:
         f.write_records(0, [b"rec1", b"rec2"])
         start = f.write_records(-1, [b"rec3", b"rec4"])
         assert start == 2
-        records, eof = f.read_records(0, 10)
+        records, _eof = f.read_records(0, 10)
         assert records == [b"rec1", b"rec2", b"rec3", b"rec4"]
 
     def test_overwrite_records(self):
         f = FileObject(1, file_access_method=FileAccessMethod.RECORD_ACCESS)
         f.write_records(0, [b"rec1", b"rec2", b"rec3"])
         f.write_records(1, [b"new2"])
-        records, eof = f.read_records(0, 10)
+        records, _eof = f.read_records(0, 10)
         assert records == [b"rec1", b"new2", b"rec3"]
 
     def test_read_empty_records(self):

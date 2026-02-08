@@ -7,6 +7,7 @@ between BACnet/IP subnets, and foreign device registration handling.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
 from dataclasses import dataclass
@@ -100,7 +101,7 @@ def _compute_forward_address(entry: BDTEntry) -> BIPAddress:
     ip_bytes = bytes(int(x) for x in entry.address.host.split("."))
     mask = entry.broadcast_mask
     inv_mask = bytes(~b & 0xFF for b in mask)
-    dest_ip = bytes(a | b for a, b in zip(ip_bytes, inv_mask))
+    dest_ip = bytes(a | b for a, b in zip(ip_bytes, inv_mask, strict=True))
     host = ".".join(str(b) for b in dest_ip)
     return BIPAddress(host=host, port=entry.address.port)
 
@@ -168,10 +169,8 @@ class BBMDManager:
         """Stop the FDT cleanup background task."""
         if self._cleanup_task is not None:
             self._cleanup_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
             self._cleanup_task = None
 
     def handle_bvlc(self, function: BvlcFunction, data: bytes, source: BIPAddress) -> bool:

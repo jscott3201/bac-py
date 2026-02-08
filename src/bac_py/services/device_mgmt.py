@@ -7,7 +7,7 @@ TimeSynchronization (Clause 16.7), and UTCTimeSynchronization (Clause 16.8).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Self
+from typing import TYPE_CHECKING, Self
 
 from bac_py.encoding.primitives import (
     decode_character_string,
@@ -23,7 +23,9 @@ from bac_py.encoding.primitives import (
 )
 from bac_py.encoding.tags import TagClass, decode_tag
 from bac_py.types.enums import EnableDisable, ReinitializedState
-from bac_py.types.primitives import BACnetDate, BACnetTime
+
+if TYPE_CHECKING:
+    from bac_py.types.primitives import BACnetDate, BACnetTime
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +46,7 @@ class DeviceCommunicationControlRequest:
     password: str | None = None
 
     def encode(self) -> bytes:
+        """Encode DeviceCommunicationControl-Request to bytes."""
         buf = bytearray()
         # [0] timeDuration (optional)
         if self.time_duration is not None:
@@ -57,6 +60,7 @@ class DeviceCommunicationControlRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> DeviceCommunicationControlRequest:
+        """Decode DeviceCommunicationControl-Request from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 
@@ -105,6 +109,7 @@ class ReinitializeDeviceRequest:
     password: str | None = None
 
     def encode(self) -> bytes:
+        """Encode ReinitializeDevice-Request to bytes."""
         buf = bytearray()
         # [0] reinitializedStateOfDevice
         buf.extend(encode_context_tagged(0, encode_enumerated(self.reinitialized_state)))
@@ -115,6 +120,7 @@ class ReinitializeDeviceRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ReinitializeDeviceRequest:
+        """Decode ReinitializeDevice-Request from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 
@@ -158,6 +164,7 @@ class TimeSynchronizationRequest:
     time: BACnetTime
 
     def encode(self) -> bytes:
+        """Encode TimeSynchronization-Request to bytes."""
         buf = bytearray()
         buf.extend(encode_application_date(self.date))
         buf.extend(encode_application_time(self.time))
@@ -165,6 +172,7 @@ class TimeSynchronizationRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> Self:
+        """Decode TimeSynchronization-Request from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 

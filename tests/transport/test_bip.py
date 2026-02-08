@@ -90,8 +90,11 @@ class TestUDPProtocol:
 
     def test_datagram_received_passes_exact_data(self):
         received = []
-        callback = lambda data, addr: received.append((data, addr))
-        protocol = _UDPProtocol(callback)
+
+        def _collect(data, addr):
+            received.append((data, addr))
+
+        protocol = _UDPProtocol(_collect)
 
         protocol.datagram_received(b"\xff\xfe", ("10.0.0.1", 9999))
 
@@ -185,7 +188,7 @@ class TestOnDatagramReceived:
         callback.assert_not_called()
 
     def test_bvlc_result_handled_logs_debug(self, caplog):
-        transport, callback = self._make_transport_with_callback()
+        transport, _callback = self._make_transport_with_callback()
         result_data = b"\x00\x30"  # register-foreign-device NAK
         bvll_data = encode_bvll(BvlcFunction.BVLC_RESULT, result_data)
         addr = ("192.168.1.1", 47808)
@@ -207,7 +210,7 @@ class TestOnDatagramReceived:
         callback.assert_not_called()
 
     def test_unknown_bvlc_function_logs_debug(self, caplog):
-        transport, callback = self._make_transport_with_callback()
+        transport, _callback = self._make_transport_with_callback()
         payload = b"\x00\x3c"
         bvll_data = encode_bvll(BvlcFunction.REGISTER_FOREIGN_DEVICE, payload)
         addr = ("192.168.1.50", 47808)
@@ -228,7 +231,7 @@ class TestOnDatagramReceived:
         callback.assert_not_called()
 
     def test_malformed_bvll_logs_warning(self, caplog):
-        transport, callback = self._make_transport_with_callback()
+        transport, _callback = self._make_transport_with_callback()
         garbage = b"\xff\xff\xff"
         addr = ("10.0.0.1", 47808)
 

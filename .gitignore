@@ -3,7 +3,7 @@ _ctx/
 _data/
 _dev/
 _deprecated/
-design_docs/
+design_docs/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

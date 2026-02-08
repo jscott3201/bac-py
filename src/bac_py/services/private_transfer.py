@@ -39,6 +39,7 @@ class ConfirmedPrivateTransferRequest:
     service_parameters: bytes | None = None
 
     def encode(self) -> bytes:
+        """Encode ConfirmedPrivateTransferRequest to bytes."""
         buf = bytearray()
         buf.extend(encode_context_tagged(0, encode_unsigned(self.vendor_id)))
         buf.extend(encode_context_tagged(1, encode_unsigned(self.service_number)))
@@ -50,6 +51,7 @@ class ConfirmedPrivateTransferRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> Self:
+        """Decode ConfirmedPrivateTransferRequest from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 
@@ -91,6 +93,7 @@ class ConfirmedPrivateTransferACK:
     result_block: bytes | None = None
 
     def encode(self) -> bytes:
+        """Encode ConfirmedPrivateTransferACK to bytes."""
         buf = bytearray()
         buf.extend(encode_context_tagged(0, encode_unsigned(self.vendor_id)))
         buf.extend(encode_context_tagged(1, encode_unsigned(self.service_number)))
@@ -102,6 +105,7 @@ class ConfirmedPrivateTransferACK:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ConfirmedPrivateTransferACK:
+        """Decode ConfirmedPrivateTransferACK from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 

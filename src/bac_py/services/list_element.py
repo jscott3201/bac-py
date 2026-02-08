@@ -47,6 +47,7 @@ class AddListElementRequest:
     property_array_index: int | None = None
 
     def encode(self) -> bytes:
+        """Encode AddListElementRequest to bytes."""
         buf = bytearray()
         # [0] objectIdentifier
         buf.extend(
@@ -71,6 +72,7 @@ class AddListElementRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AddListElementRequest:
+        """Decode AddListElementRequest from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 
@@ -126,6 +128,7 @@ class RemoveListElementRequest:
     property_array_index: int | None = None
 
     def encode(self) -> bytes:
+        """Encode RemoveListElementRequest to bytes."""
         buf = bytearray()
         buf.extend(
             encode_context_tagged(
@@ -146,6 +149,7 @@ class RemoveListElementRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> RemoveListElementRequest:
+        """Decode RemoveListElementRequest from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 

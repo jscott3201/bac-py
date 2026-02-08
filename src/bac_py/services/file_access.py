@@ -66,6 +66,7 @@ class AtomicReadFileRequest:
     access_method: StreamReadAccess | RecordReadAccess
 
     def encode(self) -> bytes:
+        """Encode AtomicReadFileRequest to bytes."""
         buf = bytearray()
         # fileIdentifier (APPLICATION-tagged)
         buf.extend(
@@ -88,6 +89,7 @@ class AtomicReadFileRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AtomicReadFileRequest:
+        """Decode AtomicReadFileRequest from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 
@@ -169,6 +171,7 @@ class AtomicReadFileACK:
     access_method: StreamReadACK | RecordReadACK
 
     def encode(self) -> bytes:
+        """Encode AtomicReadFileACK to bytes."""
         buf = bytearray()
         # endOfFile (APPLICATION-tagged boolean)
         buf.extend(encode_application_boolean(self.end_of_file))
@@ -188,6 +191,7 @@ class AtomicReadFileACK:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AtomicReadFileACK:
+        """Decode AtomicReadFileACK from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 
@@ -278,6 +282,7 @@ class AtomicWriteFileRequest:
     access_method: StreamWriteAccess | RecordWriteAccess
 
     def encode(self) -> bytes:
+        """Encode AtomicWriteFileRequest to bytes."""
         buf = bytearray()
         buf.extend(
             encode_application_object_id(
@@ -301,6 +306,7 @@ class AtomicWriteFileRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AtomicWriteFileRequest:
+        """Decode AtomicWriteFileRequest from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 
@@ -360,6 +366,7 @@ class AtomicWriteFileACK:
     file_start: int
 
     def encode(self) -> bytes:
+        """Encode AtomicWriteFileACK to bytes."""
         from bac_py.encoding.primitives import encode_context_tagged, encode_signed
 
         tag_number = 0 if self.is_stream else 1
@@ -367,6 +374,7 @@ class AtomicWriteFileACK:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AtomicWriteFileACK:
+        """Decode AtomicWriteFileACK from bytes."""
         if isinstance(data, bytes):
             data = memoryview(data)
 
