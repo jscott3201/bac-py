@@ -7,6 +7,7 @@ TimeSynchronization (Clause 16.7), and UTCTimeSynchronization (Clause 16.8).
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Self
 
 from bac_py.encoding.primitives import (
     decode_character_string,
@@ -163,7 +164,7 @@ class TimeSynchronizationRequest:
         return bytes(buf)
 
     @classmethod
-    def decode(cls, data: memoryview | bytes) -> TimeSynchronizationRequest:
+    def decode(cls, data: memoryview | bytes) -> Self:
         if isinstance(data, bytes):
             data = memoryview(data)
 
@@ -182,36 +183,9 @@ class TimeSynchronizationRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class UTCTimeSynchronizationRequest:
+class UTCTimeSynchronizationRequest(TimeSynchronizationRequest):
     """UTCTimeSynchronization-Request (Clause 16.8.1).
 
     Same structure as TimeSynchronizationRequest but uses
     UnconfirmedServiceChoice.UTC_TIME_SYNCHRONIZATION (9).
     """
-
-    date: BACnetDate
-    time: BACnetTime
-
-    def encode(self) -> bytes:
-        buf = bytearray()
-        buf.extend(encode_application_date(self.date))
-        buf.extend(encode_application_time(self.time))
-        return bytes(buf)
-
-    @classmethod
-    def decode(cls, data: memoryview | bytes) -> UTCTimeSynchronizationRequest:
-        if isinstance(data, bytes):
-            data = memoryview(data)
-
-        offset = 0
-
-        # Date (application tag 10)
-        tag, offset = decode_tag(data, offset)
-        date = decode_date(data[offset : offset + tag.length])
-        offset += tag.length
-
-        # Time (application tag 11)
-        tag, offset = decode_tag(data, offset)
-        time = decode_time(data[offset : offset + tag.length])
-
-        return cls(date=date, time=time)

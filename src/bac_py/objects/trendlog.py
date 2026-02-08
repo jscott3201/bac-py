@@ -9,6 +9,7 @@ from bac_py.objects.base import (
     PropertyAccess,
     PropertyDefinition,
     register_object_type,
+    standard_properties,
 )
 from bac_py.types.constructed import StatusFlags
 from bac_py.types.enums import (
@@ -17,7 +18,6 @@ from bac_py.types.enums import (
     PropertyIdentifier,
     Reliability,
 )
-from bac_py.types.primitives import ObjectIdentifier
 
 
 @register_object_type
@@ -32,30 +32,7 @@ class TrendLogObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.TREND_LOG
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
+        **standard_properties(),
         PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
             PropertyIdentifier.STATUS_FLAGS,
             StatusFlags,
@@ -171,18 +148,11 @@ class TrendLogObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
     }
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+        self._init_status_flags()
         if PropertyIdentifier.LOG_BUFFER not in self._properties:
             self._properties[PropertyIdentifier.LOG_BUFFER] = []
         if PropertyIdentifier.LOGGING_TYPE not in self._properties:

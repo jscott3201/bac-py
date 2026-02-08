@@ -74,7 +74,9 @@ class ObjectIdentifier:
     def from_dict(cls, data: dict[str, Any]) -> ObjectIdentifier:
         """Reconstruct from a JSON-friendly dict."""
         obj_type = _enum_from_dict(ObjectType, data["object_type"])
-        assert isinstance(obj_type, ObjectType)
+        if not isinstance(obj_type, ObjectType):
+            msg = f"Expected ObjectType, got {type(obj_type).__name__}"
+            raise TypeError(msg)
         return cls(
             object_type=obj_type,
             instance_number=data["instance"],

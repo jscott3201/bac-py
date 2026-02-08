@@ -11,6 +11,11 @@ import orjson
 class JsonSerializer:
     """JSON serializer using orjson for high-performance encoding.
 
+    ``bytes`` and ``memoryview`` values are encoded as hex strings.
+    Since JSON has no binary type, deserialization returns them as
+    plain strings — callers must use ``bytes.fromhex()`` when
+    round-tripping binary data.
+
     Args:
         pretty: Indent output with 2 spaces.
         sort_keys: Sort dict keys alphabetically.

@@ -142,3 +142,42 @@ def decode_tag(buf: memoryview | bytes, offset: int) -> tuple[Tag, int]:
             offset += 4
 
     return Tag(number=tag_number, cls=cls, length=length), offset
+
+
+def extract_context_value(
+    data: memoryview | bytes,
+    offset: int,
+    tag_number: int,
+) -> tuple[bytes, int]:
+    """Extract raw bytes enclosed by a context opening/closing tag pair.
+
+    Reads from ``offset`` (which should point just past the opening tag)
+    through the matching closing tag, handling nested opening/closing tags.
+
+    Args:
+        data: Buffer to read from.
+        offset: Position immediately after the opening tag.
+        tag_number: The context tag number of the enclosing pair.
+
+    Returns:
+        Tuple of (enclosed raw bytes, offset past the closing tag).
+    """
+    if isinstance(data, bytes):
+        data = memoryview(data)
+    value_start = offset
+    depth = 1
+    while depth > 0 and offset < len(data):
+        t, new_offset = decode_tag(data, offset)
+        if t.is_opening:
+            depth += 1
+            offset = new_offset
+        elif t.is_closing:
+            depth -= 1
+            if depth == 0:
+                value_end = offset
+                return bytes(data[value_start:value_end]), new_offset
+            offset = new_offset
+        else:
+            offset = new_offset + t.length
+    msg = f"Missing closing tag {tag_number}"
+    raise ValueError(msg)

@@ -8,7 +8,15 @@ from enum import IntEnum
 from typing import Any, ClassVar
 
 from bac_py.services.errors import BACnetError
-from bac_py.types.enums import ErrorClass, ErrorCode, ObjectType, PropertyIdentifier
+from bac_py.types.constructed import StatusFlags
+from bac_py.types.enums import (
+    ErrorClass,
+    ErrorCode,
+    EventState,
+    ObjectType,
+    PropertyIdentifier,
+    Reliability,
+)
 from bac_py.types.primitives import ObjectIdentifier
 
 
@@ -29,6 +37,118 @@ class PropertyDefinition:
     access: PropertyAccess
     required: bool
     default: Any = None
+
+
+def standard_properties() -> dict[PropertyIdentifier, PropertyDefinition]:
+    """Properties common to all BACnet objects (Clause 12.1).
+
+    Includes the required Object_Identifier/Object_Name/Object_Type
+    triad, the optional Description, and the required Property_List.
+    """
+    return {
+        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
+            PropertyIdentifier.OBJECT_IDENTIFIER,
+            ObjectIdentifier,
+            PropertyAccess.READ_ONLY,
+            required=True,
+        ),
+        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
+            PropertyIdentifier.OBJECT_NAME,
+            str,
+            PropertyAccess.READ_WRITE,
+            required=True,
+        ),
+        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
+            PropertyIdentifier.OBJECT_TYPE,
+            ObjectType,
+            PropertyAccess.READ_ONLY,
+            required=True,
+        ),
+        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
+            PropertyIdentifier.DESCRIPTION,
+            str,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
+            PropertyIdentifier.PROPERTY_LIST,
+            list,
+            PropertyAccess.READ_ONLY,
+            required=True,
+        ),
+    }
+
+
+def status_properties() -> dict[PropertyIdentifier, PropertyDefinition]:
+    """Status monitoring properties shared by most objects (Clause 12).
+
+    Includes Status_Flags, Event_State, Reliability, and Out_Of_Service.
+    """
+    return {
+        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
+            PropertyIdentifier.STATUS_FLAGS,
+            StatusFlags,
+            PropertyAccess.READ_ONLY,
+            required=True,
+        ),
+        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
+            PropertyIdentifier.EVENT_STATE,
+            EventState,
+            PropertyAccess.READ_ONLY,
+            required=True,
+            default=EventState.NORMAL,
+        ),
+        PropertyIdentifier.RELIABILITY: PropertyDefinition(
+            PropertyIdentifier.RELIABILITY,
+            Reliability,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
+            PropertyIdentifier.OUT_OF_SERVICE,
+            bool,
+            PropertyAccess.READ_WRITE,
+            required=True,
+            default=False,
+        ),
+    }
+
+
+def commandable_properties(
+    value_type: type,
+    default: Any,
+    *,
+    required: bool = True,
+) -> dict[PropertyIdentifier, PropertyDefinition]:
+    """Properties for commandable objects (Clause 19).
+
+    Args:
+        value_type: Type of the Relinquish_Default value.
+        default: Default value for Relinquish_Default.
+        required: Whether commandable properties are required
+            (True for Output objects, False for optionally commandable Values).
+    """
+    return {
+        PropertyIdentifier.PRIORITY_ARRAY: PropertyDefinition(
+            PropertyIdentifier.PRIORITY_ARRAY,
+            list,
+            PropertyAccess.READ_ONLY,
+            required=required,
+        ),
+        PropertyIdentifier.RELINQUISH_DEFAULT: PropertyDefinition(
+            PropertyIdentifier.RELINQUISH_DEFAULT,
+            value_type,
+            PropertyAccess.READ_WRITE,
+            required=required,
+            default=default if required else None,
+        ),
+        PropertyIdentifier.CURRENT_COMMAND_PRIORITY: PropertyDefinition(
+            PropertyIdentifier.CURRENT_COMMAND_PRIORITY,
+            int,
+            PropertyAccess.READ_ONLY,
+            required=required,
+        ),
+    }
 
 
 class BACnetObject:
@@ -66,6 +186,18 @@ class BACnetObject:
     def object_identifier(self) -> ObjectIdentifier:
         """The object identifier for this object."""
         return self._object_id
+
+    def _init_status_flags(self) -> None:
+        """Initialize Status_Flags to default if not already set."""
+        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
+            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+
+    def _init_commandable(self, relinquish_default: Any) -> None:
+        """Initialize the priority array for a commandable object."""
+        self._priority_array = [None] * 16
+        self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
+        if PropertyIdentifier.RELINQUISH_DEFAULT not in self._properties:
+            self._properties[PropertyIdentifier.RELINQUISH_DEFAULT] = relinquish_default
 
     def read_property(
         self,

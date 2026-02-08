@@ -70,6 +70,10 @@ def decode_bvll(data: memoryview | bytes) -> BvllMessage:
     function = BvlcFunction(data[1])
     length = (data[2] << 8) | data[3]
 
+    if length < BVLL_HEADER_LENGTH or length > len(data):
+        msg = f"Invalid BVLL length: declared {length}, actual {len(data)}"
+        raise ValueError(msg)
+
     if function == BvlcFunction.FORWARDED_NPDU:
         orig_addr = BIPAddress.decode(data[4:10])
         return BvllMessage(

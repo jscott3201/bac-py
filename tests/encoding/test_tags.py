@@ -7,6 +7,7 @@ from bac_py.encoding.tags import (
     encode_closing_tag,
     encode_opening_tag,
     encode_tag,
+    extract_context_value,
 )
 
 
@@ -275,3 +276,81 @@ class TestTagDataclass:
         tag = Tag(number=0, cls=TagClass.APPLICATION, length=4)
         with pytest.raises(AttributeError):
             tag.number = 1  # type: ignore[misc]
+
+
+class TestExtractContextValue:
+    def test_simple_value(self):
+        """Extract value between opening tag 3 and closing tag 3."""
+        inner = encode_tag(1, TagClass.APPLICATION, 2) + b"\x01\x02"
+        buf = encode_opening_tag(3) + inner + encode_closing_tag(3)
+        # offset starts after opening tag
+        _, offset = decode_tag(buf, 0)
+        value, end_offset = extract_context_value(buf, offset, 3)
+        assert value == inner
+        assert end_offset == len(buf)
+
+    def test_nested_opening_closing(self):
+        """Handle nested opening/closing tag pairs correctly."""
+        inner_nested = (
+            encode_opening_tag(5)
+            + encode_tag(0, TagClass.APPLICATION, 1)
+            + b"\x42"
+            + encode_closing_tag(5)
+        )
+        buf = encode_opening_tag(3) + inner_nested + encode_closing_tag(3)
+        _, offset = decode_tag(buf, 0)
+        value, end_offset = extract_context_value(buf, offset, 3)
+        assert value == inner_nested
+        assert end_offset == len(buf)
+
+    def test_empty_value(self):
+        """Opening tag immediately followed by closing tag."""
+        buf = encode_opening_tag(2) + encode_closing_tag(2)
+        _, offset = decode_tag(buf, 0)
+        value, end_offset = extract_context_value(buf, offset, 2)
+        assert value == b""
+        assert end_offset == len(buf)
+
+    def test_missing_closing_tag_raises(self):
+        """Missing closing tag raises ValueError."""
+        buf = encode_opening_tag(3) + encode_tag(0, TagClass.APPLICATION, 1) + b"\x42"
+        _, offset = decode_tag(buf, 0)
+        with pytest.raises(ValueError, match="Missing closing tag"):
+            extract_context_value(buf, offset, 3)
+
+    def test_bytes_input(self):
+        """Works with bytes (not just memoryview)."""
+        inner = b"\xde\xad"
+        buf = bytes(
+            encode_opening_tag(4)
+            + encode_tag(0, TagClass.APPLICATION, 2)
+            + inner
+            + encode_closing_tag(4)
+        )
+        _, offset = decode_tag(buf, 0)
+        value, _ = extract_context_value(buf, offset, 4)
+        expected_inner = encode_tag(0, TagClass.APPLICATION, 2) + inner
+        assert value == expected_inner
+
+    def test_memoryview_input(self):
+        """Works with memoryview input."""
+        inner = encode_tag(1, TagClass.APPLICATION, 1) + b"\xff"
+        buf = memoryview(encode_opening_tag(0) + inner + encode_closing_tag(0))
+        _, offset = decode_tag(buf, 0)
+        value, _ = extract_context_value(buf, offset, 0)
+        assert value == inner
+
+    def test_deeply_nested(self):
+        """Handle multiple levels of nesting."""
+        level2 = (
+            encode_opening_tag(7)
+            + encode_tag(0, TagClass.APPLICATION, 1)
+            + b"\x01"
+            + encode_closing_tag(7)
+        )
+        level1 = encode_opening_tag(5) + level2 + encode_closing_tag(5)
+        buf = encode_opening_tag(3) + level1 + encode_closing_tag(3)
+        _, offset = decode_tag(buf, 0)
+        value, end_offset = extract_context_value(buf, offset, 3)
+        assert value == level1
+        assert end_offset == len(buf)

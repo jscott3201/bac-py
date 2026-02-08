@@ -8,17 +8,16 @@ from bac_py.objects.base import (
     BACnetObject,
     PropertyAccess,
     PropertyDefinition,
+    commandable_properties,
     register_object_type,
+    standard_properties,
+    status_properties,
 )
-from bac_py.types.constructed import StatusFlags
 from bac_py.types.enums import (
     EngineeringUnits,
-    EventState,
     ObjectType,
     PropertyIdentifier,
-    Reliability,
 )
-from bac_py.types.primitives import ObjectIdentifier
 
 
 @register_object_type
@@ -32,24 +31,7 @@ class IntegerValueObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.INTEGER_VALUE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             int,
@@ -57,38 +39,7 @@ class IntegerValueObject(BACnetObject):
             required=True,
             default=0,
         ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=False,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=False,
-            default=False,
-        ),
+        **status_properties(),
         PropertyIdentifier.UNITS: PropertyDefinition(
             PropertyIdentifier.UNITS,
             EngineeringUnits,
@@ -120,30 +71,7 @@ class IntegerValueObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
-        PropertyIdentifier.PRIORITY_ARRAY: PropertyDefinition(
-            PropertyIdentifier.PRIORITY_ARRAY,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.RELINQUISH_DEFAULT: PropertyDefinition(
-            PropertyIdentifier.RELINQUISH_DEFAULT,
-            int,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.CURRENT_COMMAND_PRIORITY: PropertyDefinition(
-            PropertyIdentifier.CURRENT_COMMAND_PRIORITY,
-            int,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **commandable_properties(int, 0, required=False),
     }
 
     def __init__(
@@ -155,12 +83,8 @@ class IntegerValueObject(BACnetObject):
     ) -> None:
         super().__init__(instance_number, **initial_properties)
         if commandable:
-            self._priority_array = [None] * 16
-            self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
-            if PropertyIdentifier.RELINQUISH_DEFAULT not in self._properties:
-                self._properties[PropertyIdentifier.RELINQUISH_DEFAULT] = 0
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+            self._init_commandable(0)
+        self._init_status_flags()
 
 
 @register_object_type
@@ -174,24 +98,7 @@ class PositiveIntegerValueObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.POSITIVE_INTEGER_VALUE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             int,
@@ -199,38 +106,7 @@ class PositiveIntegerValueObject(BACnetObject):
             required=True,
             default=0,
         ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=False,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=False,
-            default=False,
-        ),
+        **status_properties(),
         PropertyIdentifier.UNITS: PropertyDefinition(
             PropertyIdentifier.UNITS,
             EngineeringUnits,
@@ -262,30 +138,7 @@ class PositiveIntegerValueObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
-        PropertyIdentifier.PRIORITY_ARRAY: PropertyDefinition(
-            PropertyIdentifier.PRIORITY_ARRAY,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.RELINQUISH_DEFAULT: PropertyDefinition(
-            PropertyIdentifier.RELINQUISH_DEFAULT,
-            int,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.CURRENT_COMMAND_PRIORITY: PropertyDefinition(
-            PropertyIdentifier.CURRENT_COMMAND_PRIORITY,
-            int,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **commandable_properties(int, 0, required=False),
     }
 
     def __init__(
@@ -297,12 +150,8 @@ class PositiveIntegerValueObject(BACnetObject):
     ) -> None:
         super().__init__(instance_number, **initial_properties)
         if commandable:
-            self._priority_array = [None] * 16
-            self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
-            if PropertyIdentifier.RELINQUISH_DEFAULT not in self._properties:
-                self._properties[PropertyIdentifier.RELINQUISH_DEFAULT] = 0
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+            self._init_commandable(0)
+        self._init_status_flags()
 
 
 @register_object_type
@@ -316,24 +165,7 @@ class LargeAnalogValueObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.LARGE_ANALOG_VALUE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             float,
@@ -341,38 +173,7 @@ class LargeAnalogValueObject(BACnetObject):
             required=True,
             default=0.0,
         ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=False,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=False,
-            default=False,
-        ),
+        **status_properties(),
         PropertyIdentifier.UNITS: PropertyDefinition(
             PropertyIdentifier.UNITS,
             EngineeringUnits,
@@ -404,30 +205,7 @@ class LargeAnalogValueObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
-        PropertyIdentifier.PRIORITY_ARRAY: PropertyDefinition(
-            PropertyIdentifier.PRIORITY_ARRAY,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.RELINQUISH_DEFAULT: PropertyDefinition(
-            PropertyIdentifier.RELINQUISH_DEFAULT,
-            float,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.CURRENT_COMMAND_PRIORITY: PropertyDefinition(
-            PropertyIdentifier.CURRENT_COMMAND_PRIORITY,
-            int,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **commandable_properties(float, 0.0, required=False),
     }
 
     def __init__(
@@ -439,12 +217,8 @@ class LargeAnalogValueObject(BACnetObject):
     ) -> None:
         super().__init__(instance_number, **initial_properties)
         if commandable:
-            self._priority_array = [None] * 16
-            self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
-            if PropertyIdentifier.RELINQUISH_DEFAULT not in self._properties:
-                self._properties[PropertyIdentifier.RELINQUISH_DEFAULT] = 0.0
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+            self._init_commandable(0.0)
+        self._init_status_flags()
 
 
 @register_object_type
@@ -458,24 +232,7 @@ class CharacterStringValueObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.CHARACTERSTRING_VALUE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             str,
@@ -483,62 +240,8 @@ class CharacterStringValueObject(BACnetObject):
             required=True,
             default="",
         ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=False,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=False,
-            default=False,
-        ),
-        PropertyIdentifier.PRIORITY_ARRAY: PropertyDefinition(
-            PropertyIdentifier.PRIORITY_ARRAY,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.RELINQUISH_DEFAULT: PropertyDefinition(
-            PropertyIdentifier.RELINQUISH_DEFAULT,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.CURRENT_COMMAND_PRIORITY: PropertyDefinition(
-            PropertyIdentifier.CURRENT_COMMAND_PRIORITY,
-            int,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **status_properties(),
+        **commandable_properties(str, "", required=False),
     }
 
     def __init__(
@@ -550,12 +253,8 @@ class CharacterStringValueObject(BACnetObject):
     ) -> None:
         super().__init__(instance_number, **initial_properties)
         if commandable:
-            self._priority_array = [None] * 16
-            self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
-            if PropertyIdentifier.RELINQUISH_DEFAULT not in self._properties:
-                self._properties[PropertyIdentifier.RELINQUISH_DEFAULT] = ""
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+            self._init_commandable("")
+        self._init_status_flags()
 
 
 @register_object_type
@@ -569,91 +268,20 @@ class DateTimeValueObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.DATETIME_VALUE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             tuple,
             PropertyAccess.READ_WRITE,
             required=True,
         ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=False,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=False,
-            default=False,
-        ),
-        PropertyIdentifier.PRIORITY_ARRAY: PropertyDefinition(
-            PropertyIdentifier.PRIORITY_ARRAY,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.RELINQUISH_DEFAULT: PropertyDefinition(
-            PropertyIdentifier.RELINQUISH_DEFAULT,
-            tuple,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.CURRENT_COMMAND_PRIORITY: PropertyDefinition(
-            PropertyIdentifier.CURRENT_COMMAND_PRIORITY,
-            int,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
+        **status_properties(),
+        **commandable_properties(tuple, None, required=False),
         PropertyIdentifier.IS_UTC: PropertyDefinition(
             PropertyIdentifier.IS_UTC,
             bool,
             PropertyAccess.READ_ONLY,
             required=False,
-        ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
         ),
     }
 
@@ -666,10 +294,8 @@ class DateTimeValueObject(BACnetObject):
     ) -> None:
         super().__init__(instance_number, **initial_properties)
         if commandable:
-            self._priority_array = [None] * 16
-            self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+            self._init_commandable(None)
+        self._init_status_flags()
 
 
 @register_object_type
@@ -683,62 +309,14 @@ class BitStringValueObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.BITSTRING_VALUE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             list,
             PropertyAccess.READ_WRITE,
             required=True,
         ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=False,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=False,
-            default=False,
-        ),
+        **status_properties(),
         PropertyIdentifier.BIT_TEXT: PropertyDefinition(
             PropertyIdentifier.BIT_TEXT,
             list,
@@ -751,30 +329,7 @@ class BitStringValueObject(BACnetObject):
             PropertyAccess.READ_ONLY,
             required=False,
         ),
-        PropertyIdentifier.PRIORITY_ARRAY: PropertyDefinition(
-            PropertyIdentifier.PRIORITY_ARRAY,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.RELINQUISH_DEFAULT: PropertyDefinition(
-            PropertyIdentifier.RELINQUISH_DEFAULT,
-            list,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.CURRENT_COMMAND_PRIORITY: PropertyDefinition(
-            PropertyIdentifier.CURRENT_COMMAND_PRIORITY,
-            int,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **commandable_properties(list, None, required=False),
     }
 
     def __init__(
@@ -786,10 +341,8 @@ class BitStringValueObject(BACnetObject):
     ) -> None:
         super().__init__(instance_number, **initial_properties)
         if commandable:
-            self._priority_array = [None] * 16
-            self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+            self._init_commandable(None)
+        self._init_status_flags()
 
 
 @register_object_type
@@ -803,24 +356,7 @@ class OctetStringValueObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.OCTETSTRING_VALUE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             bytes,
@@ -828,62 +364,8 @@ class OctetStringValueObject(BACnetObject):
             required=True,
             default=b"",
         ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=False,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=False,
-            default=False,
-        ),
-        PropertyIdentifier.PRIORITY_ARRAY: PropertyDefinition(
-            PropertyIdentifier.PRIORITY_ARRAY,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.RELINQUISH_DEFAULT: PropertyDefinition(
-            PropertyIdentifier.RELINQUISH_DEFAULT,
-            bytes,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.CURRENT_COMMAND_PRIORITY: PropertyDefinition(
-            PropertyIdentifier.CURRENT_COMMAND_PRIORITY,
-            int,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **status_properties(),
+        **commandable_properties(bytes, b"", required=False),
     }
 
     def __init__(
@@ -895,9 +377,5 @@ class OctetStringValueObject(BACnetObject):
     ) -> None:
         super().__init__(instance_number, **initial_properties)
         if commandable:
-            self._priority_array = [None] * 16
-            self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
-            if PropertyIdentifier.RELINQUISH_DEFAULT not in self._properties:
-                self._properties[PropertyIdentifier.RELINQUISH_DEFAULT] = b""
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+            self._init_commandable(b"")
+        self._init_status_flags()

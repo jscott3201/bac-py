@@ -148,8 +148,17 @@ def decode_npdu(data: memoryview | bytes) -> NPDU:
     if has_source:
         snet = int.from_bytes(data[offset : offset + 2], "big")
         offset += 2
+        if snet == 0xFFFF:
+            msg = "Source SNET cannot be 0xFFFF (global broadcast)"
+            raise ValueError(msg)
+        if snet == 0:
+            msg = "Source SNET cannot be 0 (must be 1-65534)"
+            raise ValueError(msg)
         slen = data[offset]
         offset += 1
+        if slen == 0:
+            msg = "Source SLEN cannot be 0 when source is present"
+            raise ValueError(msg)
         sadr = bytes(data[offset : offset + slen])
         offset += slen
         source = BACnetAddress(network=snet, mac_address=sadr)

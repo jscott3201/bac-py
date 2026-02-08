@@ -8,18 +8,17 @@ from bac_py.objects.base import (
     BACnetObject,
     PropertyAccess,
     PropertyDefinition,
+    commandable_properties,
     register_object_type,
+    standard_properties,
+    status_properties,
 )
-from bac_py.types.constructed import StatusFlags
 from bac_py.types.enums import (
     BinaryPV,
-    EventState,
     ObjectType,
     Polarity,
     PropertyIdentifier,
-    Reliability,
 )
-from bac_py.types.primitives import ObjectIdentifier
 
 
 @register_object_type
@@ -34,24 +33,7 @@ class BinaryInputObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.BINARY_INPUT
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             BinaryPV,
@@ -59,44 +41,13 @@ class BinaryInputObject(BACnetObject):
             required=True,
             default=BinaryPV.INACTIVE,
         ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
         PropertyIdentifier.DEVICE_TYPE: PropertyDefinition(
             PropertyIdentifier.DEVICE_TYPE,
             str,
             PropertyAccess.READ_WRITE,
             required=False,
         ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=True,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=True,
-            default=False,
-        ),
+        **status_properties(),
         PropertyIdentifier.POLARITY: PropertyDefinition(
             PropertyIdentifier.POLARITY,
             Polarity,
@@ -116,18 +67,11 @@ class BinaryInputObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
     }
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+        self._init_status_flags()
 
 
 @register_object_type
@@ -141,24 +85,7 @@ class BinaryOutputObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.BINARY_OUTPUT
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             BinaryPV,
@@ -166,44 +93,13 @@ class BinaryOutputObject(BACnetObject):
             required=True,
             default=BinaryPV.INACTIVE,
         ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
         PropertyIdentifier.DEVICE_TYPE: PropertyDefinition(
             PropertyIdentifier.DEVICE_TYPE,
             str,
             PropertyAccess.READ_WRITE,
             required=False,
         ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=True,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=True,
-            default=False,
-        ),
+        **status_properties(),
         PropertyIdentifier.POLARITY: PropertyDefinition(
             PropertyIdentifier.POLARITY,
             Polarity,
@@ -235,46 +131,20 @@ class BinaryOutputObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
-        PropertyIdentifier.PRIORITY_ARRAY: PropertyDefinition(
-            PropertyIdentifier.PRIORITY_ARRAY,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.RELINQUISH_DEFAULT: PropertyDefinition(
-            PropertyIdentifier.RELINQUISH_DEFAULT,
-            BinaryPV,
-            PropertyAccess.READ_WRITE,
-            required=True,
-            default=BinaryPV.INACTIVE,
-        ),
+        **commandable_properties(BinaryPV, BinaryPV.INACTIVE),
         PropertyIdentifier.FEEDBACK_VALUE: PropertyDefinition(
             PropertyIdentifier.FEEDBACK_VALUE,
             BinaryPV,
             PropertyAccess.READ_ONLY,
             required=False,
         ),
-        PropertyIdentifier.CURRENT_COMMAND_PRIORITY: PropertyDefinition(
-            PropertyIdentifier.CURRENT_COMMAND_PRIORITY,
-            int,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
     }
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
         # Always commandable
-        self._priority_array = [None] * 16
-        self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+        self._init_commandable(BinaryPV.INACTIVE)
+        self._init_status_flags()
 
 
 @register_object_type
@@ -288,24 +158,7 @@ class BinaryValueObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.BINARY_VALUE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             BinaryPV,
@@ -313,38 +166,7 @@ class BinaryValueObject(BACnetObject):
             required=True,
             default=BinaryPV.INACTIVE,
         ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=True,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=True,
-            default=False,
-        ),
+        **status_properties(),
         PropertyIdentifier.INACTIVE_TEXT: PropertyDefinition(
             PropertyIdentifier.INACTIVE_TEXT,
             str,
@@ -369,30 +191,7 @@ class BinaryValueObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
-        PropertyIdentifier.PRIORITY_ARRAY: PropertyDefinition(
-            PropertyIdentifier.PRIORITY_ARRAY,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.RELINQUISH_DEFAULT: PropertyDefinition(
-            PropertyIdentifier.RELINQUISH_DEFAULT,
-            BinaryPV,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.CURRENT_COMMAND_PRIORITY: PropertyDefinition(
-            PropertyIdentifier.CURRENT_COMMAND_PRIORITY,
-            int,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **commandable_properties(BinaryPV, BinaryPV.INACTIVE, required=False),
     }
 
     def __init__(
@@ -404,9 +203,5 @@ class BinaryValueObject(BACnetObject):
     ) -> None:
         super().__init__(instance_number, **initial_properties)
         if commandable:
-            self._priority_array = [None] * 16
-            self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
-            if PropertyIdentifier.RELINQUISH_DEFAULT not in self._properties:
-                self._properties[PropertyIdentifier.RELINQUISH_DEFAULT] = BinaryPV.INACTIVE
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+            self._init_commandable(BinaryPV.INACTIVE)
+        self._init_status_flags()

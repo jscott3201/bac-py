@@ -11,7 +11,13 @@ from bac_py.encoding.primitives import (
     encode_object_identifier,
     encode_unsigned,
 )
-from bac_py.encoding.tags import TagClass, decode_tag, encode_closing_tag, encode_opening_tag
+from bac_py.encoding.tags import (
+    TagClass,
+    decode_tag,
+    encode_closing_tag,
+    encode_opening_tag,
+    extract_context_value,
+)
 from bac_py.types.enums import ObjectType, PropertyIdentifier
 from bac_py.types.primitives import ObjectIdentifier
 
@@ -188,28 +194,7 @@ class ReadPropertyACK:
             tag, offset = decode_tag(data, offset)
 
         # At this point tag should be opening tag 3
-        # Find matching closing tag 3 to extract property value
-        value_start = offset
-        depth = 1
-        while depth > 0 and offset < len(data):
-            t, offset = decode_tag(data, offset)
-            if t.is_opening:
-                depth += 1
-            elif t.is_closing:
-                depth -= 1
-            else:
-                offset += t.length
-
-        # value_start to just before the closing tag
-        # Re-parse to find exact end: closing tag is at offset - (1 or 2 bytes)
-        # Simpler: the value is everything between opening and closing tag 3
-        # Let's re-find the closing tag position
-        value_end = offset
-        # Step back over the closing tag (1 byte for tag num <=14, 2 for >14)
-        closing_tag_len = 1 if tag.number <= 14 else 2
-        value_end -= closing_tag_len
-
-        property_value = bytes(data[value_start:value_end])
+        property_value, offset = extract_context_value(data, offset, 3)
 
         return cls(
             object_identifier=object_identifier,

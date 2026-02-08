@@ -9,6 +9,7 @@ from bac_py.objects.base import (
     PropertyAccess,
     PropertyDefinition,
     register_object_type,
+    standard_properties,
 )
 from bac_py.types.constructed import StatusFlags
 from bac_py.types.enums import (
@@ -17,7 +18,6 @@ from bac_py.types.enums import (
     PropertyIdentifier,
     Reliability,
 )
-from bac_py.types.primitives import ObjectIdentifier
 
 
 @register_object_type
@@ -32,35 +32,12 @@ class ScheduleObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.SCHEDULE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             object,
             PropertyAccess.READ_ONLY,
             required=True,
-        ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
         ),
         PropertyIdentifier.EFFECTIVE_PERIOD: PropertyDefinition(
             PropertyIdentifier.EFFECTIVE_PERIOD,
@@ -126,18 +103,11 @@ class ScheduleObject(BACnetObject):
             required=True,
             default=False,
         ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
     }
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+        self._init_status_flags()
         if PropertyIdentifier.EFFECTIVE_PERIOD not in self._properties:
             self._properties[PropertyIdentifier.EFFECTIVE_PERIOD] = (
                 (1900, 1, 1),

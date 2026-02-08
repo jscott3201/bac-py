@@ -14,7 +14,13 @@ from bac_py.encoding.primitives import (
     encode_object_identifier,
     encode_unsigned,
 )
-from bac_py.encoding.tags import TagClass, decode_tag, encode_closing_tag, encode_opening_tag
+from bac_py.encoding.tags import (
+    TagClass,
+    decode_tag,
+    encode_closing_tag,
+    encode_opening_tag,
+    extract_context_value,
+)
 from bac_py.types.enums import ObjectType, PropertyIdentifier
 from bac_py.types.primitives import ObjectIdentifier
 
@@ -97,20 +103,7 @@ class AddListElementRequest:
             tag, new_offset = decode_tag(data, offset)
 
         # [3] listOfElements (opening/closing tag 3)
-        offset = new_offset
-        value_start = offset
-        depth = 1
-        while depth > 0 and offset < len(data):
-            t, offset = decode_tag(data, offset)
-            if t.is_opening:
-                depth += 1
-            elif t.is_closing:
-                depth -= 1
-            else:
-                offset += t.length
-        closing_tag_len = 1 if 3 <= 14 else 2
-        value_end = offset - closing_tag_len
-        list_of_elements = bytes(data[value_start:value_end])
+        list_of_elements, offset = extract_context_value(data, new_offset, 3)
 
         return cls(
             object_identifier=object_identifier,
@@ -181,20 +174,7 @@ class RemoveListElementRequest:
             offset = new_offset + tag.length
             tag, new_offset = decode_tag(data, offset)
 
-        offset = new_offset
-        value_start = offset
-        depth = 1
-        while depth > 0 and offset < len(data):
-            t, offset = decode_tag(data, offset)
-            if t.is_opening:
-                depth += 1
-            elif t.is_closing:
-                depth -= 1
-            else:
-                offset += t.length
-        closing_tag_len = 1 if 3 <= 14 else 2
-        value_end = offset - closing_tag_len
-        list_of_elements = bytes(data[value_start:value_end])
+        list_of_elements, offset = extract_context_value(data, new_offset, 3)
 
         return cls(
             object_identifier=object_identifier,

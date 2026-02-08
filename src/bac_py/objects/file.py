@@ -9,6 +9,7 @@ from bac_py.objects.base import (
     PropertyAccess,
     PropertyDefinition,
     register_object_type,
+    standard_properties,
 )
 from bac_py.services.errors import BACnetError
 from bac_py.types.enums import (
@@ -18,7 +19,6 @@ from bac_py.types.enums import (
     ObjectType,
     PropertyIdentifier,
 )
-from bac_py.types.primitives import ObjectIdentifier
 
 
 @register_object_type
@@ -32,24 +32,7 @@ class FileObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.FILE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.FILE_TYPE: PropertyDefinition(
             PropertyIdentifier.FILE_TYPE,
             str,
@@ -87,18 +70,6 @@ class FileObject(BACnetObject):
         PropertyIdentifier.FILE_ACCESS_METHOD: PropertyDefinition(
             PropertyIdentifier.FILE_ACCESS_METHOD,
             FileAccessMethod,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
             PropertyAccess.READ_ONLY,
             required=True,
         ),

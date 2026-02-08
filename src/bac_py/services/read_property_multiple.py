@@ -11,7 +11,13 @@ from bac_py.encoding.primitives import (
     encode_object_identifier,
     encode_unsigned,
 )
-from bac_py.encoding.tags import TagClass, decode_tag, encode_closing_tag, encode_opening_tag
+from bac_py.encoding.tags import (
+    TagClass,
+    decode_tag,
+    encode_closing_tag,
+    encode_opening_tag,
+    extract_context_value,
+)
 from bac_py.types.enums import ErrorClass, ErrorCode, ObjectType, PropertyIdentifier
 from bac_py.types.primitives import ObjectIdentifier
 
@@ -263,20 +269,7 @@ class ReadResultElement:
 
         if tag_peek.is_opening and tag_peek.number == 4:
             # [4] property-value
-            offset = next_offset
-            value_start = offset
-            depth = 1
-            while depth > 0 and offset < len(data):
-                t, offset = decode_tag(data, offset)
-                if t.is_opening:
-                    depth += 1
-                elif t.is_closing:
-                    depth -= 1
-                else:
-                    offset += t.length
-            closing_tag_len = 1 if tag_peek.number <= 14 else 2
-            value_end = offset - closing_tag_len
-            property_value = bytes(data[value_start:value_end])
+            property_value, offset = extract_context_value(data, next_offset, 4)
         elif tag_peek.is_opening and tag_peek.number == 5:
             # [5] property-access-error
             offset = next_offset

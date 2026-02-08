@@ -6,11 +6,14 @@ TSMs drive instances of SegmentSender/SegmentReceiver via method calls.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
 from bac_py.types.enums import AbortReason
+
+logger = logging.getLogger(__name__)
 
 # Segment header overhead for each PDU type (when segmented=True).
 # ConfirmedRequest: byte0 + byte1(max-seg/max-apdu) + invoke_id + seq_num + window_size + service_choice
@@ -241,7 +244,12 @@ class SegmentSender:
         for idx in range(search_start, len(self.segments)):
             if (idx & 0xFF) == seq:
                 return idx
-        # Fallback: shouldn't happen with valid protocol
+        # Fallback: indicates a protocol state mismatch
+        logger.warning(
+            "Could not map sequence number %d to segment index; falling back to window start %d",
+            seq,
+            self._window_start_idx,
+        )
         return self._window_start_idx
 
 
@@ -339,6 +347,11 @@ class SegmentReceiver:
             return (SegmentAction.RESEND_LAST_ACK, self._last_ack_seq)
 
         return (SegmentAction.ABORT, -1)
+
+    @property
+    def last_ack_seq(self) -> int:
+        """The sequence number of the last acknowledged segment."""
+        return self._last_ack_seq
 
     @property
     def is_complete(self) -> bool:

@@ -426,6 +426,33 @@ class TestSegmentReceiver:
         )
         assert receiver.actual_window_size == 4
 
+    def test_last_ack_seq_initial(self):
+        """last_ack_seq starts at 0 after creation."""
+        receiver = SegmentReceiver.create(
+            first_segment_data=b"seg0",
+            service_choice=12,
+            proposed_window_size=16,
+            more_follows=True,
+        )
+        assert receiver.last_ack_seq == 0
+
+    def test_last_ack_seq_updates_on_receive(self):
+        """last_ack_seq tracks the most recently received sequence number."""
+        segments = [bytes(10) for _ in range(5)]
+        receiver = SegmentReceiver.create(
+            first_segment_data=segments[0],
+            service_choice=12,
+            proposed_window_size=16,
+            more_follows=True,
+        )
+        assert receiver.last_ack_seq == 0
+
+        receiver.receive_segment(1, segments[1], more_follows=True)
+        assert receiver.last_ack_seq == 1
+
+        receiver.receive_segment(2, segments[2], more_follows=True)
+        assert receiver.last_ack_seq == 2
+
 
 class TestSequenceWrapping:
     """Test behavior around sequence number wrapping (modulo 256)."""

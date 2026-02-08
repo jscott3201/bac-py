@@ -9,12 +9,12 @@ from bac_py.objects.base import (
     PropertyAccess,
     PropertyDefinition,
     register_object_type,
+    standard_properties,
 )
 from bac_py.types.enums import (
     ObjectType,
     PropertyIdentifier,
 )
-from bac_py.types.primitives import ObjectIdentifier
 
 
 @register_object_type
@@ -29,24 +29,7 @@ class CalendarObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.CALENDAR
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             bool,
@@ -54,22 +37,10 @@ class CalendarObject(BACnetObject):
             required=True,
             default=False,
         ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
         PropertyIdentifier.DATE_LIST: PropertyDefinition(
             PropertyIdentifier.DATE_LIST,
             list,
             PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
             required=True,
         ),
     }

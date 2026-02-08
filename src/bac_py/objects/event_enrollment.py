@@ -9,6 +9,7 @@ from bac_py.objects.base import (
     PropertyAccess,
     PropertyDefinition,
     register_object_type,
+    standard_properties,
 )
 from bac_py.types.constructed import StatusFlags
 from bac_py.types.enums import (
@@ -17,7 +18,6 @@ from bac_py.types.enums import (
     PropertyIdentifier,
     Reliability,
 )
-from bac_py.types.primitives import ObjectIdentifier
 
 
 @register_object_type
@@ -32,30 +32,7 @@ class EventEnrollmentObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.EVENT_ENROLLMENT
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
+        **standard_properties(),
         PropertyIdentifier.EVENT_TYPE: PropertyDefinition(
             PropertyIdentifier.EVENT_TYPE,
             int,
@@ -132,12 +109,6 @@ class EventEnrollmentObject(BACnetObject):
             required=True,
             default=Reliability.NO_FAULT_DETECTED,
         ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
     }
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
@@ -163,7 +134,4 @@ class EventEnrollmentObject(BACnetObject):
         # Default notification class if not set
         if PropertyIdentifier.NOTIFICATION_CLASS not in self._properties:
             self._properties[PropertyIdentifier.NOTIFICATION_CLASS] = 0
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
-        if PropertyIdentifier.RELIABILITY not in self._properties:
-            self._properties[PropertyIdentifier.RELIABILITY] = Reliability.NO_FAULT_DETECTED
+        self._init_status_flags()

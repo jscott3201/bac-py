@@ -490,7 +490,7 @@ class ClientTSM:
                 # Send negative SegmentACK requesting retransmission
                 receiver = txn.segment_receiver
                 if receiver is not None:
-                    self._send_client_segment_ack(txn, seq=receiver._last_ack_seq, negative=True)
+                    self._send_client_segment_ack(txn, seq=receiver.last_ack_seq, negative=True)
                     self._start_segment_timeout(txn)
             else:
                 self._abort_transaction(txn, AbortReason.TSM_TIMEOUT)
@@ -538,6 +538,7 @@ class ServerTSM:
         network: NetworkLayer,
         *,
         request_timeout: float = 6.0,
+        apdu_retries: int = 3,
         segment_timeout: float = 2.0,
         max_apdu_length: int = 1476,
         max_segments: int | None = None,
@@ -545,6 +546,7 @@ class ServerTSM:
     ) -> None:
         self._network = network
         self._timeout = request_timeout
+        self._retries = apdu_retries
         self._segment_timeout = segment_timeout
         self._max_apdu_length = max_apdu_length
         self._max_segments = max_segments
@@ -847,18 +849,18 @@ class ServerTSM:
 
         if txn.state == ServerTransactionState.SEGMENTED_REQUEST:
             # Waiting for more request segments from client
-            if txn.seg_retry_count < 3:
+            if txn.seg_retry_count < self._retries:
                 txn.seg_retry_count += 1
                 receiver = txn.segment_receiver
                 if receiver is not None:
-                    self._send_server_segment_ack(txn, seq=receiver._last_ack_seq, negative=True)
+                    self._send_server_segment_ack(txn, seq=receiver.last_ack_seq, negative=True)
                     self._start_segment_timeout(txn)
             else:
                 self._abort_server_transaction(txn, AbortReason.TSM_TIMEOUT)
 
         elif txn.state == ServerTransactionState.SEGMENTED_RESPONSE:
             # Waiting for SegmentACK from client
-            if txn.seg_retry_count < 3:
+            if txn.seg_retry_count < self._retries:
                 txn.seg_retry_count += 1
                 self._fill_and_send_response_window(txn)
             else:

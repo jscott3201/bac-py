@@ -89,10 +89,14 @@ class NetworkLayer:
             logger.debug("Ignoring network message type %s", npdu.message_type)
             return
 
-        # Convert source BIPAddress to BACnetAddress
-        src_addr = BACnetAddress(
-            mac_address=source.encode(),
-        )
+        # Convert source BIPAddress to BACnetAddress, preserving source
+        # network from the NPDU if present (for routed messages).
+        if npdu.source is not None:
+            src_addr = npdu.source
+        else:
+            src_addr = BACnetAddress(
+                mac_address=source.encode(),
+            )
 
         if self._receive_callback:
             self._receive_callback(npdu.apdu, src_addr)

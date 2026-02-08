@@ -9,16 +9,14 @@ from bac_py.objects.base import (
     PropertyAccess,
     PropertyDefinition,
     register_object_type,
+    standard_properties,
+    status_properties,
 )
-from bac_py.types.constructed import StatusFlags
 from bac_py.types.enums import (
     EngineeringUnits,
-    EventState,
     ObjectType,
     PropertyIdentifier,
-    Reliability,
 )
-from bac_py.types.primitives import ObjectIdentifier
 
 
 @register_object_type
@@ -33,24 +31,7 @@ class AccumulatorObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.ACCUMULATOR
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
             int,
@@ -58,38 +39,7 @@ class AccumulatorObject(BACnetObject):
             required=True,
             default=0,
         ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=True,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=True,
-            default=False,
-        ),
+        **status_properties(),
         PropertyIdentifier.UNITS: PropertyDefinition(
             PropertyIdentifier.UNITS,
             EngineeringUnits,
@@ -158,18 +108,11 @@ class AccumulatorObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
     }
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+        self._init_status_flags()
         if PropertyIdentifier.SCALE not in self._properties:
             self._properties[PropertyIdentifier.SCALE] = 1.0
         if PropertyIdentifier.PRESCALE not in self._properties:

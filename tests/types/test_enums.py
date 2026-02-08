@@ -6,17 +6,28 @@ import pytest
 
 from bac_py.types.enums import (
     AbortReason,
+    Action,
+    BinaryPV,
     BvlcFunction,
     BvlcResultCode,
     ConfirmedServiceChoice,
+    EnableDisable,
+    EngineeringUnits,
     ErrorClass,
     ErrorCode,
+    EventState,
+    FileAccessMethod,
     NetworkMessageType,
     NetworkPriority,
     ObjectType,
     PduType,
+    Polarity,
+    ProgramChange,
+    ProgramState,
     PropertyIdentifier,
     RejectReason,
+    ReinitializedState,
+    Reliability,
     Segmentation,
     UnconfirmedServiceChoice,
 )
@@ -36,6 +47,17 @@ ALL_ENUM_CLASSES = [
     NetworkMessageType,
     BvlcFunction,
     BvlcResultCode,
+    EventState,
+    BinaryPV,
+    Polarity,
+    Reliability,
+    EngineeringUnits,
+    EnableDisable,
+    ReinitializedState,
+    FileAccessMethod,
+    ProgramState,
+    ProgramChange,
+    Action,
 ]
 
 
@@ -537,6 +559,266 @@ class TestBvlcResultCode:
 
     def test_member_count(self) -> None:
         assert len(BvlcResultCode) == 7
+
+
+# ---------------------------------------------------------------------------
+# EventState
+# ---------------------------------------------------------------------------
+
+
+class TestEventState:
+    def test_normal(self) -> None:
+        assert EventState.NORMAL == 0
+
+    def test_fault(self) -> None:
+        assert EventState.FAULT == 1
+
+    def test_offnormal(self) -> None:
+        assert EventState.OFFNORMAL == 2
+
+    def test_high_limit(self) -> None:
+        assert EventState.HIGH_LIMIT == 3
+
+    def test_low_limit(self) -> None:
+        assert EventState.LOW_LIMIT == 4
+
+    def test_life_safety_alarm(self) -> None:
+        assert EventState.LIFE_SAFETY_ALARM == 5
+
+    def test_member_count(self) -> None:
+        assert len(EventState) == 6
+
+
+# ---------------------------------------------------------------------------
+# BinaryPV
+# ---------------------------------------------------------------------------
+
+
+class TestBinaryPV:
+    def test_inactive(self) -> None:
+        assert BinaryPV.INACTIVE == 0
+
+    def test_active(self) -> None:
+        assert BinaryPV.ACTIVE == 1
+
+    def test_member_count(self) -> None:
+        assert len(BinaryPV) == 2
+
+
+# ---------------------------------------------------------------------------
+# Polarity
+# ---------------------------------------------------------------------------
+
+
+class TestPolarity:
+    def test_normal(self) -> None:
+        assert Polarity.NORMAL == 0
+
+    def test_reverse(self) -> None:
+        assert Polarity.REVERSE == 1
+
+    def test_member_count(self) -> None:
+        assert len(Polarity) == 2
+
+
+# ---------------------------------------------------------------------------
+# Reliability
+# ---------------------------------------------------------------------------
+
+
+class TestReliability:
+    def test_no_fault_detected(self) -> None:
+        assert Reliability.NO_FAULT_DETECTED == 0
+
+    def test_no_sensor(self) -> None:
+        assert Reliability.NO_SENSOR == 1
+
+    def test_over_range(self) -> None:
+        assert Reliability.OVER_RANGE == 2
+
+    def test_communication_failure(self) -> None:
+        assert Reliability.COMMUNICATION_FAILURE == 12
+
+    def test_tripped(self) -> None:
+        assert Reliability.TRIPPED == 15
+
+    def test_faults_listed(self) -> None:
+        assert Reliability.FAULTS_LISTED == 23
+
+    def test_referenced_object_fault(self) -> None:
+        assert Reliability.REFERENCED_OBJECT_FAULT == 24
+
+    def test_member_count(self) -> None:
+        assert len(Reliability) == 24
+
+
+# ---------------------------------------------------------------------------
+# EngineeringUnits
+# ---------------------------------------------------------------------------
+
+
+class TestEngineeringUnits:
+    def test_degrees_celsius(self) -> None:
+        assert EngineeringUnits.DEGREES_CELSIUS == 62
+
+    def test_degrees_fahrenheit(self) -> None:
+        assert EngineeringUnits.DEGREES_FAHRENHEIT == 64
+
+    def test_watts(self) -> None:
+        assert EngineeringUnits.WATTS == 48
+
+    def test_kilowatt_hours(self) -> None:
+        assert EngineeringUnits.KILOWATT_HOURS == 19
+
+    def test_percent(self) -> None:
+        assert EngineeringUnits.PERCENT == 98
+
+    def test_no_units(self) -> None:
+        assert EngineeringUnits.NO_UNITS == 95
+
+    def test_square_meters(self) -> None:
+        assert EngineeringUnits.SQUARE_METERS == 0
+
+    def test_amperes(self) -> None:
+        assert EngineeringUnits.AMPERES == 3
+
+    def test_liters_per_second(self) -> None:
+        assert EngineeringUnits.LITERS_PER_SECOND == 85
+
+    def test_member_count(self) -> None:
+        assert len(EngineeringUnits) == 62
+
+
+# ---------------------------------------------------------------------------
+# EnableDisable
+# ---------------------------------------------------------------------------
+
+
+class TestEnableDisable:
+    def test_enable(self) -> None:
+        assert EnableDisable.ENABLE == 0
+
+    def test_disable(self) -> None:
+        assert EnableDisable.DISABLE == 1
+
+    def test_disable_initiation(self) -> None:
+        assert EnableDisable.DISABLE_INITIATION == 2
+
+    def test_member_count(self) -> None:
+        assert len(EnableDisable) == 3
+
+
+# ---------------------------------------------------------------------------
+# ReinitializedState
+# ---------------------------------------------------------------------------
+
+
+class TestReinitializedState:
+    def test_coldstart(self) -> None:
+        assert ReinitializedState.COLDSTART == 0
+
+    def test_warmstart(self) -> None:
+        assert ReinitializedState.WARMSTART == 1
+
+    def test_start_backup(self) -> None:
+        assert ReinitializedState.START_BACKUP == 2
+
+    def test_end_restore(self) -> None:
+        assert ReinitializedState.END_RESTORE == 5
+
+    def test_activate_changes(self) -> None:
+        assert ReinitializedState.ACTIVATE_CHANGES == 7
+
+    def test_member_count(self) -> None:
+        assert len(ReinitializedState) == 8
+
+
+# ---------------------------------------------------------------------------
+# FileAccessMethod
+# ---------------------------------------------------------------------------
+
+
+class TestFileAccessMethod:
+    def test_stream_access(self) -> None:
+        assert FileAccessMethod.STREAM_ACCESS == 0
+
+    def test_record_access(self) -> None:
+        assert FileAccessMethod.RECORD_ACCESS == 1
+
+    def test_member_count(self) -> None:
+        assert len(FileAccessMethod) == 2
+
+
+# ---------------------------------------------------------------------------
+# ProgramState
+# ---------------------------------------------------------------------------
+
+
+class TestProgramState:
+    def test_idle(self) -> None:
+        assert ProgramState.IDLE == 0
+
+    def test_loading(self) -> None:
+        assert ProgramState.LOADING == 1
+
+    def test_running(self) -> None:
+        assert ProgramState.RUNNING == 2
+
+    def test_waiting(self) -> None:
+        assert ProgramState.WAITING == 3
+
+    def test_halted(self) -> None:
+        assert ProgramState.HALTED == 4
+
+    def test_unloading(self) -> None:
+        assert ProgramState.UNLOADING == 5
+
+    def test_member_count(self) -> None:
+        assert len(ProgramState) == 6
+
+
+# ---------------------------------------------------------------------------
+# ProgramChange
+# ---------------------------------------------------------------------------
+
+
+class TestProgramChange:
+    def test_ready(self) -> None:
+        assert ProgramChange.READY == 0
+
+    def test_load(self) -> None:
+        assert ProgramChange.LOAD == 1
+
+    def test_run(self) -> None:
+        assert ProgramChange.RUN == 2
+
+    def test_halt(self) -> None:
+        assert ProgramChange.HALT == 3
+
+    def test_restart(self) -> None:
+        assert ProgramChange.RESTART == 4
+
+    def test_unload(self) -> None:
+        assert ProgramChange.UNLOAD == 5
+
+    def test_member_count(self) -> None:
+        assert len(ProgramChange) == 6
+
+
+# ---------------------------------------------------------------------------
+# Action
+# ---------------------------------------------------------------------------
+
+
+class TestAction:
+    def test_direct(self) -> None:
+        assert Action.DIRECT == 0
+
+    def test_reverse(self) -> None:
+        assert Action.REVERSE == 1
+
+    def test_member_count(self) -> None:
+        assert len(Action) == 2
 
 
 # ---------------------------------------------------------------------------

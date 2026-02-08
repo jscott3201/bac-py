@@ -56,7 +56,7 @@ class BDTEntry:
         return cls(address=address, broadcast_mask=broadcast_mask)
 
 
-@dataclass(slots=True)
+@dataclass(frozen=True, slots=True)
 class FDTEntry:
     """Foreign Device Table entry per Annex J.5.2.
 
