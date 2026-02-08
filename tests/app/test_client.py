@@ -4,7 +4,23 @@ from unittest.mock import AsyncMock, MagicMock
 from bac_py.app.client import BACnetClient
 from bac_py.network.address import BACnetAddress
 from bac_py.services.read_property import ReadPropertyACK
+from bac_py.services.read_property_multiple import (
+    PropertyReference,
+    ReadAccessResult,
+    ReadAccessSpecification,
+    ReadPropertyMultipleACK,
+    ReadResultElement,
+)
+from bac_py.services.read_range import (
+    RangeByPosition,
+    ReadRangeACK,
+    ResultFlags,
+)
 from bac_py.services.who_is import IAmRequest
+from bac_py.services.write_property_multiple import (
+    PropertyValue,
+    WriteAccessSpecification,
+)
 from bac_py.types.enums import (
     ConfirmedServiceChoice,
     ObjectType,
@@ -191,5 +207,138 @@ class TestBACnetClient:
             # Only the valid one should be collected
             assert len(results) == 1
             assert results[0].object_identifier.instance_number == 10
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_read_property_multiple(self):
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        # Create a fake ReadPropertyMultiple-ACK response
+        ack = ReadPropertyMultipleACK(
+            list_of_read_access_results=[
+                ReadAccessResult(
+                    object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                    list_of_results=[
+                        ReadResultElement(
+                            property_identifier=PropertyIdentifier.OBJECT_NAME,
+                            property_value=b"\x75\x05\x00test",
+                        ),
+                    ],
+                ),
+            ]
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        async def run():
+            result = await client.read_property_multiple(
+                address=PEER,
+                read_access_specs=[
+                    ReadAccessSpecification(
+                        object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                        list_of_property_references=[
+                            PropertyReference(PropertyIdentifier.OBJECT_NAME),
+                        ],
+                    ),
+                ],
+            )
+            assert isinstance(result, ReadPropertyMultipleACK)
+            assert len(result.list_of_read_access_results) == 1
+            res = result.list_of_read_access_results[0]
+            assert res.object_identifier == ObjectIdentifier(ObjectType.DEVICE, 1)
+            assert res.list_of_results[0].property_value is not None
+
+            app.confirmed_request.assert_called_once()
+            call_kwargs = app.confirmed_request.call_args
+            assert (
+                call_kwargs.kwargs["service_choice"]
+                == ConfirmedServiceChoice.READ_PROPERTY_MULTIPLE
+            )
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_write_property_multiple(self):
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""  # SimpleACK
+
+        async def run():
+            await client.write_property_multiple(
+                address=PEER,
+                write_access_specs=[
+                    WriteAccessSpecification(
+                        object_identifier=ObjectIdentifier(ObjectType.ANALOG_OUTPUT, 1),
+                        list_of_properties=[
+                            PropertyValue(
+                                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                                property_value=b"\x44\x42\x28\x00\x00",
+                                priority=8,
+                            ),
+                        ],
+                    ),
+                ],
+            )
+            app.confirmed_request.assert_called_once()
+            call_kwargs = app.confirmed_request.call_args
+            assert (
+                call_kwargs.kwargs["service_choice"]
+                == ConfirmedServiceChoice.WRITE_PROPERTY_MULTIPLE
+            )
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_read_range(self):
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        # Create a fake ReadRange-ACK response
+        ack = ReadRangeACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            result_flags=ResultFlags(first_item=True, last_item=True, more_items=False),
+            item_count=1,
+            item_data=b"\xc4\x02\x00\x00\x01",  # Device object ID
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        async def run():
+            result = await client.read_range(
+                address=PEER,
+                object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                property_identifier=PropertyIdentifier.OBJECT_LIST,
+            )
+            assert isinstance(result, ReadRangeACK)
+            assert result.result_flags.first_item is True
+            assert result.result_flags.last_item is True
+            assert result.item_count == 1
+
+            app.confirmed_request.assert_called_once()
+            call_kwargs = app.confirmed_request.call_args
+            assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.READ_RANGE
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_read_range_with_position(self):
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        ack = ReadRangeACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            result_flags=ResultFlags(first_item=False, last_item=False, more_items=True),
+            item_count=2,
+            item_data=b"\xc4\x00\x00\x00\x01\xc4\x00\x00\x00\x02",
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        async def run():
+            result = await client.read_range(
+                address=PEER,
+                object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                property_identifier=PropertyIdentifier.OBJECT_LIST,
+                range_qualifier=RangeByPosition(reference_index=2, count=2),
+            )
+            assert result.item_count == 2
+            assert result.result_flags.more_items is True
 
         asyncio.get_event_loop().run_until_complete(run())

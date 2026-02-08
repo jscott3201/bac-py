@@ -8,8 +8,24 @@ from typing import TYPE_CHECKING
 
 from bac_py.network.address import GLOBAL_BROADCAST
 from bac_py.services.read_property import ReadPropertyACK, ReadPropertyRequest
+from bac_py.services.read_property_multiple import (
+    ReadAccessSpecification,
+    ReadPropertyMultipleACK,
+    ReadPropertyMultipleRequest,
+)
+from bac_py.services.read_range import (
+    RangeByPosition,
+    RangeBySequenceNumber,
+    RangeByTime,
+    ReadRangeACK,
+    ReadRangeRequest,
+)
 from bac_py.services.who_is import IAmRequest, WhoIsRequest
 from bac_py.services.write_property import WritePropertyRequest
+from bac_py.services.write_property_multiple import (
+    WriteAccessSpecification,
+    WritePropertyMultipleRequest,
+)
 from bac_py.types.enums import (
     ConfirmedServiceChoice,
     PropertyIdentifier,
@@ -28,7 +44,8 @@ class BACnetClient:
     """High-level async BACnet client API.
 
     Wraps a BACnetApplication to provide typed methods for common
-    BACnet services: ReadProperty, WriteProperty, and Who-Is/I-Am.
+    BACnet services: ReadProperty, WriteProperty, ReadPropertyMultiple,
+    WritePropertyMultiple, ReadRange, and Who-Is/I-Am.
     """
 
     def __init__(self, app: BACnetApplication) -> None:
@@ -107,6 +124,106 @@ class BACnetClient:
             service_choice=ConfirmedServiceChoice.WRITE_PROPERTY,
             service_data=request.encode(),
         )
+
+    async def read_property_multiple(
+        self,
+        address: BACnetAddress,
+        read_access_specs: list[ReadAccessSpecification],
+    ) -> ReadPropertyMultipleACK:
+        """Read multiple properties from one or more objects.
+
+        Args:
+            address: Target device address.
+            read_access_specs: List of read access specifications, each
+                containing an object identifier and list of property
+                references to read.
+
+        Returns:
+            Decoded ReadPropertyMultiple-ACK with per-property results.
+
+        Raises:
+            BACnetError: On Error-PDU response.
+            BACnetRejectError: On Reject-PDU response.
+            BACnetAbortError: On Abort-PDU response.
+            BACnetTimeoutError: On timeout after all retries.
+        """
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=read_access_specs,
+        )
+        response_data = await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.READ_PROPERTY_MULTIPLE,
+            service_data=request.encode(),
+        )
+        return ReadPropertyMultipleACK.decode(response_data)
+
+    async def write_property_multiple(
+        self,
+        address: BACnetAddress,
+        write_access_specs: list[WriteAccessSpecification],
+    ) -> None:
+        """Write multiple properties to one or more objects.
+
+        Args:
+            address: Target device address.
+            write_access_specs: List of write access specifications, each
+                containing an object identifier and list of property
+                values to write.
+
+        Raises:
+            BACnetError: On Error-PDU response (first failing property).
+            BACnetRejectError: On Reject-PDU response.
+            BACnetAbortError: On Abort-PDU response.
+            BACnetTimeoutError: On timeout after all retries.
+        """
+        request = WritePropertyMultipleRequest(
+            list_of_write_access_specs=write_access_specs,
+        )
+        await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.WRITE_PROPERTY_MULTIPLE,
+            service_data=request.encode(),
+        )
+
+    async def read_range(
+        self,
+        address: BACnetAddress,
+        object_identifier: ObjectIdentifier,
+        property_identifier: PropertyIdentifier,
+        array_index: int | None = None,
+        range_qualifier: RangeByPosition | RangeBySequenceNumber | RangeByTime | None = None,
+    ) -> ReadRangeACK:
+        """Read a range of items from a list or array property.
+
+        Args:
+            address: Target device address.
+            object_identifier: Object containing the list property.
+            property_identifier: List or array property to read.
+            array_index: Optional array index.
+            range_qualifier: Optional range qualifier (by position,
+                sequence number, or time). If None, returns all items.
+
+        Returns:
+            Decoded ReadRange-ACK with the requested items.
+
+        Raises:
+            BACnetError: On Error-PDU response.
+            BACnetRejectError: On Reject-PDU response.
+            BACnetAbortError: On Abort-PDU response.
+            BACnetTimeoutError: On timeout after all retries.
+        """
+        request = ReadRangeRequest(
+            object_identifier=object_identifier,
+            property_identifier=property_identifier,
+            property_array_index=array_index,
+            range=range_qualifier,
+        )
+        response_data = await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.READ_RANGE,
+            service_data=request.encode(),
+        )
+        return ReadRangeACK.decode(response_data)
 
     async def who_is(
         self,

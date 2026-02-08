@@ -340,5 +340,511 @@ class TestDefaultServerHandlersRegister:
         handlers.register()
 
         registry = app.service_registry
-        assert registry.register_confirmed.call_count == 2
+        assert registry.register_confirmed.call_count == 5
         assert registry.register_unconfirmed.call_count == 1
+
+
+class TestHandleReadPropertyMultiple:
+    def test_rpm_read_multiple_properties(self):
+        from bac_py.services.read_property_multiple import (
+            PropertyReference,
+            ReadAccessSpecification,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=[
+                ReadAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.OBJECT_NAME),
+                        PropertyReference(PropertyIdentifier.PROTOCOL_VERSION),
+                    ],
+                ),
+            ]
+        )
+
+        async def run():
+            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+            ack = ReadPropertyMultipleACK.decode(result)
+            assert len(ack.list_of_read_access_results) == 1
+            res = ack.list_of_read_access_results[0]
+            assert res.object_identifier == ObjectIdentifier(ObjectType.DEVICE, 1)
+            assert len(res.list_of_results) == 2
+            assert res.list_of_results[0].property_value is not None
+            assert res.list_of_results[0].property_access_error is None
+            assert res.list_of_results[1].property_value is not None
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_rpm_per_property_error(self):
+        from bac_py.services.read_property_multiple import (
+            PropertyReference,
+            ReadAccessSpecification,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=[
+                ReadAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.OBJECT_NAME),
+                        PropertyReference(PropertyIdentifier.PRESENT_VALUE),
+                    ],
+                ),
+            ]
+        )
+
+        async def run():
+            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+            ack = ReadPropertyMultipleACK.decode(result)
+            res = ack.list_of_read_access_results[0]
+            # Object_Name succeeds
+            assert res.list_of_results[0].property_value is not None
+            assert res.list_of_results[0].property_access_error is None
+            # Present_Value fails (not on Device)
+            assert res.list_of_results[1].property_value is None
+            assert res.list_of_results[1].property_access_error is not None
+            assert res.list_of_results[1].property_access_error[1] == ErrorCode.UNKNOWN_PROPERTY
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_rpm_unknown_object(self):
+        from bac_py.services.read_property_multiple import (
+            PropertyReference,
+            ReadAccessSpecification,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=[
+                ReadAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 999),
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.PRESENT_VALUE),
+                    ],
+                ),
+            ]
+        )
+
+        async def run():
+            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+            ack = ReadPropertyMultipleACK.decode(result)
+            res = ack.list_of_read_access_results[0]
+            assert len(res.list_of_results) == 1
+            assert res.list_of_results[0].property_access_error is not None
+            assert res.list_of_results[0].property_access_error[1] == ErrorCode.UNKNOWN_OBJECT
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_rpm_wildcard_device_instance(self):
+        from bac_py.services.read_property_multiple import (
+            PropertyReference,
+            ReadAccessSpecification,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app(device_instance=42)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=[
+                ReadAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.DEVICE, 4194303),
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.OBJECT_NAME),
+                    ],
+                ),
+            ]
+        )
+
+        async def run():
+            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+            ack = ReadPropertyMultipleACK.decode(result)
+            res = ack.list_of_read_access_results[0]
+            assert res.object_identifier.instance_number == 42
+            assert res.list_of_results[0].property_value is not None
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_rpm_multiple_objects(self):
+        import bac_py.objects  # noqa: F401
+        from bac_py.objects.analog import AnalogInputObject
+        from bac_py.services.read_property_multiple import (
+            PropertyReference,
+            ReadAccessSpecification,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app()
+        ai = AnalogInputObject(1, object_name="AI-1")
+        db.add(ai)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=[
+                ReadAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.OBJECT_NAME),
+                    ],
+                ),
+                ReadAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.OBJECT_NAME),
+                    ],
+                ),
+            ]
+        )
+
+        async def run():
+            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+            ack = ReadPropertyMultipleACK.decode(result)
+            assert len(ack.list_of_read_access_results) == 2
+            assert ack.list_of_read_access_results[0].object_identifier == (
+                ObjectIdentifier(ObjectType.DEVICE, 1)
+            )
+            assert ack.list_of_read_access_results[1].object_identifier == (
+                ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+            )
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_rpm_all_properties(self):
+        """Property identifier ALL expands to all properties on the object."""
+        from bac_py.services.read_property_multiple import (
+            PropertyReference,
+            ReadAccessSpecification,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=[
+                ReadAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.ALL),
+                    ],
+                ),
+            ]
+        )
+
+        async def run():
+            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+            ack = ReadPropertyMultipleACK.decode(result)
+            res = ack.list_of_read_access_results[0]
+            # Should have many properties, not just an error for "ALL"
+            assert len(res.list_of_results) > 5
+            # Verify key properties are present
+            prop_ids = {elem.property_identifier for elem in res.list_of_results}
+            assert PropertyIdentifier.OBJECT_IDENTIFIER in prop_ids
+            assert PropertyIdentifier.OBJECT_NAME in prop_ids
+            assert PropertyIdentifier.OBJECT_TYPE in prop_ids
+            assert PropertyIdentifier.PROTOCOL_VERSION in prop_ids
+            assert PropertyIdentifier.PROPERTY_LIST in prop_ids
+            # All results should be successful (no errors)
+            for elem in res.list_of_results:
+                assert elem.property_value is not None, (
+                    f"Property {elem.property_identifier} returned error "
+                    f"{elem.property_access_error}"
+                )
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_rpm_required_properties(self):
+        """Property identifier REQUIRED expands to only required properties."""
+        from bac_py.services.read_property_multiple import (
+            PropertyReference,
+            ReadAccessSpecification,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=[
+                ReadAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.REQUIRED),
+                    ],
+                ),
+            ]
+        )
+
+        async def run():
+            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+            ack = ReadPropertyMultipleACK.decode(result)
+            res = ack.list_of_read_access_results[0]
+            prop_ids = {elem.property_identifier for elem in res.list_of_results}
+            # Should include required properties
+            assert PropertyIdentifier.OBJECT_IDENTIFIER in prop_ids
+            assert PropertyIdentifier.OBJECT_NAME in prop_ids
+            assert PropertyIdentifier.PROTOCOL_VERSION in prop_ids
+            # Should NOT include optional properties like DESCRIPTION
+            assert PropertyIdentifier.DESCRIPTION not in prop_ids
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_rpm_optional_properties(self):
+        """Property identifier OPTIONAL expands to only optional properties present."""
+        from bac_py.services.read_property_multiple import (
+            PropertyReference,
+            ReadAccessSpecification,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app()
+        # Set an optional property so it shows up
+        device._properties[PropertyIdentifier.DESCRIPTION] = "test description"
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=[
+                ReadAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.OPTIONAL),
+                    ],
+                ),
+            ]
+        )
+
+        async def run():
+            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+            ack = ReadPropertyMultipleACK.decode(result)
+            res = ack.list_of_read_access_results[0]
+            prop_ids = {elem.property_identifier for elem in res.list_of_results}
+            # DESCRIPTION is optional and present
+            assert PropertyIdentifier.DESCRIPTION in prop_ids
+            # Required properties should NOT be included
+            assert PropertyIdentifier.OBJECT_IDENTIFIER not in prop_ids
+            assert PropertyIdentifier.OBJECT_NAME not in prop_ids
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_rpm_all_unknown_object(self):
+        """ALL on an unknown object still returns UNKNOWN_OBJECT error."""
+        from bac_py.services.read_property_multiple import (
+            PropertyReference,
+            ReadAccessSpecification,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=[
+                ReadAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 999),
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.ALL),
+                    ],
+                ),
+            ]
+        )
+
+        async def run():
+            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+            ack = ReadPropertyMultipleACK.decode(result)
+            res = ack.list_of_read_access_results[0]
+            # Should have one error result for the ALL reference
+            assert len(res.list_of_results) == 1
+            assert res.list_of_results[0].property_access_error is not None
+            assert res.list_of_results[0].property_access_error[1] == ErrorCode.UNKNOWN_OBJECT
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+
+class TestHandleWritePropertyMultiple:
+    def test_wpm_write_success(self):
+        from bac_py.services.write_property_multiple import (
+            PropertyValue,
+            WriteAccessSpecification,
+            WritePropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = WritePropertyMultipleRequest(
+            list_of_write_access_specs=[
+                WriteAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                    list_of_properties=[
+                        PropertyValue(
+                            property_identifier=PropertyIdentifier.OBJECT_NAME,
+                            property_value=b"\x75\x0a\x00new-name!",
+                        ),
+                    ],
+                ),
+            ]
+        )
+
+        async def run():
+            result = await handlers.handle_write_property_multiple(16, request.encode(), SOURCE)
+            assert result is None  # SimpleACK
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_wpm_unknown_object_raises(self):
+        from bac_py.services.write_property_multiple import (
+            PropertyValue,
+            WriteAccessSpecification,
+            WritePropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = WritePropertyMultipleRequest(
+            list_of_write_access_specs=[
+                WriteAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 999),
+                    list_of_properties=[
+                        PropertyValue(
+                            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                            property_value=b"\x44\x00\x00\x00\x00",
+                        ),
+                    ],
+                ),
+            ]
+        )
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_write_property_multiple(16, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_wpm_read_only_raises(self):
+        from bac_py.services.write_property_multiple import (
+            PropertyValue,
+            WriteAccessSpecification,
+            WritePropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = WritePropertyMultipleRequest(
+            list_of_write_access_specs=[
+                WriteAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                    list_of_properties=[
+                        PropertyValue(
+                            property_identifier=PropertyIdentifier.OBJECT_IDENTIFIER,
+                            property_value=b"\xc4\x02\x00\x00\x01",
+                        ),
+                    ],
+                ),
+            ]
+        )
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_write_property_multiple(16, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+
+class TestHandleReadRange:
+    def test_read_range_full_list(self):
+        from bac_py.services.read_range import (
+            ReadRangeACK,
+            ReadRangeRequest,
+        )
+
+        app, db, device = _make_app()
+        # Populate object list with the device
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadRangeRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+        )
+
+        async def run():
+            result = await handlers.handle_read_range(26, request.encode(), SOURCE)
+            ack = ReadRangeACK.decode(result)
+            assert ack.object_identifier == ObjectIdentifier(ObjectType.DEVICE, 1)
+            assert ack.result_flags.first_item is True
+            assert ack.result_flags.last_item is True
+            assert ack.result_flags.more_items is False
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_read_range_by_position(self):
+        import bac_py.objects  # noqa: F401
+        from bac_py.objects.analog import AnalogInputObject
+        from bac_py.services.read_range import (
+            RangeByPosition,
+            ReadRangeACK,
+            ReadRangeRequest,
+        )
+
+        app, db, device = _make_app()
+        for i in range(1, 6):
+            db.add(AnalogInputObject(i, object_name=f"AI-{i}"))
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadRangeRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            range=RangeByPosition(reference_index=2, count=2),
+        )
+
+        async def run():
+            result = await handlers.handle_read_range(26, request.encode(), SOURCE)
+            ack = ReadRangeACK.decode(result)
+            assert ack.item_count == 2
+            assert ack.result_flags.first_item is False
+            assert ack.result_flags.last_item is False
+            assert ack.result_flags.more_items is True
+
+        asyncio.get_event_loop().run_until_complete(run())
+
+    def test_read_range_unknown_object_raises(self):
+        from bac_py.services.read_range import ReadRangeRequest
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadRangeRequest(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 999),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+        )
+
+        async def run():
+            with pytest.raises(BACnetError) as exc_info:
+                await handlers.handle_read_range(26, request.encode(), SOURCE)
+            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+        asyncio.get_event_loop().run_until_complete(run())
