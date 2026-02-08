@@ -19,6 +19,7 @@ from bac_py.types.enums import (
     FileAccessMethod,
     NetworkMessageType,
     NetworkPriority,
+    NetworkReachability,
     ObjectType,
     PduType,
     Polarity,
@@ -26,6 +27,7 @@ from bac_py.types.enums import (
     ProgramState,
     PropertyIdentifier,
     ReinitializedState,
+    RejectMessageReason,
     RejectReason,
     Reliability,
     Segmentation,
@@ -58,6 +60,8 @@ ALL_ENUM_CLASSES = [
     ProgramState,
     ProgramChange,
     Action,
+    RejectMessageReason,
+    NetworkReachability,
 ]
 
 
@@ -819,6 +823,56 @@ class TestAction:
 
     def test_member_count(self) -> None:
         assert len(Action) == 2
+
+
+# ---------------------------------------------------------------------------
+# RejectMessageReason
+# ---------------------------------------------------------------------------
+
+
+class TestRejectMessageReason:
+    def test_other(self) -> None:
+        assert RejectMessageReason.OTHER == 0
+
+    def test_not_directly_connected(self) -> None:
+        assert RejectMessageReason.NOT_DIRECTLY_CONNECTED == 1
+
+    def test_router_busy(self) -> None:
+        assert RejectMessageReason.ROUTER_BUSY == 2
+
+    def test_unknown_message_type(self) -> None:
+        assert RejectMessageReason.UNKNOWN_MESSAGE_TYPE == 3
+
+    def test_message_too_long(self) -> None:
+        assert RejectMessageReason.MESSAGE_TOO_LONG == 4
+
+    def test_security_error(self) -> None:
+        assert RejectMessageReason.SECURITY_ERROR == 5
+
+    def test_addressing_error(self) -> None:
+        assert RejectMessageReason.ADDRESSING_ERROR == 6
+
+    def test_member_count(self) -> None:
+        assert len(RejectMessageReason) == 7
+
+
+# ---------------------------------------------------------------------------
+# NetworkReachability
+# ---------------------------------------------------------------------------
+
+
+class TestNetworkReachability:
+    def test_reachable(self) -> None:
+        assert NetworkReachability.REACHABLE == 0
+
+    def test_busy(self) -> None:
+        assert NetworkReachability.BUSY == 1
+
+    def test_unreachable(self) -> None:
+        assert NetworkReachability.UNREACHABLE == 2
+
+    def test_member_count(self) -> None:
+        assert len(NetworkReachability) == 3
 
 
 # ---------------------------------------------------------------------------

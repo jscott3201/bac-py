@@ -83,16 +83,19 @@ class BIPTransport:
         """
         self._receive_callback = callback
 
-    def send_unicast(self, npdu: bytes, destination: BIPAddress) -> None:
+    def send_unicast(self, npdu: bytes, destination: BIPAddress | bytes) -> None:
         """Send a directed message (Original-Unicast-NPDU).
 
         Args:
             npdu: NPDU bytes to send.
-            destination: Target BACnet/IP address.
+            destination: Target BACnet/IP address, either as a
+                :class:`BIPAddress` or 6-byte raw MAC (IP + port).
         """
         if self._transport is None:
             msg = "Transport not started"
             raise RuntimeError(msg)
+        if isinstance(destination, (bytes, memoryview)):
+            destination = BIPAddress.decode(destination)
         bvll = encode_bvll(BvlcFunction.ORIGINAL_UNICAST_NPDU, npdu)
         self._transport.sendto(bvll, (destination.host, destination.port))
 
@@ -115,6 +118,11 @@ class BIPTransport:
             msg = "Transport not started"
             raise RuntimeError(msg)
         return self._local_address
+
+    @property
+    def local_mac(self) -> bytes:
+        """The 6-byte MAC address of this port (4-byte IP + 2-byte port)."""
+        return self.local_address.encode()
 
     @property
     def max_npdu_length(self) -> int:

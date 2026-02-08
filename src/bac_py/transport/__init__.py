@@ -1,1 +1,1 @@
-"""BVLL, BACnet/IP transport, and BBMD."""
+"""BVLL, BACnet/IP transport, BBMD, and transport port abstraction."""

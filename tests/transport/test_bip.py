@@ -509,6 +509,136 @@ class TestOnReceiveCallback:
         assert transport._receive_callback is second
 
 
+class TestLocalMac:
+    """Test the local_mac property."""
+
+    def test_local_mac_raises_when_not_started(self):
+        transport = BIPTransport()
+        with pytest.raises(RuntimeError, match="Transport not started"):
+            _ = transport.local_mac
+
+    async def test_local_mac_returns_6_bytes(self):
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        try:
+            await transport.start()
+            mac = transport.local_mac
+            assert isinstance(mac, bytes)
+            assert len(mac) == 6
+        finally:
+            await transport.stop()
+
+    async def test_local_mac_matches_local_address_encode(self):
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        try:
+            await transport.start()
+            assert transport.local_mac == transport.local_address.encode()
+        finally:
+            await transport.stop()
+
+    async def test_local_mac_ip_bytes(self):
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        try:
+            await transport.start()
+            mac = transport.local_mac
+            # First 4 bytes are the IP address 127.0.0.1
+            assert mac[0] == 127
+            assert mac[1] == 0
+            assert mac[2] == 0
+            assert mac[3] == 1
+        finally:
+            await transport.stop()
+
+
+class TestSendUnicastWithMac:
+    """Test send_unicast accepting raw MAC bytes."""
+
+    def test_send_unicast_mac_bytes(self):
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+
+        npdu = b"\x01\x00\x10\x02\x00"
+        # 192.168.1.100 = 0xC0.0xA8.0x01.0x64, port 47808 = 0xBAC0
+        mac = b"\xc0\xa8\x01\x64\xba\xc0"
+
+        transport.send_unicast(npdu, mac)
+
+        mock_udp.sendto.assert_called_once()
+        _, addr = mock_udp.sendto.call_args[0]
+        assert addr == ("192.168.1.100", 47808)
+
+    def test_send_unicast_mac_bvll_encoding(self):
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+
+        npdu = b"\x01\x00\x10\x02\x00"
+        mac = b"\x0a\x00\x00\x01\xba\xc0"
+
+        transport.send_unicast(npdu, mac)
+
+        sent_bvll = mock_udp.sendto.call_args[0][0]
+        expected_bvll = encode_bvll(BvlcFunction.ORIGINAL_UNICAST_NPDU, npdu)
+        assert sent_bvll == expected_bvll
+
+    def test_send_unicast_mac_not_started_raises(self):
+        transport = BIPTransport()
+        mac = b"\xc0\xa8\x01\x64\xba\xc0"
+        with pytest.raises(RuntimeError, match="Transport not started"):
+            transport.send_unicast(b"\x01\x02", mac)
+
+    def test_send_unicast_bip_address_still_works(self):
+        """Existing BIPAddress usage is not broken."""
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+
+        npdu = b"\x01\x00\x10\x02\x00"
+        dest = BIPAddress(host="192.168.1.100", port=47808)
+
+        transport.send_unicast(npdu, dest)
+
+        mock_udp.sendto.assert_called_once()
+        _, addr = mock_udp.sendto.call_args[0]
+        assert addr == ("192.168.1.100", 47808)
+
+
+class TestTransportPortProtocol:
+    """Test that BIPTransport satisfies the TransportPort protocol."""
+
+    def test_isinstance_check(self):
+        from bac_py.transport.port import TransportPort
+
+        transport = BIPTransport()
+        assert isinstance(transport, TransportPort)
+
+    def test_has_start_method(self):
+        transport = BIPTransport()
+        assert callable(transport.start)
+
+    def test_has_stop_method(self):
+        transport = BIPTransport()
+        assert callable(transport.stop)
+
+    def test_has_on_receive_method(self):
+        transport = BIPTransport()
+        assert callable(transport.on_receive)
+
+    def test_has_send_unicast_method(self):
+        transport = BIPTransport()
+        assert callable(transport.send_unicast)
+
+    def test_has_send_broadcast_method(self):
+        transport = BIPTransport()
+        assert callable(transport.send_broadcast)
+
+    def test_has_local_mac_property(self):
+        assert isinstance(BIPTransport.__dict__["local_mac"], property)
+
+    def test_has_max_npdu_length_property(self):
+        assert isinstance(BIPTransport.__dict__["max_npdu_length"], property)
+
+
 class TestHandleBvlcResult:
     """Test _handle_bvlc_result edge cases."""
 

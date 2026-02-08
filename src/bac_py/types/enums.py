@@ -968,3 +968,23 @@ class Action(IntEnum):
 
     DIRECT = 0
     REVERSE = 1
+
+
+class RejectMessageReason(IntEnum):
+    """Reject-Message-To-Network reason codes (Clause 6.4.4)."""
+
+    OTHER = 0
+    NOT_DIRECTLY_CONNECTED = 1
+    ROUTER_BUSY = 2
+    UNKNOWN_MESSAGE_TYPE = 3
+    MESSAGE_TOO_LONG = 4
+    SECURITY_ERROR = 5
+    ADDRESSING_ERROR = 6
+
+
+class NetworkReachability(IntEnum):
+    """Reachability status for a routing table entry (Clause 6.6.1)."""
+
+    REACHABLE = 0
+    BUSY = 1
+    UNREACHABLE = 2
