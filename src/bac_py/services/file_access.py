@@ -105,7 +105,7 @@ class AtomicReadFileRequest:
         # accessMethod CHOICE
         tag, offset = decode_tag(data, offset)
         access_method: StreamReadAccess | RecordReadAccess
-        if tag.number == 0:
+        if tag.number == 0 and tag.is_opening:
             # streamAccess
             t, offset = decode_tag(data, offset)
             file_start_position = decode_signed(data[offset : offset + t.length])
@@ -115,7 +115,7 @@ class AtomicReadFileRequest:
             offset += t.length
             _closing, offset = decode_tag(data, offset)
             access_method = StreamReadAccess(file_start_position, requested_octet_count)
-        else:
+        elif tag.number == 1 and tag.is_opening:
             # recordAccess
             t, offset = decode_tag(data, offset)
             file_start_record = decode_signed(data[offset : offset + t.length])
@@ -125,6 +125,9 @@ class AtomicReadFileRequest:
             offset += t.length
             _closing, offset = decode_tag(data, offset)
             access_method = RecordReadAccess(file_start_record, requested_record_count)
+        else:
+            msg = f"Unexpected tag {tag.number} in AtomicReadFile CHOICE"
+            raise ValueError(msg)
 
         return cls(file_identifier=file_identifier, access_method=access_method)
 
@@ -198,14 +201,14 @@ class AtomicReadFileACK:
         offset = 0
 
         # endOfFile (APPLICATION-tagged boolean, tag 1)
+        # Per Clause 20.2.3, the boolean value is in the tag's L/V/T field.
         tag, offset = decode_tag(data, offset)
-        # Boolean application tag: value is in the tag length/value field
-        end_of_file = tag.length != 0
+        end_of_file = tag.is_boolean_true
 
         # accessMethod CHOICE
         tag, offset = decode_tag(data, offset)
         access_method: StreamReadACK | RecordReadACK
-        if tag.number == 0:
+        if tag.number == 0 and tag.is_opening:
             # streamAccess
             t, offset = decode_tag(data, offset)
             file_start_position = decode_signed(data[offset : offset + t.length])
@@ -215,7 +218,7 @@ class AtomicReadFileACK:
             offset += t.length
             _closing, offset = decode_tag(data, offset)
             access_method = StreamReadACK(file_start_position, file_data)
-        else:
+        elif tag.number == 1 and tag.is_opening:
             # recordAccess
             t, offset = decode_tag(data, offset)
             file_start_record = decode_signed(data[offset : offset + t.length])
@@ -232,6 +235,9 @@ class AtomicReadFileACK:
             access_method = RecordReadACK(
                 file_start_record, returned_record_count, file_record_data
             )
+        else:
+            msg = f"Unexpected tag {tag.number} in AtomicReadFileACK CHOICE"
+            raise ValueError(msg)
 
         return cls(end_of_file=end_of_file, access_method=access_method)
 
@@ -320,7 +326,7 @@ class AtomicWriteFileRequest:
         # accessMethod CHOICE
         tag, offset = decode_tag(data, offset)
         access_method: StreamWriteAccess | RecordWriteAccess
-        if tag.number == 0:
+        if tag.number == 0 and tag.is_opening:
             # streamAccess
             t, offset = decode_tag(data, offset)
             file_start_position = decode_signed(data[offset : offset + t.length])
@@ -330,7 +336,7 @@ class AtomicWriteFileRequest:
             offset += t.length
             _closing, offset = decode_tag(data, offset)
             access_method = StreamWriteAccess(file_start_position, file_data)
-        else:
+        elif tag.number == 1 and tag.is_opening:
             # recordAccess
             t, offset = decode_tag(data, offset)
             file_start_record = decode_signed(data[offset : offset + t.length])
@@ -345,6 +351,9 @@ class AtomicWriteFileRequest:
                 offset += t.length
             _closing, offset = decode_tag(data, offset)
             access_method = RecordWriteAccess(file_start_record, record_count, file_record_data)
+        else:
+            msg = f"Unexpected tag {tag.number} in AtomicWriteFile CHOICE"
+            raise ValueError(msg)
 
         return cls(file_identifier=file_identifier, access_method=access_method)
 

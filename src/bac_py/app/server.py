@@ -11,11 +11,12 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from bac_py.encoding.primitives import (
+    decode_all_application_values,
     encode_application_object_id,
     encode_property_value,
 )
 from bac_py.network.address import GLOBAL_BROADCAST
-from bac_py.objects.base import create_object
+from bac_py.objects.base import _OBJECT_REGISTRY, create_object
 from bac_py.objects.file import FileObject
 from bac_py.services.cov import SubscribeCOVRequest
 from bac_py.services.device_mgmt import (
@@ -64,7 +65,7 @@ from bac_py.types.enums import (
     RejectReason,
     UnconfirmedServiceChoice,
 )
-from bac_py.types.primitives import ObjectIdentifier
+from bac_py.types.primitives import BitString, ObjectIdentifier
 
 if TYPE_CHECKING:
     from bac_py.app.application import BACnetApplication
@@ -73,6 +74,28 @@ if TYPE_CHECKING:
     from bac_py.objects.device import DeviceObject
 
 logger = logging.getLogger(__name__)
+
+
+def _bitstring_from_bits(bit_positions: set[int]) -> BitString:
+    """Build a BitString with specified bit positions set to 1.
+
+    Args:
+        bit_positions: Set of bit indices (0-based, MSB-first) to set.
+
+    Returns:
+        BitString with the specified bits set.
+    """
+    if not bit_positions:
+        return BitString(b"\x00", 0)
+    max_bit = max(bit_positions)
+    byte_count = (max_bit // 8) + 1
+    unused_bits = (byte_count * 8) - (max_bit + 1)
+    buf = bytearray(byte_count)
+    for bit in bit_positions:
+        byte_index = bit // 8
+        bit_index = 7 - (bit % 8)
+        buf[byte_index] |= 1 << bit_index
+    return BitString(bytes(buf), unused_bits)
 
 
 def _encode_property_value(value: Any) -> bytes:
@@ -190,6 +213,28 @@ class DefaultServerHandlers:
             self.handle_utc_time_synchronization,
         )
 
+        # Auto-compute Protocol_Services_Supported from registered handlers
+        # Per Clause 12.11.44: confirmed services at bit positions matching
+        # their ConfirmedServiceChoice value (0-31), unconfirmed services
+        # at bit position 32 + UnconfirmedServiceChoice value.
+        service_bits: set[int] = set()
+        for sc in registry._confirmed:
+            service_bits.add(sc)
+        for sc in registry._unconfirmed:
+            service_bits.add(32 + sc)
+        self._device._properties[PropertyIdentifier.PROTOCOL_SERVICES_SUPPORTED] = (
+            _bitstring_from_bits(service_bits)
+        )
+
+        # Auto-compute Protocol_Object_Types_Supported from registry
+        # Per Clause 12.11.43: bit position = ObjectType value.
+        obj_type_bits: set[int] = set()
+        for obj_type in _OBJECT_REGISTRY:
+            obj_type_bits.add(int(obj_type))
+        self._device._properties[PropertyIdentifier.PROTOCOL_OBJECT_TYPES_SUPPORTED] = (
+            _bitstring_from_bits(obj_type_bits)
+        )
+
     async def handle_read_property(
         self,
         service_choice: int,
@@ -262,12 +307,26 @@ class DefaultServerHandlers:
         if obj is None:
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
 
+        # Decode the raw application-tagged bytes to native Python types
+        # before storing.  This mirrors the C reference library behavior
+        # where incoming values are decoded before being applied.
+        try:
+            decoded_values = decode_all_application_values(request.property_value)
+        except (ValueError, IndexError):
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.INVALID_DATA_TYPE) from None
+
+        # Single value → unwrap; multiple values → store as list
+        if len(decoded_values) == 1:
+            write_value = decoded_values[0]
+        elif len(decoded_values) == 0:
+            write_value = None
+        else:
+            write_value = decoded_values
+
         # Write the property value (may raise BACnetError)
-        # The raw application-tagged bytes are stored directly;
-        # decoding to native types is the responsibility of extended handlers.
         await obj.async_write_property(
             request.property_identifier,
-            request.property_value,
+            write_value,
             request.priority,
             request.property_array_index,
         )
@@ -359,25 +418,27 @@ class DefaultServerHandlers:
         prop_id: PropertyIdentifier,
         array_index: int | None = None,
     ) -> Any:
-        """Read a property from an object, with OBJECT_LIST override.
+        """Read a property from an object, with computed property overrides.
 
-        The device's OBJECT_LIST property should reflect all objects in
-        the database, not just the static list stored on the object.
-        This method intercepts OBJECT_LIST reads on the device and
-        returns the database's live object list instead.
+        Intercepts OBJECT_LIST reads on the device to return the live
+        database object list, and ACTIVE_COV_SUBSCRIPTIONS to return
+        the current COV subscriptions from the COV manager.
         """
-        if (
-            prop_id == PropertyIdentifier.OBJECT_LIST
-            and obj.object_identifier == self._device.object_identifier
-        ):
-            full_list = self._db.object_list
-            if array_index is not None:
-                if array_index == 0:
-                    return len(full_list)
-                if 1 <= array_index <= len(full_list):
-                    return full_list[array_index - 1]
-                raise BACnetError(ErrorClass.PROPERTY, ErrorCode.INVALID_ARRAY_INDEX)
-            return full_list
+        if obj.object_identifier == self._device.object_identifier:
+            if prop_id == PropertyIdentifier.OBJECT_LIST:
+                full_list = self._db.object_list
+                if array_index is not None:
+                    if array_index == 0:
+                        return len(full_list)
+                    if 1 <= array_index <= len(full_list):
+                        return full_list[array_index - 1]
+                    raise BACnetError(ErrorClass.PROPERTY, ErrorCode.INVALID_ARRAY_INDEX)
+                return full_list
+            if prop_id == PropertyIdentifier.ACTIVE_COV_SUBSCRIPTIONS:
+                cov_manager = self._app.cov_manager
+                if cov_manager is None:
+                    return []
+                return cov_manager.get_active_subscriptions()
         return obj.read_property(prop_id, array_index)
 
     def _resolve_object_id(self, obj_id: ObjectIdentifier) -> ObjectIdentifier:
@@ -504,24 +565,41 @@ class DefaultServerHandlers:
     ) -> bytes | None:
         """Handle WritePropertyMultiple-Request per Clause 15.10.
 
-        Decodes the request and writes all properties in order.
-        Stops at the first error and returns a BACnet error.
+        Uses a two-pass approach for atomicity: validates all writes
+        first, then applies them. Either all writes succeed or none
+        are applied.
 
         Returns:
             None (SimpleACK response) on full success.
 
         Raises:
-            BACnetError: On first write failure.
+            BACnetError: On first validation or write failure.
         """
+        from bac_py.objects.base import PropertyAccess
+
         request = WritePropertyMultipleRequest.decode(data)
 
+        # Pass 1: Validate all writes (object existence, property access)
+        validated: list[tuple[BACnetObject, list[Any]]] = []
         for spec in request.list_of_write_access_specs:
             obj_id = self._resolve_object_id(spec.object_identifier)
             obj = self._db.get(obj_id)
             if obj is None:
                 raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
-
             for pv in spec.list_of_properties:
+                prop_def = obj.PROPERTY_DEFINITIONS.get(pv.property_identifier)
+                if prop_def is None:
+                    raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
+                if prop_def.access == PropertyAccess.READ_ONLY and not (
+                    pv.property_identifier == PropertyIdentifier.PRESENT_VALUE
+                    and obj._properties.get(PropertyIdentifier.OUT_OF_SERVICE) is True
+                ):
+                    raise BACnetError(ErrorClass.PROPERTY, ErrorCode.WRITE_ACCESS_DENIED)
+            validated.append((obj, spec.list_of_properties))
+
+        # Pass 2: Apply all writes
+        for obj, properties in validated:
+            for pv in properties:
                 await obj.async_write_property(
                     pv.property_identifier,
                     pv.value,
@@ -622,19 +700,33 @@ class DefaultServerHandlers:
     ) -> bytes | None:
         """Handle DeviceCommunicationControl-Request per Clause 16.1.
 
-        Logs the communication control state change. Does not actually
-        disable communication in this implementation.
+        Sets the application DCC state and optionally starts a timer
+        to auto-re-enable after the specified duration.
 
         Returns:
             None (SimpleACK response).
+
+        Raises:
+            BACnetError: If the password does not match (Clause 16.1.3.1).
         """
         request = DeviceCommunicationControlRequest.decode(data)
+
+        # Password validation per Clause 16.1.3.1
+        config_password = self._app.config.password
+        if config_password is not None:
+            if request.password != config_password:
+                raise BACnetError(ErrorClass.SECURITY, ErrorCode.PASSWORD_FAILURE)
+        elif request.password is not None:
+            # Device has no password configured but request includes one
+            raise BACnetError(ErrorClass.SECURITY, ErrorCode.PASSWORD_FAILURE)
+
         logger.info(
             "DeviceCommunicationControl from %s: enable_disable=%s, duration=%s",
             source,
             request.enable_disable,
             request.time_duration,
         )
+        self._app.set_dcc_state(request.enable_disable, request.time_duration)
         return None
 
     async def handle_reinitialize_device(
@@ -650,8 +742,20 @@ class DefaultServerHandlers:
 
         Returns:
             None (SimpleACK response).
+
+        Raises:
+            BACnetError: If the password does not match (Clause 16.4.3.4).
         """
         request = ReinitializeDeviceRequest.decode(data)
+
+        # Password validation per Clause 16.4.3.4
+        config_password = self._app.config.password
+        if config_password is not None:
+            if request.password != config_password:
+                raise BACnetError(ErrorClass.SECURITY, ErrorCode.PASSWORD_FAILURE)
+        elif request.password is not None:
+            raise BACnetError(ErrorClass.SECURITY, ErrorCode.PASSWORD_FAILURE)
+
         logger.info(
             "ReinitializeDevice from %s: state=%s",
             source,
@@ -825,7 +929,14 @@ class DefaultServerHandlers:
         if request.list_of_initial_values:
             for pv in request.list_of_initial_values:
                 prop_name = pv.property_identifier.name.lower()
-                kwargs[prop_name] = pv.value
+                # Decode raw application-tagged bytes to native Python types
+                decoded = decode_all_application_values(pv.value)
+                if len(decoded) == 1:
+                    kwargs[prop_name] = decoded[0]
+                elif len(decoded) == 0:
+                    kwargs[prop_name] = None
+                else:
+                    kwargs[prop_name] = decoded
 
         obj = create_object(obj_type, instance, **kwargs)
         self._db.add(obj)
@@ -851,6 +962,12 @@ class DefaultServerHandlers:
         request = DeleteObjectRequest.decode(data)
         obj_id = self._resolve_object_id(request.object_identifier)
         self._db.remove(obj_id)
+
+        # Clean up any COV subscriptions for the deleted object
+        cov_manager = self._app.cov_manager
+        if cov_manager is not None:
+            cov_manager.remove_object_subscriptions(obj_id)
+
         return None
 
     async def handle_add_list_element(
@@ -946,7 +1063,7 @@ class DefaultServerHandlers:
         if found_obj is None:
             return
 
-        # Send I-Have response
+        # Send I-Have response (per Clause 16.9.2, always broadcast)
         obj_name = found_obj.read_property(PropertyIdentifier.OBJECT_NAME)
         ihave = IHaveRequest(
             device_identifier=ObjectIdentifier(ObjectType.DEVICE, instance),
@@ -954,7 +1071,7 @@ class DefaultServerHandlers:
             object_name=obj_name,
         )
         self._app.unconfirmed_request(
-            destination=source,
+            destination=GLOBAL_BROADCAST,
             service_choice=UnconfirmedServiceChoice.I_HAVE,
             service_data=ihave.encode(),
         )

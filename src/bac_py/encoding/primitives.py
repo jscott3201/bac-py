@@ -27,6 +27,7 @@ _TAG_OBJECT_IDENTIFIER = 12
 # Charset decoders for CharacterString (Clause 20.2.9)
 _CHARSET_DECODERS: dict[int, str] = {
     0x00: "utf-8",
+    0x01: "iso2022_jp",  # JIS X0201 (Clause 20.2.9, Table 20.2.9.1)
     0x02: "iso2022_jp",
     0x03: "utf-32-be",
     0x04: "utf-16-be",
@@ -61,11 +62,24 @@ def decode_unsigned(data: memoryview | bytes) -> int:
 # --- Signed Integer (Clause 20.2.5) ---
 
 
+def _min_signed_bytes(value: int) -> int:
+    """Return minimum number of bytes to encode a signed integer.
+
+    Per Clause 20.2.5, signed integers shall use the minimum number
+    of octets in two's-complement representation.
+    """
+    if value == 0:
+        return 1
+    if value > 0:
+        return (value.bit_length() + 8) // 8  # +1 for sign bit, rounded up
+    # For negative values: (-value - 1) gives the magnitude that must
+    # be representable.  E.g. -128 -> 127 -> 7 bits -> (7+8)//8 = 1 byte.
+    return ((-value - 1).bit_length() + 8) // 8
+
+
 def encode_signed(value: int) -> bytes:
     """Encode a signed integer using minimum octets, 2's complement, big-endian."""
-    if value == 0:
-        return b"\x00"
-    n = (value.bit_length() + 8) // 8  # +1 for sign bit, rounded up
+    n = _min_signed_bytes(value)
     return value.to_bytes(n, "big", signed=True)
 
 
@@ -416,8 +430,8 @@ def decode_application_value(data: bytes | memoryview) -> object:
     match tag.number:
         case 0:  # Null
             return None
-        case 1:  # Boolean - value is in the tag length field
-            return tag.length != 0
+        case 1:  # Boolean - value is in the tag L/V/T field (Clause 20.2.3)
+            return tag.is_boolean_true
         case 2:  # Unsigned
             return decode_unsigned(content)
         case 3:  # Signed

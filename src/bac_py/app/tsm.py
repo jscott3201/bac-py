@@ -205,13 +205,14 @@ class ClientTSM:
         invoke_id: int,
         error_class: ErrorClass,
         error_code: ErrorCode,
+        error_data: bytes = b"",
     ) -> None:
         """Handle an Error-PDU response."""
         key = (source, invoke_id)
         txn = self._transactions.get(key)
         if txn and not txn.future.done():
             self._cancel_timeout(txn)
-            txn.future.set_exception(BACnetError(error_class, error_code))
+            txn.future.set_exception(BACnetError(error_class, error_code, error_data))
 
     def handle_reject(
         self,

@@ -221,11 +221,11 @@ class TestCharacterString:
 
     def test_unsupported_charset_encode_raises(self):
         with pytest.raises(ValueError, match="Unsupported BACnet character set"):
-            encode_character_string("hello", charset=0x01)
+            encode_character_string("hello", charset=0x06)
 
     def test_unsupported_charset_decode_raises(self):
         with pytest.raises(ValueError, match="Unsupported BACnet character set"):
-            decode_character_string(b"\x01hello")
+            decode_character_string(b"\x06hello")
 
     def test_iso_8859_1(self):
         encoded = encode_character_string("caf\u00e9", charset=0x05)

@@ -72,7 +72,10 @@ class CreateObjectRequest:
         offset = 0
 
         # [0] objectSpecifier (opening tag 0)
-        _opening, offset = decode_tag(data, offset)
+        opening, offset = decode_tag(data, offset)
+        if not opening.is_opening or opening.number != 0:
+            msg = f"Expected opening tag 0 for objectSpecifier, got tag {opening.number}"
+            raise ValueError(msg)
 
         object_type: ObjectType | None = None
         object_identifier: ObjectIdentifier | None = None
@@ -89,6 +92,9 @@ class CreateObjectRequest:
             )
             object_identifier = ObjectIdentifier(ObjectType(obj_type), instance)
             offset = new_offset + tag.length
+        else:
+            msg = f"Unexpected tag {tag.number} in CreateObject objectSpecifier CHOICE"
+            raise ValueError(msg)
 
         # closing tag 0
         _closing, offset = decode_tag(data, offset)

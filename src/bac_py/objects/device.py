@@ -179,6 +179,12 @@ class DeviceObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
+        PropertyIdentifier.ACTIVE_COV_SUBSCRIPTIONS: PropertyDefinition(
+            PropertyIdentifier.ACTIVE_COV_SUBSCRIPTIONS,
+            list,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
     }
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:

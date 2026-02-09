@@ -28,6 +28,7 @@ def _make_app(device_instance: int = 1):
     app.config = MagicMock()
     app.config.max_apdu_length = 1476
     app.config.vendor_id = 42
+    app.config.password = None
     app.service_registry = MagicMock()
     app.unconfirmed_request = MagicMock()
 
@@ -875,6 +876,7 @@ class TestHandleDeviceCommunicationControl:
         from bac_py.types.enums import EnableDisable
 
         app, db, device = _make_app()
+        app.config.password = "secret"
         handlers = DefaultServerHandlers(app, db, device)
 
         request = DeviceCommunicationControlRequest(
@@ -915,6 +917,7 @@ class TestHandleReinitializeDevice:
         from bac_py.types.enums import ReinitializedState
 
         app, db, device = _make_app()
+        app.config.password = "mypass"
         handlers = DefaultServerHandlers(app, db, device)
 
         request = ReinitializeDeviceRequest(

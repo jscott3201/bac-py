@@ -137,15 +137,16 @@ class SegmentAckPDU:
 class ErrorPDU:
     """BACnet Error PDU (Clause 20.1.7).
 
-    Represents the base error response with error-class and error-code.
-    Extended error data (e.g. ChangeList-Error, CreateObject-Error) is
-    not decoded — only the two-field base error is supported.
+    Represents the error response with error-class, error-code, and
+    optional trailing error data for extended error types (e.g.
+    ChangeList-Error, CreateObject-Error).
     """
 
     invoke_id: int
     service_choice: int
     error_class: ErrorClass
     error_code: ErrorCode
+    error_data: bytes = b""
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,6 +322,8 @@ def _encode_error(pdu: ErrorPDU) -> bytes:
     buf.append(pdu.service_choice)
     buf.extend(encode_application_enumerated(pdu.error_class))
     buf.extend(encode_application_enumerated(pdu.error_code))
+    if pdu.error_data:
+        buf.extend(pdu.error_data)
     return bytes(buf)
 
 
@@ -498,12 +501,17 @@ def _decode_error(data: memoryview) -> ErrorPDU:
 
     tag, offset = decode_tag(data, offset)
     error_code = ErrorCode(decode_enumerated(data[offset : offset + tag.length]))
+    offset += tag.length
+
+    # Preserve any trailing error data (extended error types)
+    error_data = bytes(data[offset:]) if offset < len(data) else b""
 
     return ErrorPDU(
         invoke_id=invoke_id,
         service_choice=service_choice,
         error_class=error_class,
         error_code=error_code,
+        error_data=error_data,
     )
 
 

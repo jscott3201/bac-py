@@ -20,7 +20,8 @@ from bac_py.encoding.tags import (
     encode_opening_tag,
     extract_context_value,
 )
-from bac_py.types.enums import ObjectType, PropertyIdentifier
+from bac_py.services.errors import BACnetRejectError
+from bac_py.types.enums import ObjectType, PropertyIdentifier, RejectReason
 from bac_py.types.primitives import ObjectIdentifier
 
 
@@ -110,8 +111,10 @@ class WritePropertyRequest:
         # [3] property-value: opening tag 3 ... closing tag 3
         property_value, offset = extract_context_value(data, offset, 3)
 
-        # [4] priority (optional)
+        # [4] priority (optional, 1-16 per Clause 15.9.1.1.5)
         priority, offset = decode_optional_context(data, offset, 4, decode_unsigned)
+        if priority is not None and not (1 <= priority <= 16):
+            raise BACnetRejectError(RejectReason.PARAMETER_OUT_OF_RANGE)
 
         return cls(
             object_identifier=object_identifier,

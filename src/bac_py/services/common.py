@@ -17,7 +17,8 @@ from bac_py.encoding.tags import (
     encode_opening_tag,
     extract_context_value,
 )
-from bac_py.types.enums import PropertyIdentifier
+from bac_py.services.errors import BACnetRejectError
+from bac_py.types.enums import PropertyIdentifier, RejectReason
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,7 +96,7 @@ class BACnetPropertyValue:
         # [2] value — opening tag 2
         value, offset = extract_context_value(data, new_offset, 2)
 
-        # [3] priority (optional)
+        # [3] priority (optional, 1-16 per Clause 21)
         priority = None
         if offset < len(data):
             tag, new_offset = decode_tag(data, offset)
@@ -107,6 +108,8 @@ class BACnetPropertyValue:
             ):
                 priority = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
+                if not (1 <= priority <= 16):
+                    raise BACnetRejectError(RejectReason.PARAMETER_OUT_OF_RANGE)
 
         return (
             cls(

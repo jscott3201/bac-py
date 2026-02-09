@@ -27,6 +27,17 @@ class Tag:
     is_opening: bool = False
     is_closing: bool = False
 
+    @property
+    def is_boolean_true(self) -> bool:
+        """Check if this is an APPLICATION boolean tag with value True.
+
+        Per Clause 20.2.3, APPLICATION-tagged booleans encode the
+        value in the tag's L/V/T field with no contents octets.
+        The ``length`` field here stores the raw L/V/T value, so
+        a nonzero value means True.
+        """
+        return self.cls == TagClass.APPLICATION and self.number == 1 and self.length != 0
+
 
 def encode_tag(tag_number: int, cls: TagClass, length: int) -> bytes:
     """Encode a tag header.

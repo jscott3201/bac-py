@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import struct
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -32,8 +33,10 @@ from bac_py.transport.bip import BIPTransport
 from bac_py.types.enums import (
     AbortReason,
     ConfirmedServiceChoice,
+    EnableDisable,
     ObjectType,
     PduType,
+    RejectReason,
     UnconfirmedServiceChoice,
 )
 from bac_py.types.primitives import ObjectIdentifier
@@ -127,6 +130,11 @@ class DeviceConfig:
     router_config: RouterConfig | None = None
     """Optional router configuration for multi-network mode."""
 
+    password: str | None = None
+    """Optional password for DeviceCommunicationControl and ReinitializeDevice
+    services (1-20 characters, per Clause 16.1.3.1 and 16.4.3.4).
+    When set, incoming requests must include a matching password."""
+
 
 class BACnetApplication:
     """Central orchestrator connecting all protocol layers.
@@ -158,6 +166,8 @@ class BACnetApplication:
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._cov_manager: COVManager | None = None
         self._cov_callbacks: dict[int, Callable[..., Any]] = {}
+        self._dcc_state: EnableDisable = EnableDisable.ENABLE
+        self._dcc_timer: asyncio.TimerHandle | None = None
 
     @property
     def object_db(self) -> ObjectDatabase:
@@ -178,6 +188,38 @@ class BACnetApplication:
     def cov_manager(self) -> COVManager | None:
         """The COV subscription manager, or None if not started."""
         return self._cov_manager
+
+    @property
+    def dcc_state(self) -> EnableDisable:
+        """The current DeviceCommunicationControl state."""
+        return self._dcc_state
+
+    def set_dcc_state(
+        self,
+        state: EnableDisable,
+        duration: int | None = None,
+    ) -> None:
+        """Set the DeviceCommunicationControl state.
+
+        Args:
+            state: New DCC state (ENABLE, DISABLE, or DISABLE_INITIATION).
+            duration: Optional duration in minutes. When provided and state
+                is not ENABLE, a timer is set to auto-re-enable after the
+                specified number of minutes.
+        """
+        # Cancel any existing DCC timer
+        if self._dcc_timer is not None:
+            self._dcc_timer.cancel()
+            self._dcc_timer = None
+
+        self._dcc_state = state
+
+        if duration is not None and state != EnableDisable.ENABLE:
+            loop = asyncio.get_running_loop()
+            self._dcc_timer = loop.call_later(
+                duration * 60,
+                self._dcc_timer_expired,
+            )
 
     @property
     def device_object_identifier(self) -> Any:
@@ -231,6 +273,9 @@ class BACnetApplication:
             UnconfirmedServiceChoice.UNCONFIRMED_COV_NOTIFICATION,
             self._handle_unconfirmed_cov_notification,
         )
+
+        # Broadcast I-Am on startup per Clause 12.11.13
+        self._broadcast_i_am()
 
     async def _start_non_router_mode(self) -> None:
         """Start in non-router (simple device) mode."""
@@ -286,6 +331,11 @@ class BACnetApplication:
             self._cov_manager.shutdown()
             self._cov_manager = None
 
+        # Cancel DCC timer
+        if self._dcc_timer is not None:
+            self._dcc_timer.cancel()
+            self._dcc_timer = None
+
         # Cancel all pending client transactions
         if self._client_tsm:
             for txn in self._client_tsm.active_transactions():
@@ -329,6 +379,39 @@ class BACnetApplication:
 
     # --- Client API ---
 
+    def _broadcast_i_am(self) -> None:
+        """Broadcast I-Am on startup per Clause 12.11.13.
+
+        Sends an unsolicited I-Am to the global broadcast address
+        using the device's configuration parameters.
+        """
+        from bac_py.network.address import GLOBAL_BROADCAST
+        from bac_py.services.who_is import IAmRequest
+        from bac_py.types.enums import PropertyIdentifier, Segmentation
+
+        # Get segmentation supported from device object if available
+        device_oid = self.device_object_identifier
+        device_obj = self._object_db.get(device_oid)
+        if device_obj is not None:
+            try:
+                segmentation = device_obj.read_property(PropertyIdentifier.SEGMENTATION_SUPPORTED)
+            except Exception:
+                segmentation = Segmentation.BOTH
+        else:
+            segmentation = Segmentation.BOTH
+
+        iam = IAmRequest(
+            object_identifier=device_oid,
+            max_apdu_length=self._config.max_apdu_length,
+            segmentation_supported=segmentation,
+            vendor_id=self._config.vendor_id,
+        )
+        self.unconfirmed_request(
+            destination=GLOBAL_BROADCAST,
+            service_choice=UnconfirmedServiceChoice.I_AM,
+            service_data=iam.encode(),
+        )
+
     async def confirmed_request(
         self,
         destination: BACnetAddress,
@@ -355,6 +438,20 @@ class BACnetApplication:
         if network is None:
             msg = "Application not started"
             raise RuntimeError(msg)
+
+        # DCC enforcement: suppress outbound unsolicited when DISABLE_INITIATION
+        if self._dcc_state == EnableDisable.DISABLE_INITIATION:
+            logger.debug(
+                "DCC DISABLE_INITIATION: suppressing outbound unconfirmed service %d",
+                service_choice,
+            )
+            return
+        if self._dcc_state == EnableDisable.DISABLE:
+            logger.debug(
+                "DCC DISABLE: suppressing outbound unconfirmed service %d",
+                service_choice,
+            )
+            return
         pdu = UnconfirmedRequestPDU(
             service_choice=service_choice,
             service_request=service_data,
@@ -444,6 +541,20 @@ class BACnetApplication:
         self._background_tasks.add(task)
         task.add_done_callback(self._background_tasks.discard)
 
+    def _dcc_timer_expired(self) -> None:
+        """Re-enable communication after DCC timer expires."""
+        self._dcc_state = EnableDisable.ENABLE
+        self._dcc_timer = None
+        logger.info("DCC timer expired, communication re-enabled")
+
+    # Services allowed when DCC is DISABLE (per Clause 16.1)
+    _DCC_ALLOWED_SERVICES: frozenset[int] = frozenset(
+        {
+            ConfirmedServiceChoice.DEVICE_COMMUNICATION_CONTROL,
+            ConfirmedServiceChoice.REINITIALIZE_DEVICE,
+        }
+    )
+
     def _on_apdu_received(self, data: bytes, source: BACnetAddress) -> None:
         """Dispatch received APDU based on PDU type.
 
@@ -489,7 +600,8 @@ class BACnetApplication:
                     return
                 if self._client_tsm:
                     self._client_tsm.handle_error(
-                        source, pdu.invoke_id, pdu.error_class, pdu.error_code
+                        source, pdu.invoke_id, pdu.error_class, pdu.error_code,
+                        pdu.error_data,
                     )
             case PduType.REJECT:
                 if not isinstance(pdu, RejectPDU):
@@ -565,6 +677,18 @@ class BACnetApplication:
         if network is None:
             return
 
+        # DCC enforcement: when DISABLE, only allow DCC and ReinitializeDevice
+        if (
+            self._dcc_state == EnableDisable.DISABLE
+            and service_choice not in self._DCC_ALLOWED_SERVICES
+        ):
+            logger.debug(
+                "DCC DISABLE: dropping confirmed service %d from %s",
+                service_choice,
+                source,
+            )
+            return
+
         response_pdu: SimpleAckPDU | ComplexAckPDU | ErrorPDU | RejectPDU | AbortPDU
         try:
             result = await self._service_registry.dispatch_confirmed(
@@ -600,6 +724,7 @@ class BACnetApplication:
                 service_choice=service_choice,
                 error_class=e.error_class,
                 error_code=e.error_code,
+                error_data=e.error_data,
             )
         except BACnetRejectError as e:
             response_pdu = RejectPDU(
@@ -611,6 +736,18 @@ class BACnetApplication:
                 sent_by_server=True,
                 invoke_id=txn.invoke_id,
                 abort_reason=e.reason,
+            )
+        except (ValueError, IndexError, struct.error):
+            # Malformed service data (truncated, bad encoding, etc.)
+            logger.debug(
+                "Malformed service data for service %d from %s",
+                service_choice,
+                source,
+                exc_info=True,
+            )
+            response_pdu = RejectPDU(
+                invoke_id=txn.invoke_id,
+                reject_reason=RejectReason.INVALID_PARAMETER_DATA_TYPE,
             )
         except Exception:
             logger.exception("Unhandled error in service handler")
@@ -632,6 +769,27 @@ class BACnetApplication:
         """Dispatch unconfirmed request to handlers."""
         if not isinstance(pdu, UnconfirmedRequestPDU):
             return
+
+        # DCC enforcement for unconfirmed requests
+        if self._dcc_state == EnableDisable.DISABLE:
+            logger.debug(
+                "DCC DISABLE: dropping unconfirmed service %d from %s",
+                pdu.service_choice,
+                source,
+            )
+            return
+        if self._dcc_state == EnableDisable.DISABLE_INITIATION:
+            # Only process Who-Is and Who-Has when DISABLE_INITIATION
+            if pdu.service_choice not in {
+                UnconfirmedServiceChoice.WHO_IS,
+                UnconfirmedServiceChoice.WHO_HAS,
+            }:
+                logger.debug(
+                    "DCC DISABLE_INITIATION: dropping unconfirmed service %d from %s",
+                    pdu.service_choice,
+                    source,
+                )
+                return
 
         # Dispatch to permanent handlers
         await self._service_registry.dispatch_unconfirmed(

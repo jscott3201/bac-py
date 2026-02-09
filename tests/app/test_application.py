@@ -303,6 +303,8 @@ class TestBACnetApplicationRouterMode:
 
             await app.start()
             try:
+                # Reset mock to clear I-Am broadcast from start()
+                mock_router_instance.send.reset_mock()
                 dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
                 app.unconfirmed_request(dest, 8, b"\x00")
                 mock_router_instance.send.assert_called_once()

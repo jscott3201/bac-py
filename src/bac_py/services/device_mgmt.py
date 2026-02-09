@@ -22,7 +22,8 @@ from bac_py.encoding.primitives import (
     encode_unsigned,
 )
 from bac_py.encoding.tags import TagClass, as_memoryview, decode_optional_context, decode_tag
-from bac_py.types.enums import EnableDisable, ReinitializedState
+from bac_py.services.errors import BACnetRejectError
+from bac_py.types.enums import EnableDisable, ReinitializedState, RejectReason
 
 if TYPE_CHECKING:
     from bac_py.types.primitives import BACnetDate, BACnetTime
@@ -67,10 +68,12 @@ class DeviceCommunicationControlRequest:
         time_duration = None
         password = None
 
-        # [0] timeDuration (optional)
+        # [0] timeDuration (optional, Unsigned16: 0-65535 per Clause 16.1.1.1)
         tag, new_offset = decode_tag(data, offset)
         if tag.cls == TagClass.CONTEXT and tag.number == 0:
             time_duration = decode_unsigned(data[new_offset : new_offset + tag.length])
+            if time_duration > 65535:
+                raise BACnetRejectError(RejectReason.PARAMETER_OUT_OF_RANGE)
             offset = new_offset + tag.length
             tag, new_offset = decode_tag(data, offset)
 
@@ -78,8 +81,10 @@ class DeviceCommunicationControlRequest:
         enable_disable = EnableDisable(decode_unsigned(data[new_offset : new_offset + tag.length]))
         offset = new_offset + tag.length
 
-        # [2] password (optional)
+        # [2] password (optional, 1-20 chars per Clause 16.1.1.3)
         password, offset = decode_optional_context(data, offset, 2, decode_character_string)
+        if password is not None and not (1 <= len(password) <= 20):
+            raise BACnetRejectError(RejectReason.PARAMETER_OUT_OF_RANGE)
 
         return cls(
             enable_disable=enable_disable,
@@ -127,8 +132,10 @@ class ReinitializeDeviceRequest:
         )
         offset += tag.length
 
-        # [1] password (optional)
+        # [1] password (optional, 1-20 chars per Clause 16.4.1.2)
         password, _ = decode_optional_context(data, offset, 1, decode_character_string)
+        if password is not None and not (1 <= len(password) <= 20):
+            raise BACnetRejectError(RejectReason.PARAMETER_OUT_OF_RANGE)
 
         return cls(
             reinitialized_state=reinitialized_state,
