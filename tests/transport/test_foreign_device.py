@@ -44,6 +44,7 @@ def fd_mgr(collector: SentCollector) -> ForeignDeviceManager:
         bbmd_address=BBMD_ADDR,
         ttl=60,
         send_callback=collector.send,
+        local_address=LOCAL_ADDR,
     )
 
 
@@ -210,3 +211,83 @@ class TestTTLEncoding:
                 ttl=0,
                 send_callback=collector.send,
             )
+
+
+# --- Deregistration on stop (F2) ---
+
+
+class TestDeregistrationOnStop:
+    @pytest.mark.asyncio
+    async def test_stop_sends_deregistration_when_registered(
+        self, fd_mgr: ForeignDeviceManager, collector: SentCollector
+    ):
+        """F2: stop() sends Delete-Foreign-Device-Table-Entry when registered."""
+        await fd_mgr.start()
+        ok = BvlcResultCode.SUCCESSFUL_COMPLETION.to_bytes(2, "big")
+        fd_mgr.handle_bvlc_result(ok)
+        assert fd_mgr.is_registered is True
+
+        collector.clear()
+        await fd_mgr.stop()
+
+        sent = collector.find_sent_to(BBMD_ADDR)
+        assert len(sent) == 1
+        msg = decode_bvll(sent[0])
+        assert msg.function == BvlcFunction.DELETE_FOREIGN_DEVICE_TABLE_ENTRY
+        # Payload should be our own 6-byte address
+        assert msg.data == LOCAL_ADDR.encode()
+
+    @pytest.mark.asyncio
+    async def test_stop_no_deregistration_when_not_registered(
+        self, fd_mgr: ForeignDeviceManager, collector: SentCollector
+    ):
+        """F2: stop() does not send deregistration when not registered."""
+        await fd_mgr.start()
+        await asyncio.sleep(0.05)
+        collector.clear()
+        await fd_mgr.stop()
+
+        # No deregistration should be sent since we never got
+        # a successful registration result
+        sent = collector.find_sent_to(BBMD_ADDR)
+        deregistrations = [
+            s
+            for s in sent
+            if decode_bvll(s).function == BvlcFunction.DELETE_FOREIGN_DEVICE_TABLE_ENTRY
+        ]
+        assert len(deregistrations) == 0
+
+    @pytest.mark.asyncio
+    async def test_stop_no_deregistration_without_local_address(
+        self, collector: SentCollector
+    ):
+        """F2: stop() skips deregistration when no local_address is set."""
+        fd_mgr = ForeignDeviceManager(
+            bbmd_address=BBMD_ADDR,
+            ttl=60,
+            send_callback=collector.send,
+            # No local_address
+        )
+        await fd_mgr.start()
+        ok = BvlcResultCode.SUCCESSFUL_COMPLETION.to_bytes(2, "big")
+        fd_mgr.handle_bvlc_result(ok)
+        assert fd_mgr.is_registered is True
+
+        collector.clear()
+        await fd_mgr.stop()
+
+        # No delete message sent (no local address to send)
+        sent = collector.find_sent_to(BBMD_ADDR)
+        assert len(sent) == 0
+        assert fd_mgr.is_registered is False
+
+    @pytest.mark.asyncio
+    async def test_stop_clears_registered_after_deregistration(
+        self, fd_mgr: ForeignDeviceManager, collector: SentCollector
+    ):
+        """F2: stop() clears is_registered after sending deregistration."""
+        await fd_mgr.start()
+        ok = BvlcResultCode.SUCCESSFUL_COMPLETION.to_bytes(2, "big")
+        fd_mgr.handle_bvlc_result(ok)
+        await fd_mgr.stop()
+        assert fd_mgr.is_registered is False

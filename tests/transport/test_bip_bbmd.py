@@ -493,3 +493,124 @@ class TestNoBBMDFallback:
         assert len(received) == 1
         assert received[0][0] == npdu
         assert received[0][1] == orig.encode()
+
+
+# --- Phase 1: F6 - Self-message drop at transport level ---
+
+
+class TestSelfMessageDrop:
+    """F6: Datagrams whose UDP source matches the local address should
+    be silently dropped.  This prevents processing our own broadcasts
+    echoed back by the OS or wire re-broadcasts from the BBMD.
+    """
+
+    def test_self_unicast_dropped(self):
+        """Original-Unicast from own address is dropped."""
+        transport, _mock_udp = _make_transport_with_mock_udp()
+        received: list[tuple[bytes, bytes]] = []
+        transport.on_receive(lambda d, s: received.append((d, s)))
+
+        npdu = b"\x01\x00\x10"
+        bvll = encode_bvll(BvlcFunction.ORIGINAL_UNICAST_NPDU, npdu)
+        # Source = own address
+        transport._on_datagram_received(
+            bvll, (transport.local_address.host, transport.local_address.port)
+        )
+
+        assert len(received) == 0
+
+    def test_self_broadcast_dropped(self):
+        """Original-Broadcast from own address is dropped."""
+        transport, _mock_udp = _make_transport_with_mock_udp()
+        received: list[tuple[bytes, bytes]] = []
+        transport.on_receive(lambda d, s: received.append((d, s)))
+
+        npdu = b"\x01\x00\x10"
+        bvll = encode_bvll(BvlcFunction.ORIGINAL_BROADCAST_NPDU, npdu)
+        transport._on_datagram_received(
+            bvll, (transport.local_address.host, transport.local_address.port)
+        )
+
+        assert len(received) == 0
+
+    def test_different_source_not_dropped(self):
+        """Datagrams from a different source are NOT dropped."""
+        transport, _mock_udp = _make_transport_with_mock_udp()
+        received: list[tuple[bytes, bytes]] = []
+        transport.on_receive(lambda d, s: received.append((d, s)))
+
+        npdu = b"\x01\x00\x10"
+        bvll = encode_bvll(BvlcFunction.ORIGINAL_UNICAST_NPDU, npdu)
+        transport._on_datagram_received(bvll, ("192.168.1.99", 47808))
+
+        assert len(received) == 1
+
+    @pytest.mark.asyncio
+    async def test_self_message_dropped_with_bbmd_attached(self):
+        """Self-message drop occurs before BBMD intercept."""
+        transport, mock_udp = _make_transport_with_mock_udp()
+        received: list[tuple[bytes, bytes]] = []
+        transport.on_receive(lambda d, s: received.append((d, s)))
+        try:
+            await transport.attach_bbmd(
+                [
+                    BDTEntry(address=transport.local_address, broadcast_mask=ALL_ONES_MASK),
+                    BDTEntry(address=PEER_ADDR, broadcast_mask=ALL_ONES_MASK),
+                ]
+            )
+            mock_udp.reset_mock()
+
+            npdu = b"\x01\x00\x10"
+            bvll = encode_bvll(BvlcFunction.ORIGINAL_BROADCAST_NPDU, npdu)
+            transport._on_datagram_received(
+                bvll, (transport.local_address.host, transport.local_address.port)
+            )
+
+            # Neither delivered to callback nor forwarded by BBMD
+            assert len(received) == 0
+            assert mock_udp.sendto.call_count == 0
+        finally:
+            await transport.stop()
+
+
+# --- Phase 1: udp_source plumbing in BIP+BBMD integration ---
+
+
+class TestUDPSourceForwarding:
+    """Verify that BIPTransport passes udp_source to BBMD for Forwarded-NPDU."""
+
+    @pytest.mark.asyncio
+    async def test_forwarded_npdu_passes_udp_source(self):
+        """When receiving a Forwarded-NPDU, the UDP peer address is
+        passed to the BBMD so it can check the BDT mask.
+        """
+        transport, mock_udp = _make_transport_with_mock_udp()
+        received: list[tuple[bytes, bytes]] = []
+        transport.on_receive(lambda d, s: received.append((d, s)))
+        try:
+            await transport.attach_bbmd(
+                [
+                    BDTEntry(address=transport.local_address, broadcast_mask=ALL_ONES_MASK),
+                    BDTEntry(address=PEER_ADDR, broadcast_mask=ALL_ONES_MASK),
+                ]
+            )
+            mock_udp.reset_mock()
+
+            npdu = b"\x01\x00\x10"
+            orig_addr = BIPAddress(host="10.0.0.99", port=47808)
+            bvll = encode_bvll(BvlcFunction.FORWARDED_NPDU, npdu, originating_address=orig_addr)
+            # UDP source is PEER_ADDR (the BDT peer)
+            transport._on_datagram_received(bvll, (PEER_ADDR.host, PEER_ADDR.port))
+
+            # Should be delivered to app
+            assert len(received) == 1
+            assert received[0][0] == npdu
+
+            # With unicast mask, should have triggered wire re-broadcast
+            # to the broadcast address (255.255.255.255)
+            broadcast_calls = [
+                c for c in mock_udp.sendto.call_args_list if c[0][1][0] == "255.255.255.255"
+            ]
+            assert len(broadcast_calls) == 1
+        finally:
+            await transport.stop()

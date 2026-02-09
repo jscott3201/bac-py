@@ -51,6 +51,7 @@ class ForeignDeviceManager:
         bbmd_address: BIPAddress,
         ttl: int,
         send_callback: Callable[[bytes, BIPAddress], None],
+        local_address: BIPAddress | None = None,
     ) -> None:
         """Initialize foreign device manager.
 
@@ -60,6 +61,9 @@ class ForeignDeviceManager:
                 will re-register at TTL/2 intervals.
             send_callback: Called with (raw_bytes, destination) to send
                 a UDP datagram.
+            local_address: This device's B/IP address. Required for
+                sending deregistration on stop. If ``None``, no
+                deregistration message is sent on stop.
         """
         self._bbmd_address = bbmd_address
         if ttl < 1:
@@ -67,6 +71,7 @@ class ForeignDeviceManager:
             raise ValueError(msg)
         self._ttl = ttl
         self._send = send_callback
+        self._local_address = local_address
         self._task: asyncio.Task[None] | None = None
         self._registered = asyncio.Event()
         self._last_result: BvlcResultCode | None = None
@@ -102,12 +107,20 @@ class ForeignDeviceManager:
         self._task = asyncio.create_task(self._registration_loop())
 
     async def stop(self) -> None:
-        """Stop the registration loop."""
+        """Stop the registration loop and deregister from the BBMD.
+
+        If the device is currently registered and a local address was
+        provided, sends a Delete-Foreign-Device-Table-Entry to the
+        BBMD so it can immediately remove the FDT entry rather than
+        waiting for TTL + grace period expiry.
+        """
         if self._task is not None:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
+        if self._registered.is_set():
+            self._send_deregistration()
             self._registered.clear()
 
     def handle_bvlc_result(self, data: bytes) -> None:
@@ -172,6 +185,24 @@ class ForeignDeviceManager:
             self._bbmd_address.host,
             self._bbmd_address.port,
             self._ttl,
+        )
+
+    def _send_deregistration(self) -> None:
+        """Send a Delete-Foreign-Device-Table-Entry for this device.
+
+        Per the BACnet specification, sending a delete for the
+        device's own address allows the BBMD to immediately remove
+        the FDT entry rather than waiting for TTL + grace period.
+        """
+        if self._local_address is None:
+            return
+        payload = self._local_address.encode()
+        bvll = encode_bvll(BvlcFunction.DELETE_FOREIGN_DEVICE_TABLE_ENTRY, payload)
+        self._send(bvll, self._bbmd_address)
+        logger.info(
+            "Sent Delete-Foreign-Device-Table-Entry to %s:%d",
+            self._bbmd_address.host,
+            self._bbmd_address.port,
         )
 
     async def _registration_loop(self) -> None:

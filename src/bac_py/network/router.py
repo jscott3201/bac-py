@@ -16,7 +16,10 @@ from typing import TYPE_CHECKING
 
 from bac_py.network.address import BACnetAddress
 from bac_py.network.messages import (
+    DisconnectConnectionToNetwork,
+    EstablishConnectionToNetwork,
     IAmRouterToNetwork,
+    ICouldBeRouterToNetwork,
     InitializeRoutingTable,
     InitializeRoutingTableAck,
     NetworkMessage,
@@ -383,11 +386,14 @@ class RoutingTable:
 _MSG_TYPE_MAP: dict[type[NetworkMessage], int] = {
     WhoIsRouterToNetwork: NetworkMessageType.WHO_IS_ROUTER_TO_NETWORK,
     IAmRouterToNetwork: NetworkMessageType.I_AM_ROUTER_TO_NETWORK,
+    ICouldBeRouterToNetwork: NetworkMessageType.I_COULD_BE_ROUTER_TO_NETWORK,
     RejectMessageToNetwork: NetworkMessageType.REJECT_MESSAGE_TO_NETWORK,
     RouterBusyToNetwork: NetworkMessageType.ROUTER_BUSY_TO_NETWORK,
     RouterAvailableToNetwork: NetworkMessageType.ROUTER_AVAILABLE_TO_NETWORK,
     InitializeRoutingTable: NetworkMessageType.INITIALIZE_ROUTING_TABLE,
     InitializeRoutingTableAck: NetworkMessageType.INITIALIZE_ROUTING_TABLE_ACK,
+    EstablishConnectionToNetwork: NetworkMessageType.ESTABLISH_CONNECTION_TO_NETWORK,
+    DisconnectConnectionToNetwork: NetworkMessageType.DISCONNECT_CONNECTION_TO_NETWORK,
     WhatIsNetworkNumber: NetworkMessageType.WHAT_IS_NETWORK_NUMBER,
     NetworkNumberIs: NetworkMessageType.NETWORK_NUMBER_IS,
 }
@@ -688,6 +694,14 @@ class NetworkRouter:
 
         Returns ``None`` if the hop count has reached zero.
         """
+        # Q2: Log if a routed NPDU (has SNET/SADR) still has the default
+        # hop count of 255, which suggests no prior router decremented it.
+        if npdu.source is not None and npdu.hop_count == 255:
+            logger.debug(
+                "Routed NPDU from SNET %s has default hop count 255",
+                npdu.source.network,
+            )
+
         # Hop count check
         new_hop_count = npdu.hop_count - 1
         if new_hop_count <= 0:
@@ -818,6 +832,12 @@ class NetworkRouter:
             self._handle_what_is_network_number(port_id, npdu)
         elif isinstance(msg, NetworkNumberIs):
             self._handle_network_number_is(port_id, msg, npdu)
+        elif isinstance(msg, ICouldBeRouterToNetwork):
+            self._handle_i_could_be_router(port_id, msg, source_mac)
+        elif isinstance(msg, EstablishConnectionToNetwork):
+            self._handle_establish_connection(port_id, msg, source_mac)
+        elif isinstance(msg, DisconnectConnectionToNetwork):
+            self._handle_disconnect_connection(port_id, msg, source_mac)
         else:
             # Unknown or unsupported standard message type (Clause 6.4.4, reason 3).
             self._send_reject(port_id, source_mac, RejectMessageReason.UNKNOWN_MESSAGE_TYPE, 0)
@@ -1076,6 +1096,66 @@ class NetworkRouter:
         port = self._routing_table.get_port(port_id)
         if port is not None and not port.network_number_configured and msg.configured:
             self._routing_table.update_port_network_number(port_id, msg.network)
+
+    # -- I-Could-Be-Router-To-Network (Clause 6.4.3) ----------------------
+
+    def _handle_i_could_be_router(
+        self,
+        port_id: int,
+        msg: ICouldBeRouterToNetwork,
+        source_mac: bytes,
+    ) -> None:
+        """Process an I-Could-Be-Router-To-Network message (Clause 6.4.3).
+
+        This is an informational message from a half-router indicating
+        it could be configured to reach a network.  Logged for
+        diagnostics; no routing table changes are applied.
+        """
+        logger.info(
+            "I-Could-Be-Router-To-Network %d (perf=%d) from port %d MAC=%s",
+            msg.network,
+            msg.performance_index,
+            port_id,
+            source_mac.hex(),
+        )
+
+    # -- Establish-Connection-To-Network (Clause 6.4.9) ------------------
+
+    def _handle_establish_connection(
+        self,
+        port_id: int,
+        msg: EstablishConnectionToNetwork,
+        source_mac: bytes,
+    ) -> None:
+        """Process an Establish-Connection-To-Network message (Clause 6.4.9).
+
+        Demand-dial / PTP connections are not supported.  Responds with
+        Reject-Message-To-Network with reason OTHER per Clause 6.4.4.
+        """
+        logger.debug(
+            "Rejecting Establish-Connection-To-Network %d (not supported)",
+            msg.network,
+        )
+        self._send_reject(port_id, source_mac, RejectMessageReason.OTHER, msg.network)
+
+    # -- Disconnect-Connection-To-Network (Clause 6.4.10) ----------------
+
+    def _handle_disconnect_connection(
+        self,
+        port_id: int,
+        msg: DisconnectConnectionToNetwork,
+        source_mac: bytes,
+    ) -> None:
+        """Process a Disconnect-Connection-To-Network message (Clause 6.4.10).
+
+        Demand-dial / PTP connections are not supported.  Responds with
+        Reject-Message-To-Network with reason OTHER per Clause 6.4.4.
+        """
+        logger.debug(
+            "Rejecting Disconnect-Connection-To-Network %d (not supported)",
+            msg.network,
+        )
+        self._send_reject(port_id, source_mac, RejectMessageReason.OTHER, msg.network)
 
     # -- Reject helper ------------------------------------------------------
 

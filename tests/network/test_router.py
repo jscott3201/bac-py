@@ -9,6 +9,8 @@ import pytest
 
 from bac_py.network.address import BACnetAddress
 from bac_py.network.messages import (
+    DisconnectConnectionToNetwork,
+    EstablishConnectionToNetwork,
     IAmRouterToNetwork,
     ICouldBeRouterToNetwork,
     InitializeRoutingTable,
@@ -2032,16 +2034,34 @@ class TestRouterStartup:
 
 
 class TestHandleUnknownMessageType:
-    def test_unknown_type_sends_reject(self) -> None:
-        """Unknown standard message type -> Reject with UNKNOWN_MESSAGE_TYPE."""
+    def test_unknown_type_sends_reject(self, monkeypatch) -> None:
+        """Unknown standard message type -> Reject with UNKNOWN_MESSAGE_TYPE.
+
+        All currently-decodable message types have handlers, so this test
+        monkeypatches decode_network_message to return an unrecognised
+        object to exercise the defensive ``else`` branch.
+        """
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True)
+        class _FakeNetworkMessage:
+            pass
+
         router, t1, _t2 = _make_two_port_router()
-        # I-Could-Be-Router (0x02) is decoded but not handled by the router.
-        msg = ICouldBeRouterToNetwork(network=10, performance_index=5)
+
+        monkeypatch.setattr(
+            "bac_py.network.router.decode_network_message",
+            lambda _mt, _data: _FakeNetworkMessage(),
+        )
+
+        # Build any network message NPDU -- the content doesn't matter
+        # because we've overridden decode_network_message.
         data = _build_network_message_npdu(
-            NetworkMessageType.I_COULD_BE_ROUTER_TO_NETWORK,
-            encode_network_message(msg),
+            NetworkMessageType.WHO_IS_ROUTER_TO_NETWORK,
+            b"",
         )
         router._on_port_receive(1, data, _MAC_DEVICE_A)
+
         # Should send Reject-Message-To-Network
         t1.send_unicast.assert_called_once()
         sent_bytes, sent_mac = t1.send_unicast.call_args[0]
@@ -2254,3 +2274,192 @@ class TestRejectRoutedBackWithSNET:
         t1.send_unicast.assert_called_once()
         sent_mac = t1.send_unicast.call_args[0][1]
         assert sent_mac == _MAC_DEVICE_A
+
+
+# ---------------------------------------------------------------------------
+# Q2: Hop count diagnostic logging
+# ---------------------------------------------------------------------------
+
+
+class TestHopCountDiagnostic:
+    """Q2: Debug log emitted when routed NPDU with SNET/SADR has default hop count."""
+
+    def test_default_hop_count_with_source_logs_debug(self, caplog) -> None:
+        """A routed NPDU with SNET and hop_count=255 should emit a debug log."""
+        import logging
+
+        router, t1, t2 = _make_two_port_router()
+        source = BACnetAddress(network=10, mac_address=_MAC_DEVICE_A)
+        # Global broadcast goes through _prepare_forwarded_npdu
+        data = _build_global_broadcast_npdu(source=source, hop_count=255)
+
+        with caplog.at_level(logging.DEBUG, logger="bac_py.network.router"):
+            router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        assert "default hop count 255" in caplog.text
+
+    def test_decremented_hop_count_no_debug_log(self, caplog) -> None:
+        """A routed NPDU with normal hop count should NOT emit the diagnostic."""
+        import logging
+
+        router, t1, t2 = _make_two_port_router()
+        source = BACnetAddress(network=10, mac_address=_MAC_DEVICE_A)
+        data = _build_global_broadcast_npdu(source=source, hop_count=254)
+
+        with caplog.at_level(logging.DEBUG, logger="bac_py.network.router"):
+            router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        assert "default hop count 255" not in caplog.text
+
+    def test_no_source_no_hop_count_diagnostic(self, caplog) -> None:
+        """An NPDU without SNET should NOT emit the hop count diagnostic."""
+        import logging
+
+        router, t1, t2 = _make_two_port_router()
+        data = _build_global_broadcast_npdu(hop_count=255)
+
+        with caplog.at_level(logging.DEBUG, logger="bac_py.network.router"):
+            router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        assert "default hop count 255" not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# F10: I-Could-Be-Router-To-Network handling
+# ---------------------------------------------------------------------------
+
+
+class TestICouldBeRouterToNetwork:
+    """F10: I-Could-Be-Router-To-Network is logged but does not change the
+    routing table."""
+
+    def test_i_could_be_router_logged(self, caplog) -> None:
+        """I-Could-Be-Router-To-Network is logged at INFO level."""
+        import logging
+
+        router, t1, _t2 = _make_two_port_router()
+        msg = ICouldBeRouterToNetwork(network=99, performance_index=5)
+        data = _build_network_message_npdu(
+            NetworkMessageType.I_COULD_BE_ROUTER_TO_NETWORK,
+            encode_network_message(msg),
+        )
+
+        with caplog.at_level(logging.INFO, logger="bac_py.network.router"):
+            router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        assert "I-Could-Be-Router-To-Network 99" in caplog.text
+        assert "perf=5" in caplog.text
+
+    def test_i_could_be_router_no_reject(self) -> None:
+        """I-Could-Be-Router-To-Network should NOT trigger a reject."""
+        router, t1, _t2 = _make_two_port_router()
+        msg = ICouldBeRouterToNetwork(network=99, performance_index=5)
+        data = _build_network_message_npdu(
+            NetworkMessageType.I_COULD_BE_ROUTER_TO_NETWORK,
+            encode_network_message(msg),
+        )
+
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        t1.send_unicast.assert_not_called()
+
+    def test_i_could_be_router_no_routing_table_change(self) -> None:
+        """I-Could-Be-Router-To-Network should NOT modify the routing table."""
+        router, t1, _t2 = _make_two_port_router()
+        entries_before = router.routing_table.get_all_entries()
+        count_before = len(entries_before)
+
+        msg = ICouldBeRouterToNetwork(network=99, performance_index=5)
+        data = _build_network_message_npdu(
+            NetworkMessageType.I_COULD_BE_ROUTER_TO_NETWORK,
+            encode_network_message(msg),
+        )
+
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        entries_after = router.routing_table.get_all_entries()
+        assert len(entries_after) == count_before
+        assert router.routing_table.get_entry(99) is None
+
+
+# ---------------------------------------------------------------------------
+# F11: Establish/Disconnect Connection handling
+# ---------------------------------------------------------------------------
+
+
+class TestEstablishDisconnectConnection:
+    """F11: Establish-Connection-To-Network and Disconnect-Connection-To-Network
+    are rejected with reason OTHER since demand-dial is not supported."""
+
+    def test_establish_connection_sends_reject(self) -> None:
+        """Establish-Connection-To-Network -> Reject with reason OTHER."""
+        router, t1, _t2 = _make_two_port_router()
+        msg = EstablishConnectionToNetwork(network=99, termination_time=0)
+        data = _build_network_message_npdu(
+            NetworkMessageType.ESTABLISH_CONNECTION_TO_NETWORK,
+            encode_network_message(msg),
+        )
+
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        t1.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t1.send_unicast.call_args[0]
+        assert sent_mac == _MAC_DEVICE_A
+        npdu = decode_npdu(sent_bytes)
+        assert npdu.message_type == NetworkMessageType.REJECT_MESSAGE_TO_NETWORK
+        reject = decode_network_message(npdu.message_type, npdu.network_message_data)
+        assert isinstance(reject, RejectMessageToNetwork)
+        assert reject.reason == RejectMessageReason.OTHER
+        assert reject.network == 99
+
+    def test_disconnect_connection_sends_reject(self) -> None:
+        """Disconnect-Connection-To-Network -> Reject with reason OTHER."""
+        router, t1, _t2 = _make_two_port_router()
+        msg = DisconnectConnectionToNetwork(network=42)
+        data = _build_network_message_npdu(
+            NetworkMessageType.DISCONNECT_CONNECTION_TO_NETWORK,
+            encode_network_message(msg),
+        )
+
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        t1.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t1.send_unicast.call_args[0]
+        assert sent_mac == _MAC_DEVICE_A
+        npdu = decode_npdu(sent_bytes)
+        assert npdu.message_type == NetworkMessageType.REJECT_MESSAGE_TO_NETWORK
+        reject = decode_network_message(npdu.message_type, npdu.network_message_data)
+        assert isinstance(reject, RejectMessageToNetwork)
+        assert reject.reason == RejectMessageReason.OTHER
+        assert reject.network == 42
+
+    def test_establish_connection_no_routing_table_change(self) -> None:
+        """Establish-Connection should NOT modify the routing table."""
+        router, _t1, _t2 = _make_two_port_router()
+        count_before = len(router.routing_table.get_all_entries())
+
+        msg = EstablishConnectionToNetwork(network=99, termination_time=60)
+        data = _build_network_message_npdu(
+            NetworkMessageType.ESTABLISH_CONNECTION_TO_NETWORK,
+            encode_network_message(msg),
+        )
+
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        assert len(router.routing_table.get_all_entries()) == count_before
+        assert router.routing_table.get_entry(99) is None
+
+    def test_disconnect_connection_no_routing_table_change(self) -> None:
+        """Disconnect-Connection should NOT modify the routing table."""
+        router, _t1, _t2 = _make_two_port_router()
+        count_before = len(router.routing_table.get_all_entries())
+
+        msg = DisconnectConnectionToNetwork(network=99)
+        data = _build_network_message_npdu(
+            NetworkMessageType.DISCONNECT_CONNECTION_TO_NETWORK,
+            encode_network_message(msg),
+        )
+
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        assert len(router.routing_table.get_all_entries()) == count_before
