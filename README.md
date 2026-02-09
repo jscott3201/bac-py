@@ -3,27 +3,32 @@
 Asynchronous BACnet/IP protocol library for Python 3.13+, implementing
 ASHRAE Standard 135-2016.
 
-bac-py provides both client and server capabilities for BACnet/IP networks
-with a clean, layered architecture. It is built on native `asyncio` with
-zero required dependencies.
+bac-py provides client and server capabilities for BACnet/IP networks with a
+clean, layered architecture. It is built on native `asyncio` with zero required
+dependencies.
+
+```python
+from bac_py import Client
+
+async with Client(instance_number=999) as client:
+    value = await client.read("192.168.1.100", "ai,1", "pv")
+```
 
 ## Features
 
 - **Full BACnet/IP support** per Annex J over UDP
 - **Client and server** in a single library
+- **Simplified convenience API** with string-based addressing and auto-encoding
 - **Async-first** design using native `asyncio`
 - **Zero dependencies** for the core library (optional `orjson` for JSON serialization)
 - **Complete object model** -- Device, Analog/Binary/MultiState I/O/Value, File, Schedule, TrendLog, and more
-- **Property access** -- ReadProperty, WriteProperty, ReadPropertyMultiple, WritePropertyMultiple, ReadRange
-- **Discovery** -- Who-Is/I-Am, Who-Has/I-Have
-- **Change of Value** -- SubscribeCOV with confirmed and unconfirmed notifications
-- **Device management** -- DeviceCommunicationControl, ReinitializeDevice, TimeSynchronization
-- **File access** -- AtomicReadFile, AtomicWriteFile (stream and record)
-- **Object management** -- CreateObject, DeleteObject, AddListElement, RemoveListElement
-- **Private transfer** -- Confirmed and unconfirmed vendor-specific services
-- **Segmentation** -- Automatic segmented request/response handling (Clause 5.2)
+- **All standard services** -- property access, discovery, COV, device management, file access, object management, private transfer
+- **Segmentation** -- automatic segmented request/response handling (Clause 5.2)
+- **Network routing** -- multi-port router with dynamic routing tables (Clause 6)
+- **BBMD** -- broadcast management device and foreign device registration
 - **Priority array** -- 16-level command prioritization for commandable objects
-- **Type-safe** -- Enums, frozen dataclasses, and comprehensive type hints throughout
+- **Smart encoding** -- property-aware type coercion for writes (int to Real for analog, Enumerated for binary, etc.)
+- **Type-safe** -- enums, frozen dataclasses, and comprehensive type hints throughout
 
 ## Installation
 
@@ -31,7 +36,7 @@ zero required dependencies.
 pip install bac-py
 ```
 
-Or with JSON serialization support:
+With optional JSON serialization:
 
 ```bash
 pip install bac-py[serialization]
@@ -40,92 +45,131 @@ pip install bac-py[serialization]
 ### Development
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/jscott3201/bac-py.git
 cd bac-py
 uv sync --group dev
 ```
 
 ## Quick Start
 
-### Client -- Read a Property
+### Read a Property
 
 ```python
 import asyncio
-from bac_py.app.application import BACnetApplication, DeviceConfig
-from bac_py.app.client import BACnetClient
-from bac_py.network.address import BACnetAddress
-from bac_py.types.enums import ObjectType, PropertyIdentifier
-from bac_py.types.primitives import ObjectIdentifier
+from bac_py import Client
 
 
 async def main():
-    config = DeviceConfig(instance_number=999, interface="0.0.0.0")
-
-    async with BACnetApplication(config) as app:
-        client = BACnetClient(app)
-
-        # Target device at 192.168.1.100 on the standard BACnet port
-        target = BACnetAddress(
-            mac_address=bytes([192, 168, 1, 100, 0xBA, 0xC0])
-        )
-
-        ack = await client.read_property(
-            target,
-            ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
-            PropertyIdentifier.PRESENT_VALUE,
-        )
-        print(f"Value: {ack.property_value.hex()}")
+    async with Client(instance_number=999) as client:
+        value = await client.read("192.168.1.100", "ai,1", "pv")
+        print(f"Temperature: {value}")
 
 
 asyncio.run(main())
 ```
 
-### Client -- Discover Devices
+The convenience API accepts short aliases (`ai`, `ao`, `av`, `bi`, `bo`, `bv`,
+`msv`, `dev`, etc.) and common property abbreviations (`pv`, `name`, `desc`,
+`units`, `sf`, etc.). Full names like `"analog-input,1"` and `"present-value"`
+also work.
+
+### Write a Value
 
 ```python
-async def discover():
-    config = DeviceConfig(instance_number=999, interface="0.0.0.0")
+async with Client(instance_number=999) as client:
+    # Float to analog -> encoded as Real
+    await client.write("192.168.1.100", "av,1", "pv", 72.5, priority=8)
 
-    async with BACnetApplication(config) as app:
-        client = BACnetClient(app)
+    # Int to binary -> encoded as Enumerated
+    await client.write("192.168.1.100", "bo,1", "pv", 1, priority=8)
 
-        devices = await client.who_is(timeout=3.0)
-        for iam in devices:
-            print(
-                f"Device {iam.object_identifier.instance_number}  "
-                f"vendor={iam.vendor_id}  max_apdu={iam.max_apdu_length}"
-            )
+    # None -> Null (relinquish a command priority)
+    await client.write("192.168.1.100", "av,1", "pv", None, priority=8)
+
+    # String property
+    await client.write("192.168.1.100", "av,1", "object-name", "Zone Temp SP")
 ```
 
-### Client -- Write a Property
+Values are automatically encoded to the correct BACnet application tag based on
+the Python type, target object type, and property:
+
+| Python type            | BACnet encoding            |
+| ---------------------- | -------------------------- |
+| `float`                | Real                       |
+| `int` (analog PV)      | Real                       |
+| `int` (binary PV)      | Enumerated                 |
+| `int` (multi-state PV) | Unsigned                   |
+| `str`                  | Character String           |
+| `bool`                 | Enumerated (1/0)           |
+| `None`                 | Null                       |
+| `IntEnum`              | Enumerated                 |
+| `bytes`                | Pass-through (pre-encoded) |
+
+For non-present-value properties, a built-in type hint map ensures common
+properties like `units`, `cov-increment`, `high-limit`, and `out-of-service`
+are encoded correctly even when given a plain `int`.
+
+### Read Multiple Properties
 
 ```python
-from bac_py.encoding.primitives import encode_application_real
+async with Client(instance_number=999) as client:
+    results = await client.read_multiple("192.168.1.100", {
+        "ai,1": ["pv", "object-name", "units"],
+        "ai,2": ["pv", "object-name"],
+        "av,1": ["pv", "priority-array"],
+    })
 
-async def write():
-    config = DeviceConfig(instance_number=999, interface="0.0.0.0")
-
-    async with BACnetApplication(config) as app:
-        client = BACnetClient(app)
-        target = BACnetAddress(
-            mac_address=bytes([192, 168, 1, 100, 0xBA, 0xC0])
-        )
-
-        await client.write_property(
-            target,
-            ObjectIdentifier(ObjectType.ANALOG_VALUE, 1),
-            PropertyIdentifier.PRESENT_VALUE,
-            value=encode_application_real(72.5),
-            priority=8,
-        )
+    for obj_id, props in results.items():
+        print(f"{obj_id}:")
+        for name, value in props.items():
+            print(f"  {name}: {value}")
 ```
 
-### Server -- Serve Objects on the Network
+Uses ReadPropertyMultiple under the hood for efficiency.
+
+### Discover Devices
 
 ```python
+from bac_py import Client, DiscoveredDevice
+
+async with Client(instance_number=999) as client:
+    devices = await client.discover(timeout=3.0)
+
+    for dev in devices:
+        print(f"  {dev.instance}  {dev.address_str}  vendor={dev.vendor_id}")
+```
+
+`discover()` returns `DiscoveredDevice` objects with the responding device's
+address, instance number, vendor ID, max APDU length, and segmentation support.
+Use `low_limit` and `high_limit` to filter by instance range.
+
+### Subscribe to COV Notifications
+
+```python
+from bac_py import Client
+from bac_py.network.address import parse_address
+from bac_py.types.enums import ObjectType
+from bac_py.types.primitives import ObjectIdentifier
+
+async with Client(instance_number=999) as client:
+    address = parse_address("192.168.1.100")
+    obj_id = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+
+    def on_notification(notification, source):
+        for pv in notification.list_of_values:
+            print(f"  {pv.property_identifier}: {pv.value.hex()}")
+
+    client.app.register_cov_callback(1, on_notification)
+    await client.subscribe_cov(address, obj_id, process_id=1, lifetime=3600)
+```
+
+### Serve Objects on the Network
+
+```python
+from bac_py.app.application import BACnetApplication, DeviceConfig
 from bac_py.app.server import DefaultServerHandlers
-from bac_py.objects.device import DeviceObject
 from bac_py.objects.analog import AnalogInputObject
+from bac_py.objects.device import DeviceObject
 from bac_py.types.enums import EngineeringUnits
 
 
@@ -156,8 +200,68 @@ async def serve():
         handlers = DefaultServerHandlers(app, app.object_db, device)
         handlers.register()
 
-        # Blocks until stopped
         await app.run()
+```
+
+The server handles ReadProperty, WriteProperty, ReadPropertyMultiple,
+WritePropertyMultiple, ReadRange, Who-Is, COV subscriptions, device management,
+file access, and object management requests automatically.
+
+## Progressive Disclosure
+
+bac-py has two API levels. Use whichever fits your needs:
+
+**`Client`** -- simplified wrapper for common client tasks. Combines
+`BACnetApplication` and `BACnetClient` into a single async context manager.
+Accepts string addresses, string object/property identifiers, and Python
+values. Ideal for scripts, integrations, and most client-side work.
+
+**`BACnetApplication` + `BACnetClient`** -- full protocol-level access. Use
+this when you need server handlers, router mode, custom service registration,
+raw encoded bytes, or direct access to the transport and network layers.
+
+The `Client` wrapper exposes both levels. All `BACnetClient` protocol-level
+methods are available alongside the convenience methods, and the underlying
+`BACnetApplication` is accessible via `client.app`.
+
+## Configuration
+
+`DeviceConfig` controls device identity and network parameters:
+
+```python
+from bac_py.app.application import DeviceConfig
+
+config = DeviceConfig(
+    instance_number=999,          # Device instance (0-4194302)
+    name="bac-py",                # Device name
+    vendor_name="bac-py",         # Vendor name
+    vendor_id=0,                  # ASHRAE vendor ID
+    interface="0.0.0.0",          # IP address to bind
+    port=0xBAC0,                  # UDP port (47808)
+    max_apdu_length=1476,         # Max APDU size
+    apdu_timeout=6000,            # Request timeout (ms)
+    apdu_retries=3,               # Retry count
+    max_segments=None,            # Max segments (None = unlimited)
+)
+```
+
+For multi-network routing, add a `RouterConfig`:
+
+```python
+from bac_py.app.application import DeviceConfig, RouterConfig, RouterPortConfig
+
+config = DeviceConfig(
+    instance_number=999,
+    router_config=RouterConfig(
+        ports=[
+            RouterPortConfig(port_id=0, network_number=1,
+                             interface="192.168.1.10", port=47808),
+            RouterPortConfig(port_id=1, network_number=2,
+                             interface="10.0.0.10", port=47808),
+        ],
+        application_port_id=0,
+    ),
+)
 ```
 
 ## Architecture
@@ -166,22 +270,24 @@ async def serve():
 src/bac_py/
   app/            High-level application, client API, server handlers, TSM
   encoding/       ASN.1/BER tag-length-value encoding and APDU codec
-  network/        Addressing and NPDU network layer
+  network/        Addressing, NPDU network layer, multi-port router
   objects/        BACnet object model (Device, Analog, Binary, MultiState, ...)
   segmentation/   Segmented message assembly and transmission
   serialization/  JSON serialization (optional orjson backend)
   services/       Service request/response types and registry
   transport/      BACnet/IP (Annex J) UDP transport, BVLL, BBMD
-  types/          Primitive types, enumerations, and constructed types
+  types/          Primitive types, enumerations, and string parsing
 ```
 
 ### Key Classes
 
 | Class                   | Module             | Purpose                                                          |
 | ----------------------- | ------------------ | ---------------------------------------------------------------- |
+| `Client`                | `client`           | Simplified async context manager for client use cases            |
 | `BACnetApplication`     | `app.application`  | Central orchestrator -- lifecycle, APDU dispatch, COV management |
 | `DeviceConfig`          | `app.application`  | Device identity, network binding, and APDU parameters            |
-| `BACnetClient`          | `app.client`       | High-level async methods for all BACnet services                 |
+| `BACnetClient`          | `app.client`       | Full async API for all BACnet services                           |
+| `DiscoveredDevice`      | `app.client`       | Device info returned by `discover()`                             |
 | `DefaultServerHandlers` | `app.server`       | Standard service handlers for a server device                    |
 | `ObjectDatabase`        | `objects.base`     | Registry of local BACnet objects                                 |
 | `BACnetObject`          | `objects.base`     | Base class for all object types                                  |
@@ -190,39 +296,102 @@ src/bac_py/
 | `ObjectIdentifier`      | `types.primitives` | Object type + instance number                                    |
 | `ServiceRegistry`       | `services.base`    | Maps service choices to handler functions                        |
 
+### Supported Object Types
+
+Device, Analog Input/Output/Value, Binary Input/Output/Value, Multi-State
+Input/Output/Value, Accumulator, Calendar, Event Enrollment, File, Loop,
+Notification Class, Program, Schedule, Trend Log, and generic value types
+(BitString, CharacterString, Date, DateTime, Integer, LargeAnalog,
+OctetString, PositiveInteger, Time, and pattern variants).
+
+### Supported Services
+
+**Confirmed:** ReadProperty, WriteProperty, ReadPropertyMultiple,
+WritePropertyMultiple, ReadRange, CreateObject, DeleteObject,
+AddListElement, RemoveListElement, AtomicReadFile, AtomicWriteFile,
+SubscribeCOV, DeviceCommunicationControl, ReinitializeDevice,
+ConfirmedPrivateTransfer.
+
+**Unconfirmed:** Who-Is/I-Am, Who-Has/I-Have, TimeSynchronization,
+UTCTimeSynchronization, UnconfirmedCOVNotification,
+UnconfirmedPrivateTransfer.
+
+### Error Handling
+
+All client methods raise from a common exception hierarchy:
+
+```python
+from bac_py.services.errors import (
+    BACnetBaseError,       # Base for all BACnet errors
+    BACnetError,           # Error-PDU (error_class, error_code)
+    BACnetRejectError,     # Reject-PDU (reason)
+    BACnetAbortError,      # Abort-PDU (reason)
+    BACnetTimeoutError,    # Timeout after all retries
+)
+```
+
 ## Examples
 
-The [`examples/`](examples/) directory contains runnable scripts covering common
-usage patterns:
+The [`examples/`](examples/) directory contains runnable scripts:
 
-| File                   | Topics                                                                                         |
-| ---------------------- | ---------------------------------------------------------------------------------------------- |
-| `read_property.py`     | Single reads, array indexing, ReadPropertyMultiple, error handling                             |
-| `write_property.py`    | Float/enum/string writes, priority, WritePropertyMultiple                                      |
-| `discovery.py`         | Who-Is/I-Am, Who-Has/I-Have, range filters, local vs global broadcast                          |
-| `configuration.py`     | DeviceConfig, DeviceObject, Analog/Binary/MultiState object setup                              |
-| `client_operations.py` | COV, device management, time sync, file access, object management, ReadRange, private transfer |
-| `server_operations.py` | Basic server, simulated sensor data, multiple devices                                          |
+| File                  | Description                                    |
+| --------------------- | ---------------------------------------------- |
+| `read_value.py`       | Read properties with short aliases             |
+| `write_value.py`      | Write values with auto-encoding and priority   |
+| `read_multiple.py`    | Read multiple properties from multiple objects |
+| `discover_devices.py` | Discover devices with Who-Is broadcast         |
+| `monitor_cov.py`      | Subscribe to COV and decode notifications      |
 
-## Value Encoding
+## Protocol-Level API
 
-Write operations require application-tagged encoded bytes. Use the helpers in
+For cases where the convenience API isn't sufficient, you can use the
+protocol-level methods directly. These accept explicit `BACnetAddress`,
+`ObjectIdentifier`, and `PropertyIdentifier` types, and work with raw
+application-tagged bytes.
+
+```python
+from bac_py.encoding.primitives import encode_application_real
+from bac_py.network.address import parse_address
+from bac_py.types.enums import ObjectType, PropertyIdentifier
+from bac_py.types.primitives import ObjectIdentifier
+
+async with Client(instance_number=999) as client:
+    address = parse_address("192.168.1.100")
+    obj_id = ObjectIdentifier(ObjectType.ANALOG_VALUE, 1)
+
+    # Protocol-level write with explicit encoding
+    await client.write_property(
+        address, obj_id,
+        PropertyIdentifier.PRESENT_VALUE,
+        value=encode_application_real(72.5),
+        priority=8,
+    )
+
+    # Protocol-level read returning raw ACK
+    ack = await client.read_property(
+        address, obj_id,
+        PropertyIdentifier.PRESENT_VALUE,
+    )
+    print(ack.property_value.hex())
+```
+
+Encoding helpers for all BACnet application types are available in
 `bac_py.encoding.primitives`:
 
 ```python
 from bac_py.encoding.primitives import (
-    encode_application_real,              # float
-    encode_application_unsigned,          # unsigned int
-    encode_application_signed,            # signed int
-    encode_application_enumerated,        # IntEnum / int
-    encode_application_character_string,  # str
-    encode_application_boolean,           # bool
-    encode_application_octet_string,      # bytes
-    encode_application_null,              # null
-    encode_application_object_id,         # (type, instance)
-    encode_application_date,              # BACnetDate
-    encode_application_time,              # BACnetTime
-    encode_application_bit_string,        # BitString
+    encode_application_real,              # float -> Real
+    encode_application_unsigned,          # int -> Unsigned
+    encode_application_signed,            # int -> Signed
+    encode_application_enumerated,        # int -> Enumerated
+    encode_application_character_string,  # str -> CharacterString
+    encode_application_boolean,           # bool -> Boolean
+    encode_application_octet_string,      # bytes -> OctetString
+    encode_application_null,              # None -> Null
+    encode_application_object_id,         # (type, instance) -> ObjectId
+    encode_application_date,              # BACnetDate -> Date
+    encode_application_time,              # BACnetTime -> Time
+    encode_application_bit_string,        # BitString -> BitString
 )
 ```
 
@@ -237,41 +406,21 @@ uv run coverage run -m pytest
 uv run coverage report
 
 # Linting and formatting
-uv run ruff check src tests
-uv run ruff format src tests
+uv run ruff check src/ tests/
+uv run ruff format --check src/ tests/
 
 # Type checking
 uv run mypy
+
+# Documentation build
+uv run sphinx-build -W -b html docs docs/_build/html
 ```
-
-## Project Status
-
-**Version 0.1.0** -- foundation release.
-
-Implemented:
-
-- BACnet/IP transport (Annex J)
-- Full APDU encoding/decoding
-- Client and server transaction state machines
-- All property access services (Read, Write, ReadMultiple, WriteMultiple, ReadRange)
-- Discovery services (Who-Is/I-Am, Who-Has/I-Have)
-- COV subscription and notification
-- Device management services
-- File access services
-- Object management services
-- Private transfer services
-- Segmentation support
-- 14+ object types with property definitions
-
-Planned:
-
-- BACnet/MSTP transport
-- Alarm and event services
-- Trend log data retrieval helpers
-- Network router support
-- BBMD foreign device registration workflows
 
 ## Requirements
 
 - Python >= 3.13
 - No runtime dependencies (optional: `orjson` for JSON serialization)
+
+## License
+
+MIT
