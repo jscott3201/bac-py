@@ -10,15 +10,13 @@ from bac_py.objects.base import (
     PropertyDefinition,
     register_object_type,
     standard_properties,
+    status_properties,
 )
-from bac_py.types.constructed import StatusFlags
 from bac_py.types.enums import (
-    EventState,
     ObjectType,
     ProgramChange,
     ProgramState,
     PropertyIdentifier,
-    Reliability,
 )
 
 
@@ -49,32 +47,7 @@ class ProgramObject(BACnetObject):
             required=True,
             default=ProgramChange.READY,
         ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=False,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=True,
-            default=False,
-        ),
+        **status_properties(event_state_required=False),
         PropertyIdentifier.REASON_FOR_HALT: PropertyDefinition(
             PropertyIdentifier.REASON_FOR_HALT,
             int,

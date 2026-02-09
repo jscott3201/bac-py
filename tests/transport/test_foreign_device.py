@@ -203,13 +203,10 @@ class TestTTLEncoding:
         msg = decode_bvll(sent[0])
         assert msg.data == b"\x01\x2c"  # 300 in big-endian
 
-    def test_ttl_0_encoding(self, collector: SentCollector):
-        fd_mgr = ForeignDeviceManager(
-            bbmd_address=BBMD_ADDR,
-            ttl=0,
-            send_callback=collector.send,
-        )
-        fd_mgr._send_registration()
-        sent = collector.find_sent_to(BBMD_ADDR)
-        msg = decode_bvll(sent[0])
-        assert msg.data == b"\x00\x00"
+    def test_ttl_0_raises(self, collector: SentCollector):
+        with pytest.raises(ValueError, match="TTL must be >= 1"):
+            ForeignDeviceManager(
+                bbmd_address=BBMD_ADDR,
+                ttl=0,
+                send_callback=collector.send,
+            )

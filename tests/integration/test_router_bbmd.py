@@ -142,7 +142,7 @@ class TestForeignDeviceRegistrationThroughRouterBBMD:
     async def test_fd_distribute_broadcast_reaches_callback(self):
         """Distribute-Broadcast from a registered FD is delivered via callback."""
         transport, mock_udp = _make_bip_transport_with_mock()
-        received: list[tuple[bytes, BIPAddress]] = []
+        received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
             bbmd = await transport.attach_bbmd(
@@ -164,7 +164,7 @@ class TestForeignDeviceRegistrationThroughRouterBBMD:
 
             assert len(received) == 1
             assert received[0][0] == npdu
-            assert received[0][1] == fd_addr
+            assert received[0][1] == fd_addr.encode()
         finally:
             await transport.stop()
 

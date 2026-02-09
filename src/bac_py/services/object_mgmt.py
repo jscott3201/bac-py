@@ -11,12 +11,18 @@ from bac_py.encoding.primitives import (
     decode_object_identifier,
     decode_unsigned,
     encode_application_object_id,
+    encode_context_object_id,
     encode_context_tagged,
     encode_enumerated,
-    encode_object_identifier,
 )
-from bac_py.encoding.tags import TagClass, decode_tag, encode_closing_tag, encode_opening_tag
-from bac_py.services.cov import BACnetPropertyValue
+from bac_py.encoding.tags import (
+    TagClass,
+    as_memoryview,
+    decode_tag,
+    encode_closing_tag,
+    encode_opening_tag,
+)
+from bac_py.services.common import BACnetPropertyValue
 from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import ObjectIdentifier
 
@@ -46,15 +52,7 @@ class CreateObjectRequest:
         # [0] objectSpecifier
         buf.extend(encode_opening_tag(0))
         if self.object_identifier is not None:
-            buf.extend(
-                encode_context_tagged(
-                    1,
-                    encode_object_identifier(
-                        self.object_identifier.object_type,
-                        self.object_identifier.instance_number,
-                    ),
-                )
-            )
+            buf.extend(encode_context_object_id(1, self.object_identifier))
         elif self.object_type is not None:
             buf.extend(encode_context_tagged(0, encode_enumerated(self.object_type)))
         buf.extend(encode_closing_tag(0))
@@ -69,8 +67,7 @@ class CreateObjectRequest:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> CreateObjectRequest:
         """Decode CreateObjectRequest from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 
@@ -143,8 +140,7 @@ class DeleteObjectRequest:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> DeleteObjectRequest:
         """Decode DeleteObjectRequest from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
         tag, offset = decode_tag(data, offset)

@@ -1306,7 +1306,7 @@ def _build_who_is_router_npdu(network: int | None = None) -> bytes:
     )
 
 
-def _build_i_am_router_npdu(networks: list[int]) -> bytes:
+def _build_i_am_router_npdu(networks: tuple[int, ...]) -> bytes:
     """Build an I-Am-Router-To-Network NPDU."""
     msg = IAmRouterToNetwork(networks=networks)
     return _build_network_message_npdu(
@@ -1330,7 +1330,7 @@ def _build_reject_message_npdu(
     )
 
 
-def _build_router_busy_npdu(networks: list[int]) -> bytes:
+def _build_router_busy_npdu(networks: tuple[int, ...]) -> bytes:
     """Build a Router-Busy-To-Network NPDU."""
     msg = RouterBusyToNetwork(networks=networks)
     return _build_network_message_npdu(
@@ -1339,7 +1339,7 @@ def _build_router_busy_npdu(networks: list[int]) -> bytes:
     )
 
 
-def _build_router_available_npdu(networks: list[int]) -> bytes:
+def _build_router_available_npdu(networks: tuple[int, ...]) -> bytes:
     """Build a Router-Available-To-Network NPDU."""
     msg = RouterAvailableToNetwork(networks=networks)
     return _build_network_message_npdu(
@@ -1348,7 +1348,7 @@ def _build_router_available_npdu(networks: list[int]) -> bytes:
     )
 
 
-def _build_init_routing_table_npdu(ports: list[RoutingTablePort]) -> bytes:
+def _build_init_routing_table_npdu(ports: tuple[RoutingTablePort, ...]) -> bytes:
     """Build an Initialize-Routing-Table NPDU."""
     msg = InitializeRoutingTable(ports=ports)
     return _build_network_message_npdu(
@@ -1357,7 +1357,7 @@ def _build_init_routing_table_npdu(ports: list[RoutingTablePort]) -> bytes:
     )
 
 
-def _build_init_routing_table_ack_npdu(ports: list[RoutingTablePort]) -> bytes:
+def _build_init_routing_table_ack_npdu(ports: tuple[RoutingTablePort, ...]) -> bytes:
     """Build an Initialize-Routing-Table-Ack NPDU."""
     msg = InitializeRoutingTableAck(ports=ports)
     return _build_network_message_npdu(
@@ -1476,7 +1476,7 @@ class TestHandleWhoIsRouter:
         assert npdu.message_type == NetworkMessageType.I_AM_ROUTER_TO_NETWORK
         msg = decode_network_message(npdu.message_type, msg_data)
         assert isinstance(msg, IAmRouterToNetwork)
-        assert msg.networks == [20]
+        assert msg.networks == (20,)
 
     def test_specific_dnet_found_on_arrival_port(self) -> None:
         """DNET reachable on arrival port -> no reply (don't advertise back)."""
@@ -1541,7 +1541,7 @@ class TestHandleIAmRouter:
     def test_new_entries_created(self) -> None:
         """I-Am-Router creates new routing table entries."""
         router, t1, t2 = _make_two_port_router()
-        data = _build_i_am_router_npdu(networks=[30, 40])
+        data = _build_i_am_router_npdu(networks=(30, 40))
         router._on_port_receive(1, data, _MAC_DEVICE_A)
         # New entries in routing table
         entry30 = router.routing_table.get_entry(30)
@@ -1557,7 +1557,7 @@ class TestHandleIAmRouter:
         """I-Am-Router updates existing entries with new MAC."""
         router, t1, t2 = _make_two_port_router()
         router.routing_table.update_route(30, port_id=1, next_router_mac=b"\x01")
-        data = _build_i_am_router_npdu(networks=[30])
+        data = _build_i_am_router_npdu(networks=(30,))
         router._on_port_receive(1, data, _MAC_DEVICE_A)
         entry = router.routing_table.get_entry(30)
         assert entry is not None
@@ -1566,7 +1566,7 @@ class TestHandleIAmRouter:
     def test_rebroadcast_on_other_ports(self) -> None:
         """I-Am-Router is re-broadcast on all other ports."""
         router, t1, t2 = _make_two_port_router()
-        data = _build_i_am_router_npdu(networks=[30])
+        data = _build_i_am_router_npdu(networks=(30,))
         router._on_port_receive(1, data, _MAC_DEVICE_A)
         # Should re-broadcast on port 2
         t2.send_broadcast.assert_called_once()
@@ -1574,7 +1574,7 @@ class TestHandleIAmRouter:
         assert npdu.message_type == NetworkMessageType.I_AM_ROUTER_TO_NETWORK
         msg = decode_network_message(npdu.message_type, msg_data)
         assert isinstance(msg, IAmRouterToNetwork)
-        assert msg.networks == [30]
+        assert msg.networks == (30,)
         # Should NOT broadcast back on port 1
         t1.send_broadcast.assert_not_called()
 
@@ -1637,7 +1637,7 @@ class TestHandleRouterBusy:
         """Specific DNETs in the message are marked BUSY."""
         router, t1, t2 = _make_two_port_router()
         router.routing_table.update_route(30, port_id=1, next_router_mac=_MAC_DEVICE_A)
-        data = _build_router_busy_npdu(networks=[30])
+        data = _build_router_busy_npdu(networks=(30,))
         router._on_port_receive(1, data, _MAC_DEVICE_A)
         entry = router.routing_table.get_entry(30)
         assert entry is not None
@@ -1650,7 +1650,7 @@ class TestHandleRouterBusy:
         router.routing_table.update_route(40, port_id=1, next_router_mac=_MAC_DEVICE_A)
         # Also a route via a different router on the same port
         router.routing_table.update_route(50, port_id=1, next_router_mac=b"\x99")
-        data = _build_router_busy_npdu(networks=[])
+        data = _build_router_busy_npdu(networks=())
         router._on_port_receive(1, data, _MAC_DEVICE_A)
         # 30 and 40 should be BUSY (same source_mac)
         entry30 = router.routing_table.get_entry(30)
@@ -1664,7 +1664,7 @@ class TestHandleRouterBusy:
     async def test_rebroadcast_on_other_ports(self) -> None:
         """Router-Busy is re-broadcast on all other ports."""
         router, t1, t2 = _make_two_port_router()
-        data = _build_router_busy_npdu(networks=[10])
+        data = _build_router_busy_npdu(networks=(10,))
         router._on_port_receive(1, data, _MAC_DEVICE_A)
         t2.send_broadcast.assert_called_once()
         npdu, msg_data = _decode_sent_network_message(t2)
@@ -1675,7 +1675,7 @@ class TestHandleRouterBusy:
         """30s timer restores REACHABLE (tested with short timeout)."""
         router, t1, t2 = _make_two_port_router()
         router.routing_table.update_route(30, port_id=1, next_router_mac=_MAC_DEVICE_A)
-        data = _build_router_busy_npdu(networks=[30])
+        data = _build_router_busy_npdu(networks=(30,))
         router._on_port_receive(1, data, _MAC_DEVICE_A)
         entry = router.routing_table.get_entry(30)
         assert entry is not None
@@ -1701,7 +1701,7 @@ class TestHandleRouterAvailable:
         entry = router.routing_table.get_entry(30)
         assert entry is not None
         entry.reachability = NetworkReachability.BUSY
-        data = _build_router_available_npdu(networks=[30])
+        data = _build_router_available_npdu(networks=(30,))
         router._on_port_receive(1, data, _MAC_DEVICE_A)
         assert entry.reachability == NetworkReachability.REACHABLE
 
@@ -1715,7 +1715,7 @@ class TestHandleRouterAvailable:
         assert e30 is not None and e40 is not None
         e30.reachability = NetworkReachability.BUSY
         e40.reachability = NetworkReachability.BUSY
-        data = _build_router_available_npdu(networks=[])
+        data = _build_router_available_npdu(networks=())
         router._on_port_receive(1, data, _MAC_DEVICE_A)
         assert e30.reachability == NetworkReachability.REACHABLE
         assert e40.reachability == NetworkReachability.REACHABLE
@@ -1723,7 +1723,7 @@ class TestHandleRouterAvailable:
     def test_rebroadcast_on_other_ports(self) -> None:
         """Router-Available is re-broadcast on other ports."""
         router, t1, t2 = _make_two_port_router()
-        data = _build_router_available_npdu(networks=[30])
+        data = _build_router_available_npdu(networks=(30,))
         router._on_port_receive(1, data, _MAC_DEVICE_A)
         t2.send_broadcast.assert_called_once()
         npdu, _ = _decode_sent_network_message(t2)
@@ -1740,7 +1740,7 @@ class TestHandleInitRoutingTable:
     def test_query_returns_full_table(self) -> None:
         """Empty ports list (query) -> Ack with complete routing table."""
         router, t1, t2 = _make_two_port_router()
-        data = _build_init_routing_table_npdu(ports=[])
+        data = _build_init_routing_table_npdu(ports=())
         router._on_port_receive(1, data, _MAC_DEVICE_A)
         # Should unicast Ack back to sender on port 1
         t1.send_unicast.assert_called_once()

@@ -104,7 +104,7 @@ class TestMultiStateOutputObject:
         assert mso.read_property(PropertyIdentifier.PRESENT_VALUE) == 1
 
     def test_present_value_writable(self):
-        mso = MultiStateOutputObject(1)
+        mso = MultiStateOutputObject(1, number_of_states=5)
         mso.write_property(PropertyIdentifier.PRESENT_VALUE, 3)
         assert mso.read_property(PropertyIdentifier.PRESENT_VALUE) == 3
 
@@ -125,19 +125,19 @@ class TestMultiStateOutputObject:
         assert mso.read_property(PropertyIdentifier.RELINQUISH_DEFAULT) == 1
 
     def test_command_priority_write(self):
-        mso = MultiStateOutputObject(1)
+        mso = MultiStateOutputObject(1, number_of_states=5)
         mso.write_property(PropertyIdentifier.PRESENT_VALUE, 5, priority=8)
         assert mso._priority_array[7] == 5
         assert mso.read_property(PropertyIdentifier.PRESENT_VALUE) == 5
 
     def test_command_higher_priority_wins(self):
-        mso = MultiStateOutputObject(1)
+        mso = MultiStateOutputObject(1, number_of_states=5)
         mso.write_property(PropertyIdentifier.PRESENT_VALUE, 2, priority=16)
         mso.write_property(PropertyIdentifier.PRESENT_VALUE, 4, priority=8)
         assert mso.read_property(PropertyIdentifier.PRESENT_VALUE) == 4
 
     def test_relinquish_falls_to_default(self):
-        mso = MultiStateOutputObject(1)
+        mso = MultiStateOutputObject(1, number_of_states=5)
         mso.write_property(PropertyIdentifier.PRESENT_VALUE, 3, priority=8)
         mso.write_property(PropertyIdentifier.PRESENT_VALUE, None, priority=8)
         assert mso.read_property(PropertyIdentifier.PRESENT_VALUE) == 1
@@ -178,7 +178,7 @@ class TestMultiStateValueObject:
         assert msv.read_property(PropertyIdentifier.PRESENT_VALUE) == 1
 
     def test_present_value_writable(self):
-        msv = MultiStateValueObject(1)
+        msv = MultiStateValueObject(1, number_of_states=5)
         msv.write_property(PropertyIdentifier.PRESENT_VALUE, 3)
         assert msv.read_property(PropertyIdentifier.PRESENT_VALUE) == 3
 
@@ -193,13 +193,13 @@ class TestMultiStateValueObject:
         assert len(msv._priority_array) == 16
 
     def test_commandable_priority_write(self):
-        msv = MultiStateValueObject(1, commandable=True)
+        msv = MultiStateValueObject(1, commandable=True, number_of_states=5)
         msv.write_property(PropertyIdentifier.PRESENT_VALUE, 4, priority=4)
         assert msv._priority_array[3] == 4
         assert msv.read_property(PropertyIdentifier.PRESENT_VALUE) == 4
 
     def test_commandable_relinquish(self):
-        msv = MultiStateValueObject(1, commandable=True)
+        msv = MultiStateValueObject(1, commandable=True, number_of_states=5)
         msv.write_property(PropertyIdentifier.PRESENT_VALUE, 4, priority=4)
         msv.write_property(PropertyIdentifier.PRESENT_VALUE, None, priority=4)
         assert msv.read_property(PropertyIdentifier.PRESENT_VALUE) == 1
@@ -253,12 +253,13 @@ class TestMultiStateObjectsInDatabase:
         msos = db.get_objects_of_type(ObjectType.MULTI_STATE_OUTPUT)
         assert len(msos) == 1
 
-    def test_priority_6_reserved(self):
-        """Priority 6 is reserved for Minimum On/Off (Clause 19.2.3)."""
+    def test_priority_6_allowed_for_multistate(self):
+        """Priority 6 is only reserved for objects with Minimum On/Off Time.
+        MultiState Output does not define those properties, so priority 6
+        writes should succeed (Clause 19.2.3)."""
         mso = MultiStateOutputObject(1)
-        with pytest.raises(BACnetError) as exc_info:
-            mso.write_property(PropertyIdentifier.PRESENT_VALUE, 2, priority=6)
-        assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
+        mso.write_property(PropertyIdentifier.PRESENT_VALUE, 2, priority=6)
+        assert mso.read_property(PropertyIdentifier.PRESENT_VALUE) == 2
 
 
 class TestMultiStateCurrentCommandPriority:
@@ -270,7 +271,7 @@ class TestMultiStateCurrentCommandPriority:
         assert PropertyIdentifier.CURRENT_COMMAND_PRIORITY in plist
 
     def test_mso_current_command_priority_returns_active(self):
-        mso = MultiStateOutputObject(1)
+        mso = MultiStateOutputObject(1, number_of_states=5)
         mso.write_property(PropertyIdentifier.PRESENT_VALUE, 3, priority=7)
         assert mso.read_property(PropertyIdentifier.CURRENT_COMMAND_PRIORITY) == 7
 

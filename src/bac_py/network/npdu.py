@@ -12,7 +12,23 @@ BACNET_PROTOCOL_VERSION = 1
 
 @dataclass(frozen=True, slots=True)
 class NPDU:
-    """Decoded Network Protocol Data Unit."""
+    """Decoded Network Protocol Data Unit (Clause 6.2).
+
+    Attributes:
+        version: BACnet protocol version (always 1).
+        is_network_message: ``True`` for network-layer messages, ``False``
+            for application-layer APDUs.
+        expecting_reply: ``True`` when the sender expects a reply.
+        priority: Message priority (NORMAL, URGENT, etc.).
+        destination: Remote destination address, or ``None`` for local.
+        source: Originating address (populated by routers).
+        hop_count: Remaining hop count for routed messages (0-255).
+        message_type: Network message type code when *is_network_message*
+            is ``True`` (0-0xFF); vendor messages use 0x80-0xFF.
+        vendor_id: Vendor identifier for proprietary network messages.
+        apdu: Application-layer APDU payload bytes.
+        network_message_data: Payload bytes for network-layer messages.
+    """
 
     version: int = BACNET_PROTOCOL_VERSION
     is_network_message: bool = False
@@ -57,7 +73,10 @@ def encode_npdu(npdu: NPDU) -> bytes:
 
     # Destination (if present)
     if npdu.destination is not None:
-        dnet = npdu.destination.network if npdu.destination.network is not None else 0xFFFF
+        if npdu.destination.network is None:
+            msg = "Destination network must be set when destination is present"
+            raise ValueError(msg)
+        dnet = npdu.destination.network
         buf.extend(dnet.to_bytes(2, "big"))
         dlen = len(npdu.destination.mac_address)
         buf.append(dlen)
@@ -66,7 +85,10 @@ def encode_npdu(npdu: NPDU) -> bytes:
 
     # Source (if present) - validate per Clause 6.2.2.1
     if npdu.source is not None:
-        snet = npdu.source.network or 0
+        if npdu.source.network is None:
+            msg = "Source network must be set when source is present (must be 1-65534)"
+            raise ValueError(msg)
+        snet = npdu.source.network
         if snet == 0xFFFF:
             msg = "SNET cannot be 0xFFFF (global broadcast is not a valid source)"
             raise ValueError(msg)
@@ -87,10 +109,12 @@ def encode_npdu(npdu: NPDU) -> bytes:
 
     # Message type or APDU
     if npdu.is_network_message:
-        msg_type = npdu.message_type or 0
-        buf.append(msg_type)
+        if npdu.message_type is None:
+            msg = "message_type must be set when is_network_message is True"
+            raise ValueError(msg)
+        buf.append(npdu.message_type)
         # Proprietary message types (0x80-0xFF) include a 2-byte vendor ID
-        if msg_type >= 0x80:
+        if npdu.message_type >= 0x80:
             vid = npdu.vendor_id or 0
             buf.extend(vid.to_bytes(2, "big"))
         buf.extend(npdu.network_message_data)
@@ -110,8 +134,12 @@ def decode_npdu(data: memoryview | bytes) -> NPDU:
         Decoded NPDU dataclass.
 
     Raises:
-        ValueError: If the protocol version is not 1.
+        ValueError: If the data is too short or the protocol version is not 1.
     """
+    if len(data) < 2:
+        msg = f"NPDU data too short: need at least 2 bytes, got {len(data)}"
+        raise ValueError(msg)
+
     if isinstance(data, bytes):
         data = memoryview(data)
 

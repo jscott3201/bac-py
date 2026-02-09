@@ -10,13 +10,11 @@ from bac_py.objects.base import (
     PropertyDefinition,
     register_object_type,
     standard_properties,
+    status_properties,
 )
-from bac_py.types.constructed import StatusFlags
 from bac_py.types.enums import (
-    EventState,
     ObjectType,
     PropertyIdentifier,
-    Reliability,
 )
 
 
@@ -33,25 +31,7 @@ class TrendLogObject(BACnetObject):
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=True,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=False,
-        ),
+        **status_properties(include_out_of_service=False),
         PropertyIdentifier.LOG_ENABLE: PropertyDefinition(
             PropertyIdentifier.LOG_ENABLE,
             bool,
@@ -153,7 +133,5 @@ class TrendLogObject(BACnetObject):
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
         self._init_status_flags()
-        if PropertyIdentifier.LOG_BUFFER not in self._properties:
-            self._properties[PropertyIdentifier.LOG_BUFFER] = []
-        if PropertyIdentifier.LOGGING_TYPE not in self._properties:
-            self._properties[PropertyIdentifier.LOGGING_TYPE] = 0
+        self._set_default(PropertyIdentifier.LOG_BUFFER, [])
+        self._set_default(PropertyIdentifier.LOGGING_TYPE, 0)

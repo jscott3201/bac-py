@@ -19,7 +19,7 @@ class FakeTransport:
     """Minimal fake transport for testing NetworkLayer."""
 
     def __init__(self):
-        self.sent_unicast: list[tuple[bytes, BIPAddress]] = []
+        self.sent_unicast: list[tuple[bytes, bytes]] = []
         self.sent_broadcast: list[bytes] = []
         self._receive_callback = None
         self._local_address = BIPAddress(host="192.168.1.100", port=0xBAC0)
@@ -27,7 +27,7 @@ class FakeTransport:
     def on_receive(self, callback):
         self._receive_callback = callback
 
-    def send_unicast(self, data: bytes, dest: BIPAddress):
+    def send_unicast(self, data: bytes, dest: bytes):
         self.sent_unicast.append((data, dest))
 
     def send_broadcast(self, data: bytes):
@@ -37,7 +37,7 @@ class FakeTransport:
     def local_address(self) -> BIPAddress:
         return self._local_address
 
-    def inject_receive(self, data: bytes, source: BIPAddress):
+    def inject_receive(self, data: bytes, source: bytes):
         if self._receive_callback:
             self._receive_callback(data, source)
 
@@ -50,7 +50,7 @@ _ROUTER_SOURCE = BIPAddress(host="10.0.0.1", port=0xBAC0)
 _ROUTER_MAC = _ROUTER_SOURCE.encode()  # b"\x0a\x00\x00\x01\xba\xc0"
 
 
-def _build_i_am_router_npdu(networks: list[int]) -> bytes:
+def _build_i_am_router_npdu(networks: tuple[int, ...]) -> bytes:
     """Build an I-Am-Router-To-Network NPDU."""
     msg = IAmRouterToNetwork(networks=networks)
     npdu = NPDU(
@@ -145,7 +145,7 @@ class TestNetworkLayer:
         npdu = b"\x01\x00" + apdu_payload
 
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(npdu, source)
+        transport.inject_receive(npdu, source.encode())
 
         assert len(received) == 1
         data, src = received[0]
@@ -160,7 +160,7 @@ class TestNetworkLayer:
 
         # Inject malformed data (too short)
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(b"", source)
+        transport.inject_receive(b"", source.encode())
         assert len(received) == 0
 
     def test_receive_ignores_network_messages(self):
@@ -173,22 +173,13 @@ class TestNetworkLayer:
         # NPDU with network message flag set (control byte bit 7)
         npdu = b"\x01\x80\x00"  # network message type 0
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(npdu, source)
+        transport.inject_receive(npdu, source.encode())
         assert len(received) == 0
 
     def test_local_address(self):
         transport = FakeTransport()
         layer = NetworkLayer(transport)
         assert layer.local_address == BIPAddress(host="192.168.1.100", port=0xBAC0)
-
-    def test_bacnet_to_bip_conversion(self):
-        bip = NetworkLayer._bacnet_to_bip(BACnetAddress(mac_address=b"\xc0\xa8\x01\x64\xba\xc0"))
-        assert bip.host == "192.168.1.100"
-        assert bip.port == 0xBAC0
-
-    def test_bacnet_to_bip_invalid_mac_raises(self):
-        with pytest.raises(ValueError, match="Cannot convert"):
-            NetworkLayer._bacnet_to_bip(BACnetAddress(mac_address=b"\x01\x02\x03"))
 
 
 # --------------------------------------------------------------------------
@@ -241,8 +232,8 @@ class TestRouterCachePopulation:
         """Receiving I-Am-Router-To-Network should populate router cache."""
         transport = FakeTransport()
         layer = NetworkLayer(transport)
-        data = _build_i_am_router_npdu(networks=[20, 30])
-        transport.inject_receive(data, _ROUTER_SOURCE)
+        data = _build_i_am_router_npdu(networks=(20, 30))
+        transport.inject_receive(data, _ROUTER_MAC)
         assert layer.get_router_for_network(20) == _ROUTER_MAC
         assert layer.get_router_for_network(30) == _ROUTER_MAC
 
@@ -250,12 +241,12 @@ class TestRouterCachePopulation:
         """Repeated I-Am-Router updates last_seen timestamp."""
         transport = FakeTransport()
         layer = NetworkLayer(transport)
-        data = _build_i_am_router_npdu(networks=[20])
-        transport.inject_receive(data, _ROUTER_SOURCE)
+        data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(data, _ROUTER_MAC)
         first_seen = layer._router_cache[20].last_seen
         # Small delay to ensure monotonic time advances
         time.sleep(0.01)
-        transport.inject_receive(data, _ROUTER_SOURCE)
+        transport.inject_receive(data, _ROUTER_MAC)
         second_seen = layer._router_cache[20].last_seen
         assert second_seen > first_seen
 
@@ -270,10 +261,10 @@ class TestRouterCachePopulation:
         layer = NetworkLayer(transport)
         router_a = BIPAddress(host="10.0.0.1", port=0xBAC0)
         router_b = BIPAddress(host="10.0.0.2", port=0xBAC0)
-        data = _build_i_am_router_npdu(networks=[20])
-        transport.inject_receive(data, router_a)
+        data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(data, router_a.encode())
         assert layer.get_router_for_network(20) == router_a.encode()
-        transport.inject_receive(data, router_b)
+        transport.inject_receive(data, router_b.encode())
         assert layer.get_router_for_network(20) == router_b.encode()
 
 
@@ -288,8 +279,8 @@ class TestRemoteSend:
         transport = FakeTransport()
         layer = NetworkLayer(transport)
         # Populate cache
-        data = _build_i_am_router_npdu(networks=[20])
-        transport.inject_receive(data, _ROUTER_SOURCE)
+        data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(data, _ROUTER_MAC)
         transport.sent_unicast.clear()
         transport.sent_broadcast.clear()
 
@@ -300,14 +291,14 @@ class TestRemoteSend:
         assert len(transport.sent_unicast) == 1
         assert len(transport.sent_broadcast) == 0
         _npdu_bytes, bip_dest = transport.sent_unicast[0]
-        assert bip_dest == _ROUTER_SOURCE
+        assert bip_dest == _ROUTER_MAC
 
     def test_send_remote_broadcast_via_cached_router(self):
         """Remote broadcast with cached router -> unicast to router MAC."""
         transport = FakeTransport()
         layer = NetworkLayer(transport)
-        data = _build_i_am_router_npdu(networks=[20])
-        transport.inject_receive(data, _ROUTER_SOURCE)
+        data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(data, _ROUTER_MAC)
         transport.sent_unicast.clear()
         transport.sent_broadcast.clear()
 
@@ -317,7 +308,7 @@ class TestRemoteSend:
         assert len(transport.sent_unicast) == 1
         assert len(transport.sent_broadcast) == 0
         _, bip_dest = transport.sent_unicast[0]
-        assert bip_dest == _ROUTER_SOURCE
+        assert bip_dest == _ROUTER_MAC
 
     def test_send_remote_cache_miss_broadcasts(self):
         """Remote send with no cached router -> broadcast NPDU."""
@@ -349,8 +340,8 @@ class TestRemoteSend:
         """Remote send NPDU must contain DNET/DADR and hop count."""
         transport = FakeTransport()
         layer = NetworkLayer(transport)
-        data = _build_i_am_router_npdu(networks=[20])
-        transport.inject_receive(data, _ROUTER_SOURCE)
+        data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(data, _ROUTER_MAC)
         transport.sent_unicast.clear()
         transport.sent_broadcast.clear()
 
@@ -383,7 +374,7 @@ class TestWhatIsNetworkNumber:
 
         data = _build_what_is_network_number_npdu()
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(data, source)
+        transport.inject_receive(data, source.encode())
 
         # Should broadcast Network-Number-Is
         assert len(transport.sent_broadcast) == 1
@@ -398,7 +389,7 @@ class TestWhatIsNetworkNumber:
 
         data = _build_what_is_network_number_npdu()
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(data, source)
+        transport.inject_receive(data, source.encode())
 
         assert len(transport.sent_broadcast) == 0
 
@@ -409,7 +400,7 @@ class TestWhatIsNetworkNumber:
 
         data = _build_what_is_network_number_npdu()
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(data, source)
+        transport.inject_receive(data, source.encode())
 
         assert len(transport.sent_broadcast) == 0
 
@@ -425,7 +416,7 @@ class TestWhatIsNetworkNumber:
         src = BACnetAddress(network=30, mac_address=b"\xaa")
         data = _build_what_is_network_number_npdu(source=src)
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(data, source)
+        transport.inject_receive(data, source.encode())
 
         assert len(transport.sent_broadcast) == 0
 
@@ -441,7 +432,7 @@ class TestWhatIsNetworkNumber:
         dest = BACnetAddress(network=20, mac_address=b"")
         data = _build_what_is_network_number_npdu(destination=dest)
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(data, source)
+        transport.inject_receive(data, source.encode())
 
         assert len(transport.sent_broadcast) == 0
 
@@ -460,7 +451,7 @@ class TestNetworkNumberIs:
 
         data = _build_network_number_is_npdu(42, configured=True)
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(data, source)
+        transport.inject_receive(data, source.encode())
 
         assert layer.network_number == 42
 
@@ -475,7 +466,7 @@ class TestNetworkNumberIs:
 
         data = _build_network_number_is_npdu(99, configured=True)
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(data, source)
+        transport.inject_receive(data, source.encode())
 
         assert layer.network_number == 10  # unchanged
 
@@ -486,7 +477,7 @@ class TestNetworkNumberIs:
 
         data = _build_network_number_is_npdu(42, configured=False)
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(data, source)
+        transport.inject_receive(data, source.encode())
 
         assert layer.network_number is None  # unchanged
 
@@ -498,7 +489,7 @@ class TestNetworkNumberIs:
         src = BACnetAddress(network=30, mac_address=b"\xaa")
         data = _build_network_number_is_npdu(42, configured=True, source=src)
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(data, source)
+        transport.inject_receive(data, source.encode())
 
         assert layer.network_number is None  # unchanged
 
@@ -510,7 +501,7 @@ class TestNetworkNumberIs:
         dest = BACnetAddress(network=20, mac_address=b"")
         data = _build_network_number_is_npdu(42, configured=True, destination=dest)
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(data, source)
+        transport.inject_receive(data, source.encode())
 
         assert layer.network_number is None  # unchanged
 
@@ -535,7 +526,7 @@ class TestMalformedNetworkMessage:
             network_message_data=b"\x01",  # too short
         )
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
-        transport.inject_receive(encode_npdu(npdu), source)
+        transport.inject_receive(encode_npdu(npdu), source.encode())
 
         # Should not crash, should not deliver to app
         assert len(received) == 0

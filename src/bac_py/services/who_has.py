@@ -11,11 +11,11 @@ from bac_py.encoding.primitives import (
     encode_application_character_string,
     encode_application_object_id,
     encode_character_string,
+    encode_context_object_id,
     encode_context_tagged,
-    encode_object_identifier,
     encode_unsigned,
 )
-from bac_py.encoding.tags import TagClass, decode_tag
+from bac_py.encoding.tags import TagClass, as_memoryview, decode_tag
 from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import ObjectIdentifier
 
@@ -43,6 +43,13 @@ class WhoHasRequest:
     low_limit: int | None = None
     high_limit: int | None = None
 
+    def __post_init__(self) -> None:
+        both_set = self.object_identifier is not None and self.object_name is not None
+        neither_set = self.object_identifier is None and self.object_name is None
+        if both_set or neither_set:
+            msg = "Exactly one of object_identifier or object_name must be set"
+            raise ValueError(msg)
+
     def encode(self) -> bytes:
         """Encode WhoHasRequest to bytes."""
         buf = bytearray()
@@ -52,15 +59,7 @@ class WhoHasRequest:
             buf.extend(encode_context_tagged(1, encode_unsigned(self.high_limit)))
         # CHOICE: objectIdentifier [2] or objectName [3]
         if self.object_identifier is not None:
-            buf.extend(
-                encode_context_tagged(
-                    2,
-                    encode_object_identifier(
-                        self.object_identifier.object_type,
-                        self.object_identifier.instance_number,
-                    ),
-                )
-            )
+            buf.extend(encode_context_object_id(2, self.object_identifier))
         elif self.object_name is not None:
             buf.extend(encode_context_tagged(3, encode_character_string(self.object_name)))
         return bytes(buf)
@@ -68,8 +67,7 @@ class WhoHasRequest:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> WhoHasRequest:
         """Decode WhoHasRequest from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
         low_limit = None
@@ -145,8 +143,7 @@ class IHaveRequest:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> IHaveRequest:
         """Decode IHaveRequest from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 

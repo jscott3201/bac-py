@@ -184,13 +184,12 @@ class DeviceObject(BACnetObject):
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
         # Initialize empty services/object-types supported if not provided
-        if PropertyIdentifier.PROTOCOL_SERVICES_SUPPORTED not in self._properties:
-            self._properties[PropertyIdentifier.PROTOCOL_SERVICES_SUPPORTED] = BitString(
-                b"\x00\x00\x00\x00\x00", 0
-            )
-        if PropertyIdentifier.PROTOCOL_OBJECT_TYPES_SUPPORTED not in self._properties:
-            self._properties[PropertyIdentifier.PROTOCOL_OBJECT_TYPES_SUPPORTED] = BitString(
-                b"\x00\x00\x00\x00\x00\x00\x00\x00", 0
-            )
-        if PropertyIdentifier.OBJECT_LIST not in self._properties:
-            self._properties[PropertyIdentifier.OBJECT_LIST] = []
+        self._set_default(
+            PropertyIdentifier.PROTOCOL_SERVICES_SUPPORTED,
+            BitString(b"\x00\x00\x00\x00\x00", 0),
+        )
+        self._set_default(
+            PropertyIdentifier.PROTOCOL_OBJECT_TYPES_SUPPORTED,
+            BitString(b"\x00\x00\x00\x00\x00\x00\x00\x00", 0),
+        )
+        self._set_default(PropertyIdentifier.OBJECT_LIST, [])

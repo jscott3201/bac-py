@@ -13,7 +13,7 @@ from bac_py.encoding.primitives import (
     encode_context_tagged,
     encode_unsigned,
 )
-from bac_py.encoding.tags import TagClass, decode_tag
+from bac_py.encoding.tags import TagClass, as_memoryview, decode_tag
 from bac_py.types.enums import ObjectType, Segmentation
 from bac_py.types.primitives import ObjectIdentifier
 
@@ -53,8 +53,7 @@ class WhoIsRequest:
         Returns:
             Decoded WhoIsRequest.
         """
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         if len(data) == 0:
             return cls()
@@ -129,8 +128,7 @@ class IAmRequest:
         Returns:
             Decoded IAmRequest.
         """
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 

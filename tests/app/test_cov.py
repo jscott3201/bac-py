@@ -13,7 +13,6 @@ from bac_py.objects.binary import BinaryValueObject
 from bac_py.objects.multistate import MultiStateValueObject
 from bac_py.services.cov import SubscribeCOVRequest
 from bac_py.services.errors import BACnetError, BACnetRejectError
-from bac_py.types.constructed import StatusFlags
 from bac_py.types.enums import (
     ConfirmedServiceChoice,
     ErrorCode,
@@ -432,10 +431,10 @@ class TestCOVNotification:
         )
         _subscribe_and_reset(app, cov, SUBSCRIBER, request, db)
 
-        # Change Status_Flags (set out_of_service) -- use internal _properties
-        # since STATUS_FLAGS is read-only per the object model
-        av._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags(out_of_service=True)
-        cov.check_and_notify(av, PropertyIdentifier.STATUS_FLAGS)
+        # Change Out_Of_Service to True, which causes StatusFlags to change
+        # (the out_of_service bit is computed from the Out_Of_Service property)
+        av._properties[PropertyIdentifier.OUT_OF_SERVICE] = True
+        cov.check_and_notify(av, PropertyIdentifier.OUT_OF_SERVICE)
 
         app.unconfirmed_request.assert_called_once()
 

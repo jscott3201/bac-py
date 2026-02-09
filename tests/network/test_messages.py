@@ -73,35 +73,35 @@ class TestWhoIsRouterToNetwork:
 
 class TestIAmRouterToNetwork:
     def test_encode_single_network(self) -> None:
-        msg = IAmRouterToNetwork(networks=[1])
+        msg = IAmRouterToNetwork(networks=(1,))
         assert encode_network_message(msg) == b"\x00\x01"
 
     def test_encode_multiple_networks(self) -> None:
-        msg = IAmRouterToNetwork(networks=[1, 2, 3])
+        msg = IAmRouterToNetwork(networks=(1, 2, 3))
         assert encode_network_message(msg) == b"\x00\x01\x00\x02\x00\x03"
 
     def test_encode_empty_networks(self) -> None:
-        msg = IAmRouterToNetwork(networks=[])
+        msg = IAmRouterToNetwork(networks=())
         assert encode_network_message(msg) == b""
 
     def test_decode_single_network(self) -> None:
         msg = decode_network_message(NetworkMessageType.I_AM_ROUTER_TO_NETWORK, b"\x00\x05")
         assert isinstance(msg, IAmRouterToNetwork)
-        assert msg.networks == [5]
+        assert msg.networks == (5,)
 
     def test_decode_multiple_networks(self) -> None:
         data = b"\x00\x01\x00\x02\x00\x03"
         msg = decode_network_message(NetworkMessageType.I_AM_ROUTER_TO_NETWORK, data)
         assert isinstance(msg, IAmRouterToNetwork)
-        assert msg.networks == [1, 2, 3]
+        assert msg.networks == (1, 2, 3)
 
     def test_decode_empty(self) -> None:
         msg = decode_network_message(NetworkMessageType.I_AM_ROUTER_TO_NETWORK, b"")
         assert isinstance(msg, IAmRouterToNetwork)
-        assert msg.networks == []
+        assert msg.networks == ()
 
     def test_roundtrip(self) -> None:
-        original = IAmRouterToNetwork(networks=[10, 20, 30, 40])
+        original = IAmRouterToNetwork(networks=(10, 20, 30, 40))
         encoded = encode_network_message(original)
         decoded = decode_network_message(NetworkMessageType.I_AM_ROUTER_TO_NETWORK, encoded)
         assert decoded == original
@@ -188,11 +188,11 @@ class TestRejectMessageToNetwork:
 
 class TestRouterBusyToNetwork:
     def test_encode_specific_networks(self) -> None:
-        msg = RouterBusyToNetwork(networks=[5, 10])
+        msg = RouterBusyToNetwork(networks=(5, 10))
         assert encode_network_message(msg) == b"\x00\x05\x00\x0a"
 
     def test_encode_all_networks(self) -> None:
-        msg = RouterBusyToNetwork(networks=[])
+        msg = RouterBusyToNetwork(networks=())
         assert encode_network_message(msg) == b""
 
     def test_decode_specific_networks(self) -> None:
@@ -200,15 +200,15 @@ class TestRouterBusyToNetwork:
             NetworkMessageType.ROUTER_BUSY_TO_NETWORK, b"\x00\x05\x00\x0a"
         )
         assert isinstance(msg, RouterBusyToNetwork)
-        assert msg.networks == [5, 10]
+        assert msg.networks == (5, 10)
 
     def test_decode_all_networks(self) -> None:
         msg = decode_network_message(NetworkMessageType.ROUTER_BUSY_TO_NETWORK, b"")
         assert isinstance(msg, RouterBusyToNetwork)
-        assert msg.networks == []
+        assert msg.networks == ()
 
     def test_roundtrip(self) -> None:
-        original = RouterBusyToNetwork(networks=[1, 2, 3])
+        original = RouterBusyToNetwork(networks=(1, 2, 3))
         encoded = encode_network_message(original)
         decoded = decode_network_message(NetworkMessageType.ROUTER_BUSY_TO_NETWORK, encoded)
         assert decoded == original
@@ -221,11 +221,11 @@ class TestRouterBusyToNetwork:
 
 class TestRouterAvailableToNetwork:
     def test_encode_specific_networks(self) -> None:
-        msg = RouterAvailableToNetwork(networks=[5, 10])
+        msg = RouterAvailableToNetwork(networks=(5, 10))
         assert encode_network_message(msg) == b"\x00\x05\x00\x0a"
 
     def test_encode_all_networks(self) -> None:
-        msg = RouterAvailableToNetwork(networks=[])
+        msg = RouterAvailableToNetwork(networks=())
         assert encode_network_message(msg) == b""
 
     def test_decode_specific_networks(self) -> None:
@@ -233,15 +233,15 @@ class TestRouterAvailableToNetwork:
             NetworkMessageType.ROUTER_AVAILABLE_TO_NETWORK, b"\x00\x05\x00\x0a"
         )
         assert isinstance(msg, RouterAvailableToNetwork)
-        assert msg.networks == [5, 10]
+        assert msg.networks == (5, 10)
 
     def test_decode_all_networks(self) -> None:
         msg = decode_network_message(NetworkMessageType.ROUTER_AVAILABLE_TO_NETWORK, b"")
         assert isinstance(msg, RouterAvailableToNetwork)
-        assert msg.networks == []
+        assert msg.networks == ()
 
     def test_roundtrip(self) -> None:
-        original = RouterAvailableToNetwork(networks=[100, 200])
+        original = RouterAvailableToNetwork(networks=(100, 200))
         encoded = encode_network_message(original)
         decoded = decode_network_message(NetworkMessageType.ROUTER_AVAILABLE_TO_NETWORK, encoded)
         assert decoded == original
@@ -255,27 +255,27 @@ class TestRouterAvailableToNetwork:
 class TestInitializeRoutingTable:
     def test_encode_query(self) -> None:
         """Number of Ports = 0 means query without modification."""
-        msg = InitializeRoutingTable(ports=[])
+        msg = InitializeRoutingTable(ports=())
         assert encode_network_message(msg) == b"\x00"
 
     def test_encode_single_port(self) -> None:
-        msg = InitializeRoutingTable(ports=[RoutingTablePort(network=5, port_id=1, port_info=b"")])
+        msg = InitializeRoutingTable(ports=(RoutingTablePort(network=5, port_id=1, port_info=b""),))
         # 01 (num ports) 00 05 (net) 01 (port_id) 00 (info_len)
         assert encode_network_message(msg) == b"\x01\x00\x05\x01\x00"
 
     def test_encode_port_with_info(self) -> None:
         msg = InitializeRoutingTable(
-            ports=[RoutingTablePort(network=10, port_id=2, port_info=b"\xab\xcd")]
+            ports=(RoutingTablePort(network=10, port_id=2, port_info=b"\xab\xcd"),)
         )
         # 01 (num) 00 0a (net) 02 (pid) 02 (info_len) ab cd (info)
         assert encode_network_message(msg) == b"\x01\x00\x0a\x02\x02\xab\xcd"
 
     def test_encode_multiple_ports(self) -> None:
         msg = InitializeRoutingTable(
-            ports=[
+            ports=(
                 RoutingTablePort(network=1, port_id=1, port_info=b""),
                 RoutingTablePort(network=2, port_id=2, port_info=b"\xff"),
-            ]
+            )
         )
         expected = b"\x02\x00\x01\x01\x00\x00\x02\x02\x01\xff"
         assert encode_network_message(msg) == expected
@@ -283,7 +283,7 @@ class TestInitializeRoutingTable:
     def test_decode_query(self) -> None:
         msg = decode_network_message(NetworkMessageType.INITIALIZE_ROUTING_TABLE, b"\x00")
         assert isinstance(msg, InitializeRoutingTable)
-        assert msg.ports == []
+        assert msg.ports == ()
 
     def test_decode_single_port(self) -> None:
         msg = decode_network_message(
@@ -306,18 +306,18 @@ class TestInitializeRoutingTable:
         assert msg.ports[0].port_info == b"\xab\xcd"
 
     def test_roundtrip_query(self) -> None:
-        original = InitializeRoutingTable(ports=[])
+        original = InitializeRoutingTable(ports=())
         encoded = encode_network_message(original)
         decoded = decode_network_message(NetworkMessageType.INITIALIZE_ROUTING_TABLE, encoded)
         assert decoded == original
 
     def test_roundtrip_multiple_ports(self) -> None:
         original = InitializeRoutingTable(
-            ports=[
+            ports=(
                 RoutingTablePort(network=5, port_id=1, port_info=b""),
                 RoutingTablePort(network=10, port_id=2, port_info=b"\x01\x02\x03"),
                 RoutingTablePort(network=20, port_id=3, port_info=b"\xff"),
-            ]
+            )
         )
         encoded = encode_network_message(original)
         decoded = decode_network_message(NetworkMessageType.INITIALIZE_ROUTING_TABLE, encoded)
@@ -341,7 +341,7 @@ class TestInitializeRoutingTable:
 
     def test_port_id_zero_purge(self) -> None:
         """Port ID = 0 means purge entries for this DNET (Clause 6.4.7)."""
-        msg = InitializeRoutingTable(ports=[RoutingTablePort(network=5, port_id=0, port_info=b"")])
+        msg = InitializeRoutingTable(ports=(RoutingTablePort(network=5, port_id=0, port_info=b""),))
         encoded = encode_network_message(msg)
         decoded = decode_network_message(NetworkMessageType.INITIALIZE_ROUTING_TABLE, encoded)
         assert decoded.ports[0].port_id == 0
@@ -355,26 +355,26 @@ class TestInitializeRoutingTable:
 class TestInitializeRoutingTableAck:
     def test_encode_empty_ack(self) -> None:
         """Acknowledging an update: no data."""
-        msg = InitializeRoutingTableAck(ports=[])
+        msg = InitializeRoutingTableAck(ports=())
         assert encode_network_message(msg) == b"\x00"
 
     def test_encode_with_table_data(self) -> None:
         msg = InitializeRoutingTableAck(
-            ports=[RoutingTablePort(network=5, port_id=1, port_info=b"")]
+            ports=(RoutingTablePort(network=5, port_id=1, port_info=b""),)
         )
         assert encode_network_message(msg) == b"\x01\x00\x05\x01\x00"
 
     def test_decode_empty_ack(self) -> None:
         msg = decode_network_message(NetworkMessageType.INITIALIZE_ROUTING_TABLE_ACK, b"\x00")
         assert isinstance(msg, InitializeRoutingTableAck)
-        assert msg.ports == []
+        assert msg.ports == ()
 
     def test_roundtrip(self) -> None:
         original = InitializeRoutingTableAck(
-            ports=[
+            ports=(
                 RoutingTablePort(network=1, port_id=1, port_info=b""),
                 RoutingTablePort(network=2, port_id=2, port_info=b"\xaa\xbb"),
-            ]
+            )
         )
         encoded = encode_network_message(original)
         decoded = decode_network_message(NetworkMessageType.INITIALIZE_ROUTING_TABLE_ACK, encoded)
@@ -560,7 +560,7 @@ class TestNpduIntegration:
     def test_i_am_router_via_npdu(self) -> None:
         from bac_py.network.npdu import NPDU, decode_npdu, encode_npdu
 
-        msg = IAmRouterToNetwork(networks=[1, 2, 3])
+        msg = IAmRouterToNetwork(networks=(1, 2, 3))
         msg_data = encode_network_message(msg)
         npdu = NPDU(
             is_network_message=True,
@@ -571,7 +571,7 @@ class TestNpduIntegration:
         decoded = decode_npdu(encoded)
         result = decode_network_message(decoded.message_type, decoded.network_message_data)
         assert isinstance(result, IAmRouterToNetwork)
-        assert result.networks == [1, 2, 3]
+        assert result.networks == (1, 2, 3)
 
     def test_reject_message_via_npdu(self) -> None:
         from bac_py.network.npdu import NPDU, decode_npdu, encode_npdu
@@ -593,7 +593,7 @@ class TestNpduIntegration:
     def test_init_routing_table_query_via_npdu(self) -> None:
         from bac_py.network.npdu import NPDU, decode_npdu, encode_npdu
 
-        msg = InitializeRoutingTable(ports=[])
+        msg = InitializeRoutingTable(ports=())
         msg_data = encode_network_message(msg)
         npdu = NPDU(
             is_network_message=True,
@@ -606,7 +606,7 @@ class TestNpduIntegration:
         assert decoded.expecting_reply is True
         result = decode_network_message(decoded.message_type, decoded.network_message_data)
         assert isinstance(result, InitializeRoutingTable)
-        assert result.ports == []
+        assert result.ports == ()
 
     def test_network_number_is_via_npdu(self) -> None:
         from bac_py.network.npdu import NPDU, decode_npdu, encode_npdu
@@ -641,14 +641,14 @@ class TestEdgeCases:
 
     def test_network_number_one(self) -> None:
         """Network number 1 is the minimum valid value."""
-        msg = IAmRouterToNetwork(networks=[1])
+        msg = IAmRouterToNetwork(networks=(1,))
         encoded = encode_network_message(msg)
         decoded = decode_network_message(NetworkMessageType.I_AM_ROUTER_TO_NETWORK, encoded)
-        assert decoded.networks == [1]
+        assert decoded.networks == (1,)
 
     def test_large_network_list(self) -> None:
         """Test with many networks in a single message."""
-        networks = list(range(1, 101))
+        networks = tuple(range(1, 101))
         msg = IAmRouterToNetwork(networks=networks)
         encoded = encode_network_message(msg)
         decoded = decode_network_message(NetworkMessageType.I_AM_ROUTER_TO_NETWORK, encoded)
@@ -659,7 +659,7 @@ class TestEdgeCases:
         """Port info can be up to 255 bytes."""
         port_info = bytes(range(255))
         msg = InitializeRoutingTable(
-            ports=[RoutingTablePort(network=1, port_id=1, port_info=port_info)]
+            ports=(RoutingTablePort(network=1, port_id=1, port_info=port_info),)
         )
         encoded = encode_network_message(msg)
         decoded = decode_network_message(NetworkMessageType.INITIALIZE_ROUTING_TABLE, encoded)

@@ -158,6 +158,13 @@ class BitString:
     __slots__ = ("_data", "_unused_bits")
 
     def __init__(self, value: bytes, unused_bits: int = 0) -> None:
+        """Initialise a BitString.
+
+        Args:
+            value: Raw bytes containing the bit data.
+            unused_bits: Number of unused trailing bits in the last byte
+                (0-7).  Must be 0 when *value* is empty.
+        """
         self._data = value
         self._unused_bits = unused_bits
 

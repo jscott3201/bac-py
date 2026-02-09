@@ -28,20 +28,22 @@ from bac_py.segmentation.manager import compute_max_segment_payload
 from bac_py.services.base import ServiceRegistry
 from bac_py.services.cov import COVNotificationRequest
 from bac_py.services.errors import BACnetAbortError, BACnetError, BACnetRejectError
-from bac_py.transport.bbmd import BDTEntry
 from bac_py.transport.bip import BIPTransport
 from bac_py.types.enums import (
     AbortReason,
     ConfirmedServiceChoice,
+    ObjectType,
     PduType,
     UnconfirmedServiceChoice,
 )
+from bac_py.types.primitives import ObjectIdentifier
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from bac_py.app.tsm import ServerTransaction
     from bac_py.network.address import BACnetAddress
+    from bac_py.transport.bbmd import BDTEntry
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +82,25 @@ class RouterConfig:
 
 @dataclass
 class DeviceConfig:
-    """Configuration for a BACnet device."""
+    """Configuration for a BACnet device.
+
+    Attributes:
+        instance_number: BACnet device instance number (0-4194302).
+        name: Device object name.
+        vendor_name: Vendor name string.
+        vendor_id: ASHRAE-assigned vendor identifier.
+        model_name: Device model name string.
+        firmware_revision: Firmware revision string.
+        application_software_version: Application software version string.
+        interface: Local IP address to bind to (``"0.0.0.0"`` for all).
+        port: UDP port number (default ``0xBAC0`` / 47808).
+        apdu_timeout: APDU timeout in milliseconds.
+        apdu_segment_timeout: Segment timeout in milliseconds.
+        apdu_retries: Maximum number of APDU retries.
+        max_apdu_length: Maximum APDU length in bytes.
+        max_segments: Maximum segments accepted, or ``None`` for unlimited.
+        router_config: Optional router configuration for multi-network mode.
+    """
 
     instance_number: int
     name: str = "bac-py"
@@ -106,6 +126,11 @@ class BACnetApplication:
     """
 
     def __init__(self, config: DeviceConfig) -> None:
+        """Initialise the application from a device configuration.
+
+        Args:
+            config: Device and network parameters for this BACnet device.
+        """
         self._config = config
         self._transport: BIPTransport | None = None
         self._network: NetworkLayer | None = None
@@ -116,6 +141,7 @@ class BACnetApplication:
         self._service_registry = ServiceRegistry()
         self._object_db = ObjectDatabase()
         self._running = False
+        self._stopped = False
         self._stop_event: asyncio.Event | None = None
         self._run_task: asyncio.Task[None] | None = None
         self._ready_event: asyncio.Event | None = None
@@ -152,13 +178,13 @@ class BACnetApplication:
         object database. Used by the COV manager to populate the
         initiating device identifier in notifications.
         """
-        from bac_py.types.enums import ObjectType
-        from bac_py.types.primitives import ObjectIdentifier
-
         return ObjectIdentifier(ObjectType.DEVICE, self._config.instance_number)
 
     async def start(self) -> None:
         """Start the transport and initialize all layers."""
+        self._stopped = False
+        self._stop_event = asyncio.Event()
+
         if self._config.router_config:
             await self._start_router_mode()
         else:
@@ -166,7 +192,9 @@ class BACnetApplication:
 
         # Common: create TSMs with whichever network sender is active
         network = self._router or self._network
-        assert network is not None
+        if network is None:
+            msg = "Neither router nor network layer initialized after start"
+            raise RuntimeError(msg)
         segment_timeout = self._config.apdu_segment_timeout / 1000
         self._client_tsm = ClientTSM(
             network,
@@ -207,7 +235,9 @@ class BACnetApplication:
 
     async def _start_router_mode(self) -> None:
         """Start in router mode with multiple ports."""
-        assert self._config.router_config is not None
+        if self._config.router_config is None:
+            msg = "Router config is required for router mode"
+            raise RuntimeError(msg)
         ports: list[RouterPort] = []
         for pc in self._config.router_config.ports:
             transport = BIPTransport(interface=pc.interface, port=pc.port)
@@ -221,7 +251,7 @@ class BACnetApplication:
             port = RouterPort(
                 port_id=pc.port_id,
                 network_number=pc.network_number,
-                transport=transport,  # type: ignore[arg-type]  # BIPTransport on_receive callback uses BIPAddress, not bytes
+                transport=transport,
                 mac_address=transport.local_mac,
                 max_npdu_length=transport.max_npdu_length,
             )
@@ -234,7 +264,14 @@ class BACnetApplication:
         await self._router.start()
 
     async def stop(self) -> None:
-        """Stop the application and clean up resources."""
+        """Stop the application and clean up resources.
+
+        This method is idempotent -- calling it multiple times is safe.
+        """
+        if self._stopped:
+            return
+        self._stopped = True
+
         # Shutdown COV manager (cancel subscription timers)
         if self._cov_manager:
             self._cov_manager.shutdown()
@@ -249,6 +286,13 @@ class BACnetApplication:
         if self._stop_event:
             self._stop_event.set()
 
+        # Cancel all background tasks
+        for task in self._background_tasks:
+            task.cancel()
+        if self._background_tasks:
+            await asyncio.gather(*self._background_tasks, return_exceptions=True)
+            self._background_tasks.clear()
+
         if self._router:
             await self._router.stop()
         elif self._transport:
@@ -259,9 +303,9 @@ class BACnetApplication:
     async def run(self) -> None:
         """Start the application and block until stopped."""
         await self.start()
-        self._stop_event = asyncio.Event()
         try:
-            await self._stop_event.wait()
+            if self._stop_event is not None:
+                await self._stop_event.wait()
         finally:
             await self.stop()
 
@@ -392,7 +436,13 @@ class BACnetApplication:
         task.add_done_callback(self._background_tasks.discard)
 
     def _on_apdu_received(self, data: bytes, source: BACnetAddress) -> None:
-        """Dispatch received APDU based on PDU type."""
+        """Dispatch received APDU based on PDU type.
+
+        Routes confirmed requests to the server TSM, unconfirmed
+        requests to the service registry, and responses (simple-ack,
+        complex-ack, error, reject, abort, segment-ack) to the
+        client TSM for correlation with outstanding transactions.
+        """
         try:
             pdu = decode_apdu(data)
         except (ValueError, IndexError):
@@ -403,7 +453,8 @@ class BACnetApplication:
 
         match pdu_type:
             case PduType.CONFIRMED_REQUEST:
-                assert isinstance(pdu, ConfirmedRequestPDU)
+                if not isinstance(pdu, ConfirmedRequestPDU):
+                    return
                 if pdu.segmented:
                     self._handle_segmented_request(pdu, source)
                 else:
@@ -411,11 +462,13 @@ class BACnetApplication:
             case PduType.UNCONFIRMED_REQUEST:
                 self._spawn_task(self._handle_unconfirmed_request(pdu, source))
             case PduType.SIMPLE_ACK:
-                assert isinstance(pdu, SimpleAckPDU)
+                if not isinstance(pdu, SimpleAckPDU):
+                    return
                 if self._client_tsm:
                     self._client_tsm.handle_simple_ack(source, pdu.invoke_id, pdu.service_choice)
             case PduType.COMPLEX_ACK:
-                assert isinstance(pdu, ComplexAckPDU)
+                if not isinstance(pdu, ComplexAckPDU):
+                    return
                 if self._client_tsm and pdu.segmented:
                     self._client_tsm.handle_segmented_complex_ack(source, pdu)
                 elif self._client_tsm:
@@ -423,21 +476,25 @@ class BACnetApplication:
                         source, pdu.invoke_id, pdu.service_choice, pdu.service_ack
                     )
             case PduType.ERROR:
-                assert isinstance(pdu, ErrorPDU)
+                if not isinstance(pdu, ErrorPDU):
+                    return
                 if self._client_tsm:
                     self._client_tsm.handle_error(
                         source, pdu.invoke_id, pdu.error_class, pdu.error_code
                     )
             case PduType.REJECT:
-                assert isinstance(pdu, RejectPDU)
+                if not isinstance(pdu, RejectPDU):
+                    return
                 if self._client_tsm:
                     self._client_tsm.handle_reject(source, pdu.invoke_id, pdu.reject_reason)
             case PduType.ABORT:
-                assert isinstance(pdu, AbortPDU)
+                if not isinstance(pdu, AbortPDU):
+                    return
                 if self._client_tsm:
                     self._client_tsm.handle_abort(source, pdu.invoke_id, pdu.abort_reason)
             case PduType.SEGMENT_ACK:
-                assert isinstance(pdu, SegmentAckPDU)
+                if not isinstance(pdu, SegmentAckPDU):
+                    return
                 if pdu.sent_by_server:
                     # Server sent ACK -> we are the client receiving it
                     if self._client_tsm:
@@ -564,7 +621,8 @@ class BACnetApplication:
         source: BACnetAddress,
     ) -> None:
         """Dispatch unconfirmed request to handlers."""
-        assert isinstance(pdu, UnconfirmedRequestPDU)
+        if not isinstance(pdu, UnconfirmedRequestPDU):
+            return
 
         # Dispatch to permanent handlers
         await self._service_registry.dispatch_unconfirmed(
@@ -581,6 +639,16 @@ class BACnetApplication:
 
     # --- COV notification handlers (client role) ---
 
+    def _dispatch_cov_notification(self, data: bytes, source: BACnetAddress) -> None:
+        """Decode a COV notification and dispatch to the registered callback."""
+        notification = COVNotificationRequest.decode(data)
+        callback = self._cov_callbacks.get(notification.subscriber_process_identifier)
+        if callback:
+            try:
+                callback(notification, source)
+            except Exception:
+                logger.debug("Error in COV callback", exc_info=True)
+
     async def _handle_confirmed_cov_notification(
         self,
         service_choice: int,
@@ -591,13 +659,7 @@ class BACnetApplication:
 
         Dispatches to registered COV callbacks and returns SimpleACK.
         """
-        notification = COVNotificationRequest.decode(data)
-        callback = self._cov_callbacks.get(notification.subscriber_process_identifier)
-        if callback:
-            try:
-                callback(notification, source)
-            except Exception:
-                logger.debug("Error in COV callback", exc_info=True)
+        self._dispatch_cov_notification(data, source)
         return None  # SimpleACK
 
     async def _handle_unconfirmed_cov_notification(
@@ -610,10 +672,4 @@ class BACnetApplication:
 
         Dispatches to registered COV callbacks.
         """
-        notification = COVNotificationRequest.decode(data)
-        callback = self._cov_callbacks.get(notification.subscriber_process_identifier)
-        if callback:
-            try:
-                callback(notification, source)
-            except Exception:
-                logger.debug("Error in COV callback", exc_info=True)
+        self._dispatch_cov_notification(data, source)

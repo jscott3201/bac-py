@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 class TagClass(IntEnum):
@@ -27,6 +31,10 @@ class Tag:
 def encode_tag(tag_number: int, cls: TagClass, length: int) -> bytes:
     """Encode a tag header.
 
+    For APPLICATION class tags, the tag number identifies the datatype
+    (0=Null, 1=Boolean, ..., 12=ObjectIdentifier).  For CONTEXT class
+    tags, the tag number is a context-specific field identifier (0-254).
+
     Args:
         tag_number: Tag number (0-254).
         cls: Tag class (APPLICATION or CONTEXT).
@@ -34,7 +42,16 @@ def encode_tag(tag_number: int, cls: TagClass, length: int) -> bytes:
 
     Returns:
         Encoded tag header bytes.
+
+    Raises:
+        ValueError: If tag_number or length is out of range.
     """
+    if tag_number < 0 or tag_number > 254:
+        msg = f"Tag number must be 0-254, got {tag_number}"
+        raise ValueError(msg)
+    if length < 0:
+        msg = f"Tag length must be non-negative, got {length}"
+        raise ValueError(msg)
     buf = bytearray()
 
     # Initial tag octet
@@ -93,6 +110,11 @@ def encode_closing_tag(tag_number: int) -> bytes:
     return bytes([0xFF, tag_number])
 
 
+def as_memoryview(data: bytes | memoryview) -> memoryview:
+    """Ensure data is a memoryview for efficient slicing."""
+    return memoryview(data) if isinstance(data, bytes) else data
+
+
 def decode_tag(buf: memoryview | bytes, offset: int) -> tuple[Tag, int]:
     """Decode a tag from buffer, return (tag, new_offset).
 
@@ -102,9 +124,16 @@ def decode_tag(buf: memoryview | bytes, offset: int) -> tuple[Tag, int]:
 
     Returns:
         Tuple of (decoded Tag, new offset after tag header).
+
+    Raises:
+        ValueError: If the buffer is too short for the tag.
     """
     if isinstance(buf, bytes):
         buf = memoryview(buf)
+
+    if offset >= len(buf):
+        msg = f"Tag decode: offset {offset} beyond buffer length {len(buf)}"
+        raise ValueError(msg)
 
     initial = buf[offset]
     offset += 1
@@ -181,3 +210,38 @@ def extract_context_value(
             offset = new_offset + t.length
     msg = f"Missing closing tag {tag_number}"
     raise ValueError(msg)
+
+
+def decode_optional_context[T](
+    data: memoryview,
+    offset: int,
+    tag_number: int,
+    decode_fn: Callable[[memoryview | bytes], T],
+) -> tuple[T | None, int]:
+    """Try to decode an optional context-tagged field.
+
+    Peeks at the next tag; if it matches the expected context tag number,
+    decodes the value using ``decode_fn`` and advances the offset.
+    Otherwise returns ``(None, offset)`` unchanged.
+
+    Args:
+        data: Buffer to decode from (must already be a memoryview).
+        offset: Current position in the buffer.
+        tag_number: Expected context tag number.
+        decode_fn: Callable to decode the tag's content bytes.
+
+    Returns:
+        Tuple of (decoded value or None, new offset).
+    """
+    if offset >= len(data):
+        return None, offset
+    tag, new_offset = decode_tag(data, offset)
+    if (
+        tag.cls == TagClass.CONTEXT
+        and tag.number == tag_number
+        and not tag.is_opening
+        and not tag.is_closing
+    ):
+        value = decode_fn(data[new_offset : new_offset + tag.length])
+        return value, new_offset + tag.length
+    return None, offset

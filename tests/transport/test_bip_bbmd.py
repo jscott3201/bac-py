@@ -131,7 +131,7 @@ class TestIncomingBroadcastWithBBMD:
     @pytest.mark.asyncio
     async def test_original_broadcast_also_delivered_locally(self):
         transport, mock_udp = _make_transport_with_mock_udp()
-        received: list[tuple[bytes, BIPAddress]] = []
+        received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
             await transport.attach_bbmd(
@@ -146,7 +146,7 @@ class TestIncomingBroadcastWithBBMD:
 
             assert len(received) == 1
             assert received[0][0] == npdu
-            assert received[0][1] == CLIENT_ADDR
+            assert received[0][1] == CLIENT_ADDR.encode()
         finally:
             await transport.stop()
 
@@ -183,7 +183,7 @@ class TestIncomingForwardedNPDU:
     async def test_forwarded_npdu_delivered_once(self):
         """Forwarded-NPDU should be delivered exactly once (via BBMD callback)."""
         transport, mock_udp = _make_transport_with_mock_udp()
-        received: list[tuple[bytes, BIPAddress]] = []
+        received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
             await transport.attach_bbmd(
@@ -200,7 +200,7 @@ class TestIncomingForwardedNPDU:
             # Delivered exactly once with the originating address
             assert len(received) == 1
             assert received[0][0] == npdu
-            assert received[0][1] == orig_addr
+            assert received[0][1] == orig_addr.encode()
         finally:
             await transport.stop()
 
@@ -239,7 +239,7 @@ class TestIncomingDistributeBroadcast:
     @pytest.mark.asyncio
     async def test_distribute_broadcast_delivered_locally(self):
         transport, mock_udp = _make_transport_with_mock_udp()
-        received: list[tuple[bytes, BIPAddress]] = []
+        received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
             bbmd = await transport.attach_bbmd(
@@ -263,7 +263,7 @@ class TestIncomingDistributeBroadcast:
             # NPDU should be delivered to the local callback
             assert len(received) == 1
             assert received[0][0] == npdu
-            assert received[0][1] == FD_ADDR
+            assert received[0][1] == FD_ADDR.encode()
         finally:
             await transport.stop()
 
@@ -372,7 +372,7 @@ class TestBVLCManagementExclusivelyHandled:
     @pytest.mark.asyncio
     async def test_register_fd_not_delivered_to_callback(self):
         transport, mock_udp = _make_transport_with_mock_udp()
-        received: list[tuple[bytes, BIPAddress]] = []
+        received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
             await transport.attach_bbmd()
@@ -387,7 +387,7 @@ class TestBVLCManagementExclusivelyHandled:
     @pytest.mark.asyncio
     async def test_read_bdt_not_delivered_to_callback(self):
         transport, mock_udp = _make_transport_with_mock_udp()
-        received: list[tuple[bytes, BIPAddress]] = []
+        received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
             await transport.attach_bbmd()
@@ -402,7 +402,7 @@ class TestBVLCManagementExclusivelyHandled:
     @pytest.mark.asyncio
     async def test_write_bdt_not_delivered_to_callback(self):
         transport, mock_udp = _make_transport_with_mock_udp()
-        received: list[tuple[bytes, BIPAddress]] = []
+        received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
             await transport.attach_bbmd()
@@ -418,7 +418,7 @@ class TestBVLCManagementExclusivelyHandled:
     @pytest.mark.asyncio
     async def test_read_fdt_not_delivered_to_callback(self):
         transport, mock_udp = _make_transport_with_mock_udp()
-        received: list[tuple[bytes, BIPAddress]] = []
+        received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
             await transport.attach_bbmd()
@@ -455,7 +455,7 @@ class TestNoBBMDFallback:
 
     def test_original_unicast_works_without_bbmd(self):
         transport = BIPTransport()
-        received: list[tuple[bytes, BIPAddress]] = []
+        received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         transport._transport = MagicMock()
 
@@ -468,7 +468,7 @@ class TestNoBBMDFallback:
 
     def test_original_broadcast_works_without_bbmd(self):
         transport = BIPTransport()
-        received: list[tuple[bytes, BIPAddress]] = []
+        received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         transport._transport = MagicMock()
 
@@ -481,7 +481,7 @@ class TestNoBBMDFallback:
 
     def test_forwarded_npdu_works_without_bbmd(self):
         transport = BIPTransport()
-        received: list[tuple[bytes, BIPAddress]] = []
+        received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         transport._transport = MagicMock()
 
@@ -492,4 +492,4 @@ class TestNoBBMDFallback:
 
         assert len(received) == 1
         assert received[0][0] == npdu
-        assert received[0][1] == orig
+        assert received[0][1] == orig.encode()

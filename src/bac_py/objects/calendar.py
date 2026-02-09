@@ -47,5 +47,4 @@ class CalendarObject(BACnetObject):
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
-        if PropertyIdentifier.DATE_LIST not in self._properties:
-            self._properties[PropertyIdentifier.DATE_LIST] = []
+        self._set_default(PropertyIdentifier.DATE_LIST, [])

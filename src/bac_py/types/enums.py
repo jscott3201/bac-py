@@ -69,7 +69,14 @@ class ObjectType(IntEnum):
 
 
 class PropertyIdentifier(IntEnum):
-    """BACnet property identifiers (Clause 12)."""
+    """BACnet property identifiers (Clause 12).
+
+    This enum covers commonly encountered property IDs but does not
+    include every value defined in the standard (e.g. deprecated IDs
+    like 18, 51, 55, 95, 101 and some newer additions).  Constructing
+    a ``PropertyIdentifier`` with an unlisted integer will raise
+    ``ValueError``.
+    """
 
     ACKED_TRANSITIONS = 0
     ACK_REQUIRED = 1
@@ -596,7 +603,7 @@ class Segmentation(IntEnum):
 
 
 class AbortReason(IntEnum):
-    """BACnet abort reasons (Clause 20.1.8)."""
+    """BACnet abort reasons (Clause 20.1.9)."""
 
     OTHER = 0
     BUFFER_OVERFLOW = 1
@@ -613,7 +620,7 @@ class AbortReason(IntEnum):
 
 
 class RejectReason(IntEnum):
-    """BACnet reject reasons (Clause 20.1.7)."""
+    """BACnet reject reasons (Clause 20.1.8)."""
 
     OTHER = 0
     BUFFER_OVERFLOW = 1
@@ -781,7 +788,11 @@ class Polarity(IntEnum):
 
 
 class Reliability(IntEnum):
-    """BACnet reliability enumeration (Clause 12)."""
+    """BACnet reliability enumeration (Clause 12).
+
+    Value 11 is intentionally omitted — it was removed from the
+    standard and is not assigned to any reliability condition.
+    """
 
     NO_FAULT_DETECTED = 0
     NO_SENSOR = 1

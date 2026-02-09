@@ -1,7 +1,7 @@
 """Tests for WritePropertyMultiple service (Clause 15.10)."""
 
+from bac_py.services.common import BACnetPropertyValue
 from bac_py.services.write_property_multiple import (
-    PropertyValue,
     WriteAccessSpecification,
     WritePropertyMultipleRequest,
 )
@@ -9,58 +9,58 @@ from bac_py.types.enums import ObjectType, PropertyIdentifier
 from bac_py.types.primitives import ObjectIdentifier
 
 
-class TestPropertyValue:
+class TestBACnetPropertyValue:
     def test_encode_decode_minimal(self):
-        pv = PropertyValue(
+        pv = BACnetPropertyValue(
             property_identifier=PropertyIdentifier.PRESENT_VALUE,
-            property_value=b"\x44\x42\x28\x00\x00",
+            value=b"\x44\x42\x28\x00\x00",
         )
         encoded = pv.encode()
-        decoded, offset = PropertyValue.decode(encoded, 0)
+        decoded, offset = BACnetPropertyValue.decode_from(encoded, 0)
         assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
-        assert decoded.property_value == b"\x44\x42\x28\x00\x00"
+        assert decoded.value == b"\x44\x42\x28\x00\x00"
         assert decoded.property_array_index is None
         assert decoded.priority is None
         assert offset == len(encoded)
 
     def test_encode_decode_with_priority(self):
-        pv = PropertyValue(
+        pv = BACnetPropertyValue(
             property_identifier=PropertyIdentifier.PRESENT_VALUE,
-            property_value=b"\x44\x42\x28\x00\x00",
+            value=b"\x44\x42\x28\x00\x00",
             priority=8,
         )
         encoded = pv.encode()
-        decoded, offset = PropertyValue.decode(encoded, 0)
+        decoded, offset = BACnetPropertyValue.decode_from(encoded, 0)
         assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
-        assert decoded.property_value == b"\x44\x42\x28\x00\x00"
+        assert decoded.value == b"\x44\x42\x28\x00\x00"
         assert decoded.priority == 8
         assert offset == len(encoded)
 
     def test_encode_decode_with_array_index(self):
-        pv = PropertyValue(
+        pv = BACnetPropertyValue(
             property_identifier=PropertyIdentifier.OBJECT_LIST,
-            property_value=b"\xc4\x00\x00\x00\x01",
+            value=b"\xc4\x00\x00\x00\x01",
             property_array_index=3,
         )
         encoded = pv.encode()
-        decoded, offset = PropertyValue.decode(encoded, 0)
+        decoded, offset = BACnetPropertyValue.decode_from(encoded, 0)
         assert decoded.property_identifier == PropertyIdentifier.OBJECT_LIST
         assert decoded.property_array_index == 3
-        assert decoded.property_value == b"\xc4\x00\x00\x00\x01"
+        assert decoded.value == b"\xc4\x00\x00\x00\x01"
         assert offset == len(encoded)
 
     def test_encode_decode_all_fields(self):
-        pv = PropertyValue(
+        pv = BACnetPropertyValue(
             property_identifier=PropertyIdentifier.PRESENT_VALUE,
-            property_value=b"\x44\x42\x28\x00\x00",
+            value=b"\x44\x42\x28\x00\x00",
             property_array_index=1,
             priority=4,
         )
         encoded = pv.encode()
-        decoded, offset = PropertyValue.decode(encoded, 0)
+        decoded, offset = BACnetPropertyValue.decode_from(encoded, 0)
         assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
         assert decoded.property_array_index == 1
-        assert decoded.property_value == b"\x44\x42\x28\x00\x00"
+        assert decoded.value == b"\x44\x42\x28\x00\x00"
         assert decoded.priority == 4
         assert offset == len(encoded)
 
@@ -70,9 +70,9 @@ class TestWriteAccessSpecification:
         spec = WriteAccessSpecification(
             object_identifier=ObjectIdentifier(ObjectType.ANALOG_OUTPUT, 1),
             list_of_properties=[
-                PropertyValue(
+                BACnetPropertyValue(
                     property_identifier=PropertyIdentifier.PRESENT_VALUE,
-                    property_value=b"\x44\x42\x28\x00\x00",
+                    value=b"\x44\x42\x28\x00\x00",
                 ),
             ],
         )
@@ -89,13 +89,13 @@ class TestWriteAccessSpecification:
         spec = WriteAccessSpecification(
             object_identifier=ObjectIdentifier(ObjectType.DEVICE, 42),
             list_of_properties=[
-                PropertyValue(
+                BACnetPropertyValue(
                     property_identifier=PropertyIdentifier.OBJECT_NAME,
-                    property_value=b"\x75\x05\x00test",
+                    value=b"\x75\x05\x00test",
                 ),
-                PropertyValue(
+                BACnetPropertyValue(
                     property_identifier=PropertyIdentifier.DESCRIPTION,
-                    property_value=b"\x75\x06\x00hello",
+                    value=b"\x75\x06\x00hello",
                 ),
             ],
         )
@@ -113,9 +113,9 @@ class TestWritePropertyMultipleRequest:
                 WriteAccessSpecification(
                     object_identifier=ObjectIdentifier(ObjectType.ANALOG_OUTPUT, 1),
                     list_of_properties=[
-                        PropertyValue(
+                        BACnetPropertyValue(
                             property_identifier=PropertyIdentifier.PRESENT_VALUE,
-                            property_value=b"\x44\x42\x28\x00\x00",
+                            value=b"\x44\x42\x28\x00\x00",
                             priority=8,
                         ),
                     ],
@@ -136,23 +136,23 @@ class TestWritePropertyMultipleRequest:
                 WriteAccessSpecification(
                     object_identifier=ObjectIdentifier(ObjectType.ANALOG_OUTPUT, 1),
                     list_of_properties=[
-                        PropertyValue(
+                        BACnetPropertyValue(
                             property_identifier=PropertyIdentifier.PRESENT_VALUE,
-                            property_value=b"\x44\x42\x28\x00\x00",
+                            value=b"\x44\x42\x28\x00\x00",
                         ),
                     ],
                 ),
                 WriteAccessSpecification(
                     object_identifier=ObjectIdentifier(ObjectType.ANALOG_OUTPUT, 2),
                     list_of_properties=[
-                        PropertyValue(
+                        BACnetPropertyValue(
                             property_identifier=PropertyIdentifier.PRESENT_VALUE,
-                            property_value=b"\x44\x00\x00\x00\x00",
+                            value=b"\x44\x00\x00\x00\x00",
                             priority=4,
                         ),
-                        PropertyValue(
+                        BACnetPropertyValue(
                             property_identifier=PropertyIdentifier.OBJECT_NAME,
-                            property_value=b"\x75\x05\x00test",
+                            value=b"\x75\x05\x00test",
                         ),
                     ],
                 ),
@@ -173,9 +173,9 @@ class TestWritePropertyMultipleRequest:
                 WriteAccessSpecification(
                     object_identifier=ObjectIdentifier(ObjectType.DEVICE, 100),
                     list_of_properties=[
-                        PropertyValue(
+                        BACnetPropertyValue(
                             property_identifier=PropertyIdentifier.OBJECT_LIST,
-                            property_value=b"\xc4\x00\x00\x00\x05",
+                            value=b"\xc4\x00\x00\x00\x05",
                             property_array_index=3,
                             priority=16,
                         ),
@@ -189,4 +189,4 @@ class TestWritePropertyMultipleRequest:
         assert pv.property_identifier == PropertyIdentifier.OBJECT_LIST
         assert pv.property_array_index == 3
         assert pv.priority == 16
-        assert pv.property_value == b"\xc4\x00\x00\x00\x05"
+        assert pv.value == b"\xc4\x00\x00\x00\x05"

@@ -5,20 +5,25 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from bac_py.encoding.primitives import (
+    decode_bit_string,
     decode_date,
     decode_object_identifier,
     decode_signed,
     decode_time,
     decode_unsigned,
+    encode_application_date,
+    encode_application_signed,
+    encode_application_time,
+    encode_application_unsigned,
+    encode_bit_string,
+    encode_context_object_id,
     encode_context_tagged,
-    encode_date,
-    encode_object_identifier,
-    encode_signed,
-    encode_time,
     encode_unsigned,
 )
 from bac_py.encoding.tags import (
     TagClass,
+    as_memoryview,
+    decode_optional_context,
     decode_tag,
     encode_closing_tag,
     encode_opening_tag,
@@ -134,46 +139,36 @@ class ReadRangeRequest:
         """Encode ReadRange-Request service parameters."""
         buf = bytearray()
         # [0] object-identifier
-        buf.extend(
-            encode_context_tagged(
-                0,
-                encode_object_identifier(
-                    self.object_identifier.object_type,
-                    self.object_identifier.instance_number,
-                ),
-            )
-        )
+        buf.extend(encode_context_object_id(0, self.object_identifier))
         # [1] property-identifier
         buf.extend(encode_context_tagged(1, encode_unsigned(self.property_identifier)))
         # [2] property-array-index (optional)
         if self.property_array_index is not None:
             buf.extend(encode_context_tagged(2, encode_unsigned(self.property_array_index)))
-        # Range qualifier (optional)
+        # Range qualifier (optional) -- inner SEQUENCE elements use
+        # application tags per BACnet encoding rules.
         if isinstance(self.range, RangeByPosition):
             buf.extend(encode_opening_tag(3))
-            buf.extend(encode_context_tagged(0, encode_unsigned(self.range.reference_index)))
-            buf.extend(encode_context_tagged(1, encode_signed(self.range.count)))
+            buf.extend(encode_application_unsigned(self.range.reference_index))
+            buf.extend(encode_application_signed(self.range.count))
             buf.extend(encode_closing_tag(3))
         elif isinstance(self.range, RangeBySequenceNumber):
             buf.extend(encode_opening_tag(6))
-            buf.extend(
-                encode_context_tagged(0, encode_unsigned(self.range.reference_sequence_number))
-            )
-            buf.extend(encode_context_tagged(1, encode_signed(self.range.count)))
+            buf.extend(encode_application_unsigned(self.range.reference_sequence_number))
+            buf.extend(encode_application_signed(self.range.count))
             buf.extend(encode_closing_tag(6))
         elif isinstance(self.range, RangeByTime):
             buf.extend(encode_opening_tag(7))
-            buf.extend(encode_context_tagged(0, encode_date(self.range.reference_date)))
-            buf.extend(encode_context_tagged(1, encode_time(self.range.reference_time)))
-            buf.extend(encode_context_tagged(2, encode_signed(self.range.count)))
+            buf.extend(encode_application_date(self.range.reference_date))
+            buf.extend(encode_application_time(self.range.reference_time))
+            buf.extend(encode_application_signed(self.range.count))
             buf.extend(encode_closing_tag(7))
         return bytes(buf)
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ReadRangeRequest:
         """Decode ReadRange-Request from service request bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 
@@ -293,19 +288,9 @@ class ReadRangeACK:
 
     def encode(self) -> bytes:
         """Encode ReadRange-ACK service parameters."""
-        from bac_py.encoding.primitives import encode_bit_string
-
         buf = bytearray()
         # [0] object-identifier
-        buf.extend(
-            encode_context_tagged(
-                0,
-                encode_object_identifier(
-                    self.object_identifier.object_type,
-                    self.object_identifier.instance_number,
-                ),
-            )
-        )
+        buf.extend(encode_context_object_id(0, self.object_identifier))
         # [1] property-identifier
         buf.extend(encode_context_tagged(1, encode_unsigned(self.property_identifier)))
         # [2] property-array-index (optional)
@@ -327,10 +312,7 @@ class ReadRangeACK:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ReadRangeACK:
         """Decode ReadRange-ACK from service ACK bytes."""
-        from bac_py.encoding.primitives import decode_bit_string
-
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 
@@ -380,12 +362,7 @@ class ReadRangeACK:
         item_data, offset = extract_context_value(data, offset, 5)
 
         # [6] first-sequence-number (optional)
-        first_sequence_number = None
-        if offset < len(data):
-            tag, offset = decode_tag(data, offset)
-            if tag.cls == TagClass.CONTEXT and tag.number == 6:
-                first_sequence_number = decode_unsigned(data[offset : offset + tag.length])
-                offset += tag.length
+        first_sequence_number, _ = decode_optional_context(data, offset, 6, decode_unsigned)
 
         return cls(
             object_identifier=object_identifier,

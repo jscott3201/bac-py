@@ -9,7 +9,6 @@ only the data that follows the message type byte.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union
 
 from bac_py.types.enums import NetworkMessageType, RejectMessageReason
 
@@ -32,7 +31,7 @@ class WhoIsRouterToNetwork:
 class IAmRouterToNetwork:
     """Clause 6.4.2 -- list of reachable DNETs."""
 
-    networks: list[int]
+    networks: tuple[int, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +60,7 @@ class RouterBusyToNetwork:
     Empty networks list means all networks served by the router.
     """
 
-    networks: list[int]
+    networks: tuple[int, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,7 +70,7 @@ class RouterAvailableToNetwork:
     Empty networks list means all previously curtailed networks.
     """
 
-    networks: list[int]
+    networks: tuple[int, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,7 +90,7 @@ class InitializeRoutingTable:
     the complete routing table without modification.
     """
 
-    ports: list[RoutingTablePort]
+    ports: tuple[RoutingTablePort, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,7 +101,7 @@ class InitializeRoutingTableAck:
     Empty ports list when acknowledging an update.
     """
 
-    ports: list[RoutingTablePort]
+    ports: tuple[RoutingTablePort, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,20 +142,20 @@ class NetworkNumberIs:
 
 
 # Union type for all network messages handled by this module.
-NetworkMessage = Union[
-    WhoIsRouterToNetwork,
-    IAmRouterToNetwork,
-    ICouldBeRouterToNetwork,
-    RejectMessageToNetwork,
-    RouterBusyToNetwork,
-    RouterAvailableToNetwork,
-    InitializeRoutingTable,
-    InitializeRoutingTableAck,
-    EstablishConnectionToNetwork,
-    DisconnectConnectionToNetwork,
-    WhatIsNetworkNumber,
-    NetworkNumberIs,
-]
+NetworkMessage = (
+    WhoIsRouterToNetwork
+    | IAmRouterToNetwork
+    | ICouldBeRouterToNetwork
+    | RejectMessageToNetwork
+    | RouterBusyToNetwork
+    | RouterAvailableToNetwork
+    | InitializeRoutingTable
+    | InitializeRoutingTableAck
+    | EstablishConnectionToNetwork
+    | DisconnectConnectionToNetwork
+    | WhatIsNetworkNumber
+    | NetworkNumberIs
+)
 
 
 # ---------------------------------------------------------------------------
@@ -170,6 +169,11 @@ def encode_network_message(msg: NetworkMessage) -> bytes:
     This encodes only the variable-length data that follows the message
     type byte in the NPDU. The caller is responsible for constructing
     the full NPDU with the correct message type.
+
+    Some message types (e.g. ``WhatIsNetworkNumber``) have no payload,
+    so this function returns ``b""``.
+
+    See :func:`decode_network_message` for the inverse operation.
 
     Args:
         msg: A network message dataclass instance.
@@ -214,7 +218,7 @@ def _encode_who_is_router(msg: WhoIsRouterToNetwork) -> bytes:
     return msg.network.to_bytes(2, "big")
 
 
-def _encode_network_list(networks: list[int]) -> bytes:
+def _encode_network_list(networks: tuple[int, ...]) -> bytes:
     buf = bytearray()
     for net in networks:
         buf.extend(net.to_bytes(2, "big"))
@@ -235,7 +239,7 @@ def _encode_reject_message(msg: RejectMessageToNetwork) -> bytes:
     return bytes(buf)
 
 
-def _encode_routing_table(ports: list[RoutingTablePort]) -> bytes:
+def _encode_routing_table(ports: tuple[RoutingTablePort, ...]) -> bytes:
     buf = bytearray()
     buf.append(len(ports))
     for port in ports:
@@ -268,9 +272,12 @@ def _encode_network_number_is(msg: NetworkNumberIs) -> bytes:
 def decode_network_message(message_type: int, data: bytes | memoryview) -> NetworkMessage:
     """Decode the data payload of a network layer message.
 
+    See :func:`encode_network_message` for the inverse operation.
+
     Args:
         message_type: The NetworkMessageType value from the NPDU.
-        data: The raw data bytes following the message type byte.
+        data: The raw data bytes following the message type byte
+            (may be empty for message types with no payload).
 
     Returns:
         A decoded network message dataclass instance.
@@ -322,14 +329,14 @@ def _decode_who_is_router(data: bytes) -> WhoIsRouterToNetwork:
     return WhoIsRouterToNetwork(network=network)
 
 
-def _decode_network_list(data: bytes) -> list[int]:
+def _decode_network_list(data: bytes) -> tuple[int, ...]:
     if len(data) % 2 != 0:
         msg = "Network list data length must be a multiple of 2"
         raise ValueError(msg)
     networks = []
     for i in range(0, len(data), 2):
         networks.append(int.from_bytes(data[i : i + 2], "big"))
-    return networks
+    return tuple(networks)
 
 
 def _decode_i_could_be_router(data: bytes) -> ICouldBeRouterToNetwork:
@@ -350,7 +357,7 @@ def _decode_reject_message(data: bytes) -> RejectMessageToNetwork:
     return RejectMessageToNetwork(reason=reason, network=network)
 
 
-def _decode_routing_table(data: bytes) -> list[RoutingTablePort]:
+def _decode_routing_table(data: bytes) -> tuple[RoutingTablePort, ...]:
     if len(data) < 1:
         msg = "Routing table data too short"
         raise ValueError(msg)
@@ -373,7 +380,7 @@ def _decode_routing_table(data: bytes) -> list[RoutingTablePort]:
         port_info = data[offset : offset + port_info_len]
         offset += port_info_len
         ports.append(RoutingTablePort(network=network, port_id=port_id, port_info=port_info))
-    return ports
+    return tuple(ports)
 
 
 def _decode_establish_connection(data: bytes) -> EstablishConnectionToNetwork:

@@ -31,7 +31,7 @@ class ForeignDeviceManager:
 
     - Initial registration with the BBMD
     - Periodic re-registration at TTL/2 intervals to prevent expiry
-    - Tracking registration state (pending, registered, failed)
+    - Tracking registration state (registered, failed)
     - Sending broadcasts via Distribute-Broadcast-To-Network
 
     Usage::
@@ -62,6 +62,9 @@ class ForeignDeviceManager:
                 a UDP datagram.
         """
         self._bbmd_address = bbmd_address
+        if ttl < 1:
+            msg = f"TTL must be >= 1 second, got {ttl}"
+            raise ValueError(msg)
         self._ttl = ttl
         self._send = send_callback
         self._task: asyncio.Task[None] | None = None
@@ -174,6 +177,9 @@ class ForeignDeviceManager:
     async def _registration_loop(self) -> None:
         """Re-register at TTL/2 intervals per Annex J.5.2.3."""
         while True:
-            self._send_registration()
+            try:
+                self._send_registration()
+            except Exception:
+                logger.exception("Error in foreign device registration loop")
             # Re-register at half the TTL to avoid expiry
             await asyncio.sleep(self._ttl / 2)

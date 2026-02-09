@@ -184,8 +184,11 @@ class BBMDManager:
             source: UDP source address of the sender.
 
         Returns:
-            True if the message was handled by the BBMD, False if it
-            should be processed by the normal receive path.
+            ``True`` if the message was fully consumed by the BBMD and
+            should *not* be delivered locally.  ``False`` if the NPDU
+            should also be processed by the normal receive path (this
+            is the case for Original-Broadcast-NPDU and Forwarded-NPDU,
+            which are forwarded *and* delivered locally).
         """
         match function:
             case BvlcFunction.ORIGINAL_BROADCAST_NPDU:
@@ -332,6 +335,10 @@ class BBMDManager:
             return
 
         ttl = int.from_bytes(data[0:2], "big")
+        if ttl < 1:
+            result = _encode_bvlc_result(BvlcResultCode.REGISTER_FOREIGN_DEVICE_NAK)
+            self._send(result, source)
+            return
         expiry = time.monotonic() + ttl + FDT_GRACE_PERIOD_SECONDS
 
         self._fdt[source] = FDTEntry(address=source, ttl=ttl, expiry=expiry)
@@ -421,7 +428,10 @@ class BBMDManager:
         """Periodically purge expired FDT entries."""
         while True:
             await asyncio.sleep(10)  # Check every 10 seconds
-            self._purge_expired_fdt_entries()
+            try:
+                self._purge_expired_fdt_entries()
+            except Exception:
+                logger.exception("Error in FDT cleanup loop")
 
     def _purge_expired_fdt_entries(self) -> None:
         """Remove FDT entries whose TTL + grace period has elapsed."""

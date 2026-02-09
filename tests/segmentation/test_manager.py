@@ -308,7 +308,9 @@ class TestSegmentReceiver:
 
         for i in range(1, 4):
             action, seq = receiver.receive_segment(i, segments[i], more_follows=True)
-            assert action == SegmentAction.SEND_ACK
+            # Window size (16) > total segments (5), so intermediate
+            # segments return CONTINUE (no ACK until window boundary)
+            assert action == SegmentAction.CONTINUE
             assert seq == i
 
         # Last segment
@@ -507,6 +509,7 @@ class TestSequenceWrapping:
             if i == len(segments) - 1:
                 assert action == SegmentAction.COMPLETE
             else:
-                assert action == SegmentAction.SEND_ACK
+                # Window-based ACK: SEND_ACK at window boundaries, CONTINUE otherwise
+                assert action in (SegmentAction.SEND_ACK, SegmentAction.CONTINUE)
 
         assert receiver.reassemble() == original

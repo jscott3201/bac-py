@@ -13,14 +13,38 @@ from bac_py.objects.base import (
     standard_properties,
     status_properties,
 )
+from bac_py.services.errors import BACnetError
 from bac_py.types.enums import (
+    ErrorClass,
+    ErrorCode,
     ObjectType,
     PropertyIdentifier,
 )
 
 
+class _MultiStateBase(BACnetObject):
+    """Shared validation for multi-state object types.
+
+    Validates that Present_Value is within 1..Number_Of_States
+    on writes per Clause 12.18/12.19/12.20.
+    """
+
+    def write_property(
+        self,
+        prop_id: PropertyIdentifier,
+        value: Any,
+        priority: int | None = None,
+        array_index: int | None = None,
+    ) -> None:
+        if prop_id == PropertyIdentifier.PRESENT_VALUE and isinstance(value, int):
+            num_states = self._properties.get(PropertyIdentifier.NUMBER_OF_STATES)
+            if num_states is not None and (value < 1 or value > num_states):
+                raise BACnetError(ErrorClass.PROPERTY, ErrorCode.VALUE_OUT_OF_RANGE)
+        super().write_property(prop_id, value, priority, array_index)
+
+
 @register_object_type
-class MultiStateInputObject(BACnetObject):
+class MultiStateInputObject(_MultiStateBase):
     """BACnet Multi-State Input object (Clause 12.18).
 
     Represents an enumerated sensor input with N possible states.
@@ -67,13 +91,12 @@ class MultiStateInputObject(BACnetObject):
         **initial_properties: Any,
     ) -> None:
         super().__init__(instance_number, **initial_properties)
-        if PropertyIdentifier.NUMBER_OF_STATES not in self._properties:
-            self._properties[PropertyIdentifier.NUMBER_OF_STATES] = number_of_states
+        self._set_default(PropertyIdentifier.NUMBER_OF_STATES, number_of_states)
         self._init_status_flags()
 
 
 @register_object_type
-class MultiStateOutputObject(BACnetObject):
+class MultiStateOutputObject(_MultiStateBase):
     """BACnet Multi-State Output object (Clause 12.19).
 
     Represents an enumerated actuator command with N possible states.
@@ -122,15 +145,14 @@ class MultiStateOutputObject(BACnetObject):
         **initial_properties: Any,
     ) -> None:
         super().__init__(instance_number, **initial_properties)
-        if PropertyIdentifier.NUMBER_OF_STATES not in self._properties:
-            self._properties[PropertyIdentifier.NUMBER_OF_STATES] = number_of_states
+        self._set_default(PropertyIdentifier.NUMBER_OF_STATES, number_of_states)
         # Always commandable
         self._init_commandable(1)
         self._init_status_flags()
 
 
 @register_object_type
-class MultiStateValueObject(BACnetObject):
+class MultiStateValueObject(_MultiStateBase):
     """BACnet Multi-State Value object (Clause 12.20).
 
     Represents an enumerated configuration or status value.
@@ -174,8 +196,7 @@ class MultiStateValueObject(BACnetObject):
         **initial_properties: Any,
     ) -> None:
         super().__init__(instance_number, **initial_properties)
-        if PropertyIdentifier.NUMBER_OF_STATES not in self._properties:
-            self._properties[PropertyIdentifier.NUMBER_OF_STATES] = number_of_states
+        self._set_default(PropertyIdentifier.NUMBER_OF_STATES, number_of_states)
         if commandable:
             self._init_commandable(1)
         self._init_status_flags()

@@ -62,7 +62,7 @@ class TestBIPTransportNotStarted:
         transport = BIPTransport()
         dest = BIPAddress(host="10.0.0.1", port=47808)
         with pytest.raises(RuntimeError, match="Transport not started"):
-            transport.send_unicast(b"\x01\x02", dest)
+            transport.send_unicast(b"\x01\x02", dest.encode())
 
     def test_send_broadcast_raises(self):
         transport = BIPTransport()
@@ -143,8 +143,7 @@ class TestOnDatagramReceived:
         callback.assert_called_once()
         delivered_npdu, delivered_source = callback.call_args[0]
         assert delivered_npdu == npdu
-        assert delivered_source.host == "192.168.1.50"
-        assert delivered_source.port == 47808
+        assert delivered_source == BIPAddress(host="192.168.1.50", port=47808).encode()
 
     def test_original_broadcast_npdu_delivers_data(self):
         transport, callback = self._make_transport_with_callback()
@@ -157,8 +156,7 @@ class TestOnDatagramReceived:
         callback.assert_called_once()
         delivered_npdu, delivered_source = callback.call_args[0]
         assert delivered_npdu == npdu
-        assert delivered_source.host == "192.168.1.50"
-        assert delivered_source.port == 47808
+        assert delivered_source == BIPAddress(host="192.168.1.50", port=47808).encode()
 
     def test_forwarded_npdu_delivers_with_originating_address(self):
         transport, callback = self._make_transport_with_callback()
@@ -174,8 +172,7 @@ class TestOnDatagramReceived:
         delivered_npdu, delivered_source = callback.call_args[0]
         assert delivered_npdu == npdu
         # Should use the originating address, not the forwarder.
-        assert delivered_source.host == "10.0.0.99"
-        assert delivered_source.port == 47808
+        assert delivered_source == BIPAddress(host="10.0.0.99", port=47808).encode()
 
     def test_bvlc_result_not_delivered_as_npdu(self):
         transport, callback = self._make_transport_with_callback()
@@ -187,16 +184,16 @@ class TestOnDatagramReceived:
 
         callback.assert_not_called()
 
-    def test_bvlc_result_handled_logs_debug(self, caplog):
+    def test_bvlc_result_handled_logs_warning(self, caplog):
         transport, _callback = self._make_transport_with_callback()
         result_data = b"\x00\x30"  # register-foreign-device NAK
         bvll_data = encode_bvll(BvlcFunction.BVLC_RESULT, result_data)
         addr = ("192.168.1.1", 47808)
 
-        with caplog.at_level(logging.DEBUG, logger="bac_py.transport.bip"):
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.bip"):
             transport._on_datagram_received(bvll_data, addr)
 
-        assert "BVLC-Result: 48" in caplog.text
+        assert "BVLC-Result NAK: code 48" in caplog.text
 
     def test_unknown_bvlc_function_ignored(self):
         transport, callback = self._make_transport_with_callback()
@@ -351,7 +348,7 @@ class TestSendUnicast:
         npdu = b"\x01\x00\x10\x02\x00"
         dest = BIPAddress(host="192.168.1.100", port=47808)
 
-        transport.send_unicast(npdu, dest)
+        transport.send_unicast(npdu, dest.encode())
 
         mock_udp.sendto.assert_called_once()
 
@@ -363,7 +360,7 @@ class TestSendUnicast:
         npdu = b"\x01\x00\x10\x02\x00"
         dest = BIPAddress(host="192.168.1.100", port=47808)
 
-        transport.send_unicast(npdu, dest)
+        transport.send_unicast(npdu, dest.encode())
 
         _, addr = mock_udp.sendto.call_args[0]
         assert addr == ("192.168.1.100", 47808)
@@ -376,7 +373,7 @@ class TestSendUnicast:
         npdu = b"\x01\x00\x10\x02\x00"
         dest = BIPAddress(host="10.0.0.1", port=47808)
 
-        transport.send_unicast(npdu, dest)
+        transport.send_unicast(npdu, dest.encode())
 
         sent_bvll = mock_udp.sendto.call_args[0][0]
         expected_bvll = encode_bvll(BvlcFunction.ORIGINAL_UNICAST_NPDU, npdu)
@@ -390,7 +387,7 @@ class TestSendUnicast:
         npdu = b"\x01\x02\x03"
         dest = BIPAddress(host="10.0.0.1", port=47808)
 
-        transport.send_unicast(npdu, dest)
+        transport.send_unicast(npdu, dest.encode())
 
         sent_bvll = mock_udp.sendto.call_args[0][0]
         assert sent_bvll[0] == 0x81  # BVLC type for BACnet/IP
@@ -403,7 +400,7 @@ class TestSendUnicast:
         npdu = b"\x01\x02\x03"
         dest = BIPAddress(host="10.0.0.1", port=47808)
 
-        transport.send_unicast(npdu, dest)
+        transport.send_unicast(npdu, dest.encode())
 
         sent_bvll = mock_udp.sendto.call_args[0][0]
         assert sent_bvll[1] == BvlcFunction.ORIGINAL_UNICAST_NPDU
@@ -416,7 +413,7 @@ class TestSendUnicast:
         npdu = b"\xde\xad\xbe\xef"
         dest = BIPAddress(host="10.0.0.1", port=47808)
 
-        transport.send_unicast(npdu, dest)
+        transport.send_unicast(npdu, dest.encode())
 
         sent_bvll = mock_udp.sendto.call_args[0][0]
         # NPDU follows the 4-byte BVLL header.
@@ -599,8 +596,8 @@ class TestSendUnicastWithMac:
         with pytest.raises(RuntimeError, match="Transport not started"):
             transport.send_unicast(b"\x01\x02", mac)
 
-    def test_send_unicast_bip_address_still_works(self):
-        """Existing BIPAddress usage is not broken."""
+    def test_send_unicast_encoded_bip_address(self):
+        """Encoded BIPAddress (bytes) works with send_unicast."""
         transport = BIPTransport()
         mock_udp = MagicMock()
         transport._transport = mock_udp
@@ -608,7 +605,7 @@ class TestSendUnicastWithMac:
         npdu = b"\x01\x00\x10\x02\x00"
         dest = BIPAddress(host="192.168.1.100", port=47808)
 
-        transport.send_unicast(npdu, dest)
+        transport.send_unicast(npdu, dest.encode())
 
         mock_udp.sendto.assert_called_once()
         _, addr = mock_udp.sendto.call_args[0]
@@ -669,8 +666,8 @@ class TestHandleBvlcResult:
             transport._handle_bvlc_result(b"\x00\x00")
         assert "BVLC-Result: 0" in caplog.text
 
-    def test_nonzero_result_code_logs_debug(self, caplog):
+    def test_nonzero_result_code_logs_warning(self, caplog):
         transport = BIPTransport()
-        with caplog.at_level(logging.DEBUG, logger="bac_py.transport.bip"):
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.bip"):
             transport._handle_bvlc_result(b"\x00\x30")
-        assert "BVLC-Result: 48" in caplog.text
+        assert "BVLC-Result NAK: code 48" in caplog.text

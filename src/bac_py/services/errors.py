@@ -24,6 +24,15 @@ class BACnetError(BACnetBaseError):
         error_code: ErrorCode,
         error_data: bytes = b"",
     ) -> None:
+        """Initialise a BACnet error.
+
+        Args:
+            error_class: The error class enumeration.
+            error_code: The error code enumeration.
+            error_data: Additional raw error data following the base
+                error class/code pair.  Currently preserved but not
+                decoded (extended error types are service-specific).
+        """
         self.error_class = error_class
         self.error_code = error_code
         self.error_data = error_data

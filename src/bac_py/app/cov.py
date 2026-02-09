@@ -10,17 +10,20 @@ from typing import TYPE_CHECKING, Any
 
 from bac_py.encoding.primitives import (
     encode_application_bit_string,
-    encode_application_enumerated,
-    encode_application_real,
-    encode_application_unsigned,
+    encode_property_value,
 )
 from bac_py.services.cov import BACnetPropertyValue, COVNotificationRequest
+from bac_py.services.errors import BACnetError
+from bac_py.types.constructed import StatusFlags
 from bac_py.types.enums import (
     ConfirmedServiceChoice,
+    ErrorClass,
+    ErrorCode,
     ObjectType,
     PropertyIdentifier,
     UnconfirmedServiceChoice,
 )
+from bac_py.types.primitives import BitString
 
 if TYPE_CHECKING:
     from bac_py.app.application import BACnetApplication
@@ -44,7 +47,23 @@ _ANALOG_TYPES = frozenset(
 
 @dataclass
 class COVSubscription:
-    """Tracks a single COV subscription."""
+    """Tracks a single COV subscription.
+
+    Attributes:
+        subscriber: BACnet address of the subscribing device.
+        process_id: Subscriber-assigned process identifier.
+        monitored_object: Object identifier being monitored.
+        confirmed: ``True`` for confirmed notifications, ``False`` for
+            unconfirmed.
+        lifetime: Subscription duration in seconds, or ``None`` for
+            indefinite subscriptions.
+        created_at: Monotonic timestamp when the subscription was created.
+        expiry_handle: Timer handle for subscription expiry, if any.
+        last_present_value: Last notified Present_Value, used for
+            change-of-value comparison (COV increment / equality).
+        last_status_flags: Last notified Status_Flags, used for
+            change detection (any bit change triggers notification).
+    """
 
     subscriber: BACnetAddress
     process_id: int
@@ -89,9 +108,6 @@ class COVManager:
         Raises:
             BACnetError: If the monitored object does not exist.
         """
-        from bac_py.services.errors import BACnetError
-        from bac_py.types.enums import ErrorClass, ErrorCode
-
         obj_id = request.monitored_object_identifier
         obj = object_db.get(obj_id)
         if obj is None:
@@ -335,29 +351,23 @@ class COVManager:
 
     @staticmethod
     def _encode_value(value: Any, obj_type: ObjectType) -> bytes:
-        """Encode a property value to application-tagged bytes for COV notification."""
-        import enum
+        """Encode a property value to application-tagged bytes for COV notification.
 
-        if isinstance(value, float):
-            return encode_application_real(value)
-        if isinstance(value, bool):
-            return encode_application_enumerated(int(value))
-        if isinstance(value, enum.IntEnum):
-            # BinaryPV, MultiState values, etc. are ENUMERATED per spec
-            return encode_application_enumerated(value)
-        if isinstance(value, int):
-            if obj_type in _ANALOG_TYPES:
-                return encode_application_real(float(value))
-            return encode_application_unsigned(value)
-        # Fallback: try as unsigned
-        return encode_application_unsigned(0)
+        Delegates to :func:`encode_property_value`.  For analog object
+        types, integers are encoded as REAL; otherwise the native type
+        encoding is used.  Returns raw application-tagged bytes suitable
+        for inclusion in a BACnetPropertyValue sequence.
+        """
+        return encode_property_value(value, int_as_real=obj_type in _ANALOG_TYPES)
 
     @staticmethod
     def _encode_status_flags(status_flags: Any) -> bytes:
-        """Encode StatusFlags to application-tagged bytes."""
-        from bac_py.types.constructed import StatusFlags
-        from bac_py.types.primitives import BitString
+        """Encode StatusFlags to application-tagged bytes.
 
+        Accepts a :class:`StatusFlags` dataclass, a raw
+        :class:`BitString`, or any other value (in which case
+        all-clear flags are returned as a fallback).
+        """
         if isinstance(status_flags, StatusFlags):
             return encode_application_bit_string(status_flags.to_bit_string())
         if isinstance(status_flags, BitString):

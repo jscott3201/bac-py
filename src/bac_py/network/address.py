@@ -37,10 +37,23 @@ class BIPAddress:
 
 @dataclass(frozen=True, slots=True)
 class BACnetAddress:
-    """A full BACnet address: optional network number + MAC address."""
+    """A full BACnet address: optional network number + MAC address.
+
+    Network numbers must be ``None`` (local), 0xFFFF (global broadcast),
+    or 1-65534 (valid remote network per Clause 6.2.1).
+    """
 
     network: int | None = None
     mac_address: bytes = b""
+
+    def __post_init__(self) -> None:
+        if (
+            self.network is not None
+            and self.network != 0xFFFF
+            and (self.network < 1 or self.network > 65534)
+        ):
+            msg = f"Network number must be 1-65534, got {self.network}"
+            raise ValueError(msg)
 
     @property
     def is_local(self) -> bool:

@@ -96,6 +96,10 @@ class ServiceRegistry:
     ) -> None:
         """Dispatch an incoming unconfirmed request to its handler.
 
+        If no handler is registered for *service_choice*, the request
+        is silently ignored (per Clause 5.4.2 — no reject/abort is
+        sent for unconfirmed services).
+
         Args:
             service_choice: Unconfirmed service choice number.
             request_data: Raw service request bytes.

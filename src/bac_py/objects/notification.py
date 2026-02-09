@@ -59,14 +59,10 @@ class NotificationClassObject(BACnetObject):
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
         # Notification_Class value defaults to instance number per spec
-        if PropertyIdentifier.NOTIFICATION_CLASS not in self._properties:
-            self._properties[PropertyIdentifier.NOTIFICATION_CLASS] = instance_number
+        self._set_default(PropertyIdentifier.NOTIFICATION_CLASS, instance_number)
         # Priority: 3-element list [to-offnormal, to-fault, to-normal]
-        if PropertyIdentifier.PRIORITY not in self._properties:
-            self._properties[PropertyIdentifier.PRIORITY] = [0, 0, 0]
+        self._set_default(PropertyIdentifier.PRIORITY, [0, 0, 0])
         # Ack_Required: 3-element list [to-offnormal, to-fault, to-normal]
-        if PropertyIdentifier.ACK_REQUIRED not in self._properties:
-            self._properties[PropertyIdentifier.ACK_REQUIRED] = [False, False, False]
+        self._set_default(PropertyIdentifier.ACK_REQUIRED, [False, False, False])
         # Recipient_List defaults empty
-        if PropertyIdentifier.RECIPIENT_LIST not in self._properties:
-            self._properties[PropertyIdentifier.RECIPIENT_LIST] = []
+        self._set_default(PropertyIdentifier.RECIPIENT_LIST, [])

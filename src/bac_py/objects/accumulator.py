@@ -1,4 +1,4 @@
-"""BACnet Accumulator object per ASHRAE 135-2016 Clause 12.1."""
+"""BACnet Accumulator object per ASHRAE 135-2016 Clause 12.2."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ from bac_py.types.enums import (
 
 @register_object_type
 class AccumulatorObject(BACnetObject):
-    """BACnet Accumulator object (Clause 12.1).
+    """BACnet Accumulator object (Clause 12.2).
 
     Represents a pulse-counting device such as an energy meter or
     water meter.  Present_Value accumulates counts; Scale and Prescale
@@ -113,7 +113,5 @@ class AccumulatorObject(BACnetObject):
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
         self._init_status_flags()
-        if PropertyIdentifier.SCALE not in self._properties:
-            self._properties[PropertyIdentifier.SCALE] = 1.0
-        if PropertyIdentifier.PRESCALE not in self._properties:
-            self._properties[PropertyIdentifier.PRESCALE] = 1
+        self._set_default(PropertyIdentifier.SCALE, 1.0)
+        self._set_default(PropertyIdentifier.PRESCALE, 1)

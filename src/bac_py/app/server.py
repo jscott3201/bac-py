@@ -7,18 +7,14 @@ work with the local ObjectDatabase and DeviceObject.
 
 from __future__ import annotations
 
-import enum
 import logging
 from typing import TYPE_CHECKING, Any
 
 from bac_py.encoding.primitives import (
-    encode_application_bit_string,
-    encode_application_character_string,
-    encode_application_enumerated,
     encode_application_object_id,
-    encode_application_real,
-    encode_application_unsigned,
+    encode_property_value,
 )
+from bac_py.network.address import GLOBAL_BROADCAST
 from bac_py.objects.base import create_object
 from bac_py.objects.file import FileObject
 from bac_py.services.cov import SubscribeCOVRequest
@@ -68,7 +64,7 @@ from bac_py.types.enums import (
     RejectReason,
     UnconfirmedServiceChoice,
 )
-from bac_py.types.primitives import BitString, ObjectIdentifier
+from bac_py.types.primitives import ObjectIdentifier
 
 if TYPE_CHECKING:
     from bac_py.app.application import BACnetApplication
@@ -82,33 +78,13 @@ logger = logging.getLogger(__name__)
 def _encode_property_value(value: Any) -> bytes:
     """Encode a property value to application-tagged bytes.
 
-    Handles the common Python types stored in BACnet objects.
-    Returns raw application-tagged encoded bytes suitable for
-    inclusion in a ReadPropertyACK property-value field.
+    Thin wrapper around ``encode_property_value`` that converts
+    TypeError to BACnetError for the server error response path.
     """
-    if isinstance(value, ObjectIdentifier):
-        return encode_application_object_id(value.object_type, value.instance_number)
-    if isinstance(value, BitString):
-        return encode_application_bit_string(value)
-    if isinstance(value, str):
-        return encode_application_character_string(value)
-    if isinstance(value, bool):
-        # Must check bool before int since bool is a subclass of int
-        return encode_application_enumerated(int(value))
-    if isinstance(value, enum.IntEnum):
-        # Must check IntEnum before int since IntEnum is a subclass of int
-        return encode_application_enumerated(value)
-    if isinstance(value, float):
-        return encode_application_real(value)
-    if isinstance(value, int):
-        return encode_application_unsigned(value)
-    if isinstance(value, list):
-        # Encode list of ObjectIdentifiers (e.g., object-list)
-        buf = bytearray()
-        for item in value:
-            buf.extend(_encode_property_value(item))
-        return bytes(buf)
-    raise BACnetError(ErrorClass.PROPERTY, ErrorCode.OTHER)
+    try:
+        return encode_property_value(value)
+    except TypeError:
+        raise BACnetError(ErrorClass.PROPERTY, ErrorCode.OTHER) from None
 
 
 class DefaultServerHandlers:
@@ -125,6 +101,15 @@ class DefaultServerHandlers:
         object_db: ObjectDatabase,
         device: DeviceObject,
     ) -> None:
+        """Initialise default server handlers.
+
+        Args:
+            app: The parent application (used for service registration
+                and sending unconfirmed responses).
+            object_db: Object database to serve property reads/writes from.
+            device: The local device object (used for Who-Is matching
+                and wildcard resolution).
+        """
         self._app = app
         self._db = object_db
         self._device = device
@@ -224,10 +209,7 @@ class DefaultServerHandlers:
         """
         request = ReadPropertyRequest.decode(data)
 
-        # Wildcard device instance 4194303 resolves to local device (Clause 15.5.2)
-        obj_id = request.object_identifier
-        if obj_id.object_type == ObjectType.DEVICE and obj_id.instance_number == 0x3FFFFF:
-            obj_id = self._device.object_identifier
+        obj_id = self._resolve_object_id(request.object_identifier)
 
         # Look up the object
         obj = self._db.get(obj_id)
@@ -273,10 +255,7 @@ class DefaultServerHandlers:
         """
         request = WritePropertyRequest.decode(data)
 
-        # Wildcard device instance 4194303 resolves to local device (Clause 15.9)
-        obj_id = request.object_identifier
-        if obj_id.object_type == ObjectType.DEVICE and obj_id.instance_number == 0x3FFFFF:
-            obj_id = self._device.object_identifier
+        obj_id = self._resolve_object_id(request.object_identifier)
 
         # Look up the object
         obj = self._db.get(obj_id)
@@ -359,7 +338,7 @@ class DefaultServerHandlers:
         ):
             return
 
-        # Send I-Am response
+        # Send I-Am response (per Clause 16.10.2, always send to global broadcast)
         config = self._app.config
         segmentation = self._device.read_property(PropertyIdentifier.SEGMENTATION_SUPPORTED)
         iam = IAmRequest(
@@ -369,7 +348,7 @@ class DefaultServerHandlers:
             vendor_id=config.vendor_id,
         )
         self._app.unconfirmed_request(
-            destination=source,
+            destination=GLOBAL_BROADCAST,
             service_choice=UnconfirmedServiceChoice.I_AM,
             service_data=iam.encode(),
         )
@@ -545,7 +524,7 @@ class DefaultServerHandlers:
             for pv in spec.list_of_properties:
                 await obj.async_write_property(
                     pv.property_identifier,
-                    pv.property_value,
+                    pv.value,
                     pv.priority,
                     pv.property_array_index,
                 )

@@ -163,15 +163,13 @@ class TestSourceValidation:
             encode_npdu(npdu)
 
     def test_snet_zero_raises(self):
-        src = BACnetAddress(network=0, mac_address=b"\x01")
-        npdu = NPDU(source=src, apdu=b"\x01")
-        with pytest.raises(ValueError, match="SNET cannot be 0"):
-            encode_npdu(npdu)
+        with pytest.raises(ValueError, match="Network number must be 1-65534"):
+            BACnetAddress(network=0, mac_address=b"\x01")
 
     def test_snet_none_raises(self):
         src = BACnetAddress(network=None, mac_address=b"\x01")
         npdu = NPDU(source=src, apdu=b"\x01")
-        with pytest.raises(ValueError, match="SNET cannot be 0"):
+        with pytest.raises(ValueError, match="Source network must be set"):
             encode_npdu(npdu)
 
     def test_slen_zero_raises(self):

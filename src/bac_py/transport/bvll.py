@@ -58,8 +58,15 @@ def decode_bvll(data: memoryview | bytes) -> BvllMessage:
         Decoded BvllMessage.
 
     Raises:
-        ValueError: If BVLC type byte is invalid.
+        ValueError: If data is too short, BVLC type byte is invalid,
+            declared length is inconsistent, or a function-specific
+            payload (e.g. Forwarded-NPDU originating address) is
+            truncated.
     """
+    if len(data) < BVLL_HEADER_LENGTH:
+        msg = f"BVLL data too short: need at least {BVLL_HEADER_LENGTH} bytes, got {len(data)}"
+        raise ValueError(msg)
+
     if isinstance(data, bytes):
         data = memoryview(data)
 
@@ -75,6 +82,9 @@ def decode_bvll(data: memoryview | bytes) -> BvllMessage:
         raise ValueError(msg)
 
     if function == BvlcFunction.FORWARDED_NPDU:
+        if length < BVLL_HEADER_LENGTH + 6:
+            msg = f"Forwarded-NPDU too short: need at least {BVLL_HEADER_LENGTH + 6} bytes, got {length}"
+            raise ValueError(msg)
         orig_addr = BIPAddress.decode(data[4:10])
         return BvllMessage(
             function=function,

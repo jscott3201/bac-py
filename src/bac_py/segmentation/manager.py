@@ -35,6 +35,7 @@ class SegmentationError(Exception):
 class SegmentAction(Enum):
     """Action the receiver should take after processing a segment."""
 
+    CONTINUE = "continue"
     SEND_ACK = "send_ack"
     RESEND_LAST_ACK = "resend"
     COMPLETE = "complete"
@@ -235,6 +236,11 @@ class SegmentSender:
     def _seq_to_idx(self, seq: int) -> int:
         """Map an 8-bit sequence number to the nearest absolute index.
 
+        Sequence numbers wrap at 256 (``seq = idx & 0xFF``), so when the
+        total segment count exceeds 255 multiple indices share the same
+        sequence number.  This method resolves the ambiguity by searching
+        forward from a lower bound based on the current window position.
+
         Finds the index at or above ``_window_start_idx - actual_window_size``
         (to handle the case where the ACK references the last segment in the
         previous window) where ``idx & 0xFF == seq``.
@@ -270,6 +276,7 @@ class SegmentReceiver:
     service_choice: int = 0
     _final_idx: int | None = None
     _last_ack_seq: int = 0
+    _window_start_idx: int = 0
 
     @classmethod
     def create(
@@ -301,6 +308,7 @@ class SegmentReceiver:
             service_choice=service_choice,
             _final_idx=0 if not more_follows else None,
             _last_ack_seq=0,
+            _window_start_idx=1,
         )
         return receiver
 
@@ -312,6 +320,10 @@ class SegmentReceiver:
     ) -> tuple[SegmentAction, int]:
         """Process a received segment.
 
+        Per Clause 5.4, SegmentACKs are sent at window boundaries
+        (when the window is full) or when the transfer is complete,
+        not for every individual segment.
+
         Args:
             seq_num: 8-bit sequence number from the PDU.
             data: Segment payload data.
@@ -320,6 +332,7 @@ class SegmentReceiver:
         Returns:
             ``(action, ack_sequence_number)`` indicating what the caller
             should do next. For ABORT, ack_sequence_number is -1.
+            CONTINUE means the segment was stored but no ACK is needed yet.
         """
         expected_seq = self._expected_idx & 0xFF
 
@@ -338,8 +351,16 @@ class SegmentReceiver:
             self._last_ack_seq = seq_num
 
             if self.is_complete:
+                self._window_start_idx = self._expected_idx
                 return (SegmentAction.COMPLETE, seq_num)
-            return (SegmentAction.SEND_ACK, seq_num)
+
+            # ACK at window boundary: when contiguous reception fills the window
+            window_end = self._window_start_idx + self.actual_window_size
+            if self._expected_idx >= window_end:
+                self._window_start_idx = self._expected_idx
+                return (SegmentAction.SEND_ACK, seq_num)
+
+            return (SegmentAction.CONTINUE, seq_num)
 
         if duplicate_in_window(
             seq_num, expected_seq, self.actual_window_size, self.proposed_window_size

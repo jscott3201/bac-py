@@ -1,7 +1,7 @@
 """Tests for object management services."""
 
 from bac_py.encoding.primitives import encode_application_real
-from bac_py.services.cov import BACnetPropertyValue
+from bac_py.services.common import BACnetPropertyValue
 from bac_py.services.object_mgmt import CreateObjectRequest, DeleteObjectRequest
 from bac_py.types.enums import ObjectType, PropertyIdentifier
 from bac_py.types.primitives import ObjectIdentifier

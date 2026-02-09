@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from bac_py.types.primitives import BitString
 
 
+@dataclass(frozen=True, slots=True)
 class StatusFlags:
-    """BACnet StatusFlags bit string (Clause 12).
+    """BACnet StatusFlags bit string (Clause 12.50, BACnetStatusFlags).
 
     Four Boolean flags indicating the "health" of an object:
       Bit 0: IN_ALARM
@@ -17,20 +19,10 @@ class StatusFlags:
       Bit 3: OUT_OF_SERVICE
     """
 
-    __slots__ = ("fault", "in_alarm", "out_of_service", "overridden")
-
-    def __init__(
-        self,
-        *,
-        in_alarm: bool = False,
-        fault: bool = False,
-        overridden: bool = False,
-        out_of_service: bool = False,
-    ) -> None:
-        self.in_alarm = in_alarm
-        self.fault = fault
-        self.overridden = overridden
-        self.out_of_service = out_of_service
+    in_alarm: bool = False
+    fault: bool = False
+    overridden: bool = False
+    out_of_service: bool = False
 
     def to_bit_string(self) -> BitString:
         """Encode as a BACnet BitString (4 significant bits)."""
@@ -66,16 +58,6 @@ class StatusFlags:
             fault=data.get("fault", False),
             overridden=data.get("overridden", False),
             out_of_service=data.get("out_of_service", False),
-        )
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, StatusFlags):
-            return NotImplemented
-        return (
-            self.in_alarm == other.in_alarm
-            and self.fault == other.fault
-            and self.overridden == other.overridden
-            and self.out_of_service == other.out_of_service
         )
 
     def __repr__(self) -> str:

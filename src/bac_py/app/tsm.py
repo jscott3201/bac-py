@@ -89,6 +89,19 @@ class ClientTSM:
         segment_timeout: float = 2.0,
         proposed_window_size: int = 16,
     ) -> None:
+        """Initialise the client TSM.
+
+        Args:
+            network: Network sender used for transmitting APDUs.
+            apdu_timeout: Seconds to wait for a response before retry.
+            apdu_retries: Maximum number of transmission retries.
+            max_apdu_length: Maximum APDU length accepted by this device
+                (bytes).
+            max_segments: Maximum segments this device can accept, or
+                ``None`` for unlimited.
+            segment_timeout: Seconds to wait between segments.
+            proposed_window_size: Proposed segmentation window size (1-127).
+        """
         self._network = network
         self._timeout = apdu_timeout
         self._retries = apdu_retries
@@ -165,6 +178,8 @@ class ClientTSM:
         key = (source, invoke_id)
         txn = self._transactions.get(key)
         if txn and not txn.future.done():
+            if txn.state != ClientTransactionState.AWAIT_CONFIRMATION:
+                return
             self._cancel_timeout(txn)
             txn.future.set_result(b"")
 
@@ -179,6 +194,8 @@ class ClientTSM:
         key = (source, invoke_id)
         txn = self._transactions.get(key)
         if txn and not txn.future.done():
+            if txn.state != ClientTransactionState.AWAIT_CONFIRMATION:
+                return
             self._cancel_timeout(txn)
             txn.future.set_result(data)
 
@@ -310,6 +327,8 @@ class ClientTSM:
                 txn.future.set_result(seg_receiver.reassemble())
             case SegmentAction.SEND_ACK:
                 self._send_client_segment_ack(txn, seq=ack_seq, negative=False)
+                self._start_segment_timeout(txn)
+            case SegmentAction.CONTINUE:
                 self._start_segment_timeout(txn)
             case SegmentAction.RESEND_LAST_ACK:
                 self._send_client_segment_ack(txn, seq=ack_seq, negative=False)
@@ -457,7 +476,14 @@ class ClientTSM:
                 txn.retry_count,
                 self._retries,
             )
-            self._send_confirmed_request(txn)
+            # Retry using the same method as the original request.
+            # If the request data exceeds the max segment payload it
+            # must be re-sent as a segmented request.
+            max_payload = compute_max_segment_payload(self._max_apdu_length, "confirmed_request")
+            if len(txn.request_data) > max_payload:
+                self._send_segmented_request(txn)
+            else:
+                self._send_confirmed_request(txn)
         else:
             txn.future.set_exception(
                 BACnetTimeoutError(f"No response after {self._retries} retries")
@@ -544,6 +570,19 @@ class ServerTSM:
         max_segments: int | None = None,
         proposed_window_size: int = 16,
     ) -> None:
+        """Initialise the server TSM.
+
+        Args:
+            network: Network sender used for transmitting responses.
+            request_timeout: Seconds before a server transaction expires.
+            apdu_retries: Maximum number of segment retries.
+            segment_timeout: Seconds to wait between segments.
+            max_apdu_length: Maximum APDU length this device can send
+                (bytes).
+            max_segments: Maximum segments this device can send, or
+                ``None`` for unlimited.
+            proposed_window_size: Proposed segmentation window size (1-127).
+        """
         self._network = network
         self._timeout = request_timeout
         self._retries = apdu_retries
@@ -655,6 +694,9 @@ class ServerTSM:
                 self._send_server_segment_ack(txn, ack_seq, negative=False)
                 self._restart_segment_timeout(txn)
                 return (txn, None)
+            case SegmentAction.CONTINUE:
+                self._restart_segment_timeout(txn)
+                return (txn, None)
             case SegmentAction.RESEND_LAST_ACK:
                 self._send_server_segment_ack(txn, ack_seq, negative=False)
                 self._restart_segment_timeout(txn)
@@ -698,6 +740,19 @@ class ServerTSM:
 
         txn.segment_sender = sender
         txn.state = ServerTransactionState.SEGMENTED_RESPONSE
+        # Cache the full non-segmented ComplexACK for retransmission detection.
+        # If the client retransmits the request after all segments are sent,
+        # the server resends this cached response.
+        full_ack = ComplexAckPDU(
+            segmented=False,
+            more_follows=False,
+            invoke_id=txn.invoke_id,
+            sequence_number=None,
+            proposed_window_size=None,
+            service_choice=service_choice,
+            service_ack=response_data,
+        )
+        txn.cached_response = encode_apdu(full_ack)
         self._fill_and_send_response_window(txn)
 
     def handle_segment_ack_for_response(

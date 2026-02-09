@@ -14,6 +14,7 @@ from bac_py.encoding.primitives import (
     encode_unsigned,
 )
 from bac_py.encoding.tags import (
+    as_memoryview,
     decode_tag,
     encode_closing_tag,
     encode_opening_tag,
@@ -52,8 +53,7 @@ class ConfirmedPrivateTransferRequest:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> Self:
         """Decode ConfirmedPrivateTransferRequest from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 
@@ -85,7 +85,9 @@ class ConfirmedPrivateTransferRequest:
 class ConfirmedPrivateTransferACK:
     """ConfirmedPrivateTransfer-ACK (Clause 16.2.1.2).
 
-    Same structure as the request.
+    Uses the same wire format as the request, but the context-2
+    tagged block carries vendor-defined *result* data rather than
+    request *service-parameters*.
     """
 
     vendor_id: int
@@ -106,8 +108,7 @@ class ConfirmedPrivateTransferACK:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ConfirmedPrivateTransferACK:
         """Decode ConfirmedPrivateTransferACK from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import enum
 import struct
 
 from bac_py.encoding.tags import TagClass, encode_tag
-from bac_py.types.primitives import BACnetDate, BACnetTime, BitString
+from bac_py.types.enums import ObjectType
+from bac_py.types.primitives import BACnetDate, BACnetTime, BitString, ObjectIdentifier
 
 # Application tag numbers for primitive types
 _TAG_NULL = 0
@@ -138,6 +140,9 @@ def decode_character_string(data: memoryview | bytes) -> str:
 
     The first byte is the character set identifier.
     """
+    if len(data) < 1:
+        msg = "CharacterString data too short: need at least 1 byte for charset"
+        raise ValueError(msg)
     charset = data[0]
     encoding = _CHARSET_DECODERS.get(charset)
     if encoding is None:
@@ -169,6 +174,9 @@ def encode_bit_string(value: BitString) -> bytes:
 
 def decode_bit_string(data: memoryview | bytes) -> BitString:
     """Decode a bit string from contents octets."""
+    if len(data) < 1:
+        msg = "BitString data too short: need at least 1 byte for unused-bits count"
+        raise ValueError(msg)
     unused_bits = data[0]
     return BitString(bytes(data[1:]), unused_bits)
 
@@ -184,6 +192,9 @@ def encode_date(date: BACnetDate) -> bytes:
 
 def decode_date(data: memoryview | bytes) -> BACnetDate:
     """Decode a BACnet date from 4 bytes."""
+    if len(data) < 4:
+        msg = f"Date data too short: need 4 bytes, got {len(data)}"
+        raise ValueError(msg)
     year = 0xFF if data[0] == 0xFF else data[0] + 1900
     return BACnetDate(year, data[1], data[2], data[3])
 
@@ -198,6 +209,9 @@ def encode_time(time: BACnetTime) -> bytes:
 
 def decode_time(data: memoryview | bytes) -> BACnetTime:
     """Decode a BACnet time from 4 bytes."""
+    if len(data) < 4:
+        msg = f"Time data too short: need 4 bytes, got {len(data)}"
+        raise ValueError(msg)
     return BACnetTime(data[0], data[1], data[2], data[3])
 
 
@@ -205,9 +219,12 @@ def decode_time(data: memoryview | bytes) -> BACnetTime:
 
 
 def encode_object_identifier(obj_type: int, instance: int) -> bytes:
-    """Encode a BACnet object identifier to 4 bytes."""
-    value = (obj_type << 22) | (instance & 0x3FFFFF)
-    return value.to_bytes(4, "big")
+    """Encode a BACnet object identifier to 4 bytes.
+
+    Object type is a 10-bit field (0-1023). Instance is a 22-bit field
+    (0-4194303). Delegates to ObjectIdentifier.encode().
+    """
+    return ObjectIdentifier(ObjectType(obj_type), instance).encode()
 
 
 def decode_object_identifier(data: memoryview | bytes) -> tuple[int, int]:
@@ -216,6 +233,9 @@ def decode_object_identifier(data: memoryview | bytes) -> tuple[int, int]:
     Returns:
         Tuple of (object_type, instance_number).
     """
+    if len(data) < 4:
+        msg = f"ObjectIdentifier data too short: need 4 bytes, got {len(data)}"
+        raise ValueError(msg)
     value = int.from_bytes(data[:4], "big")
     return (value >> 22, value & 0x3FFFFF)
 
@@ -334,7 +354,59 @@ def encode_application_object_id(obj_type: int, instance: int) -> bytes:
     return encode_application_tagged(_TAG_OBJECT_IDENTIFIER, data)
 
 
+def encode_context_object_id(tag_number: int, obj_id: ObjectIdentifier) -> bytes:
+    """Encode an ObjectIdentifier with a context-specific tag."""
+    return encode_context_tagged(tag_number, obj_id.encode())
+
+
 def encode_application_bit_string(value: BitString) -> bytes:
     """Encode an application-tagged Bit String."""
     data = encode_bit_string(value)
     return encode_application_tagged(_TAG_BIT_STRING, data)
+
+
+def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
+    """Encode a Python value to application-tagged bytes.
+
+    Handles the common types stored in BACnet object properties.
+
+    Args:
+        value: The value to encode.
+        int_as_real: If True, encode plain ints as Real instead of Unsigned
+            (used for analog object types where Present_Value is Real).
+
+    Returns:
+        Application-tagged encoded bytes.
+
+    Raises:
+        TypeError: If the value type is not supported.
+    """
+    if isinstance(value, ObjectIdentifier):
+        return encode_application_object_id(value.object_type, value.instance_number)
+    if isinstance(value, BitString):
+        return encode_application_bit_string(value)
+    if isinstance(value, str):
+        return encode_application_character_string(value)
+    if isinstance(value, bool):
+        # Must check bool before int since bool is a subclass of int
+        return encode_application_enumerated(int(value))
+    if isinstance(value, enum.IntEnum):
+        # Must check IntEnum before int since IntEnum is a subclass of int
+        return encode_application_enumerated(value)
+    if isinstance(value, float):
+        return encode_application_real(value)
+    if isinstance(value, int):
+        if int_as_real:
+            return encode_application_real(float(value))
+        return encode_application_unsigned(value)
+    if isinstance(value, bytes):
+        # Already-encoded application-tagged bytes (pass-through)
+        return value
+    if isinstance(value, list):
+        buf = bytearray()
+        for item in value:
+            buf.extend(encode_property_value(item, int_as_real=int_as_real))
+        return bytes(buf)
+
+    msg = f"Cannot encode value of type {type(value).__name__}"
+    raise TypeError(msg)

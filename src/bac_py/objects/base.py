@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from bac_py.services.errors import BACnetError
 from bac_py.types.constructed import StatusFlags
@@ -79,12 +83,19 @@ def standard_properties() -> dict[PropertyIdentifier, PropertyDefinition]:
     }
 
 
-def status_properties() -> dict[PropertyIdentifier, PropertyDefinition]:
+def status_properties(
+    *,
+    event_state_required: bool = True,
+    reliability_required: bool = False,
+    reliability_default: Reliability | None = None,
+    include_out_of_service: bool = True,
+) -> dict[PropertyIdentifier, PropertyDefinition]:
     """Status monitoring properties shared by most objects (Clause 12).
 
-    Includes Status_Flags, Event_State, Reliability, and Out_Of_Service.
+    Includes Status_Flags, Event_State, Reliability, and optionally
+    Out_Of_Service.  Keyword arguments allow per-object-type overrides.
     """
-    return {
+    props: dict[PropertyIdentifier, PropertyDefinition] = {
         PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
             PropertyIdentifier.STATUS_FLAGS,
             StatusFlags,
@@ -95,23 +106,26 @@ def status_properties() -> dict[PropertyIdentifier, PropertyDefinition]:
             PropertyIdentifier.EVENT_STATE,
             EventState,
             PropertyAccess.READ_ONLY,
-            required=True,
+            required=event_state_required,
             default=EventState.NORMAL,
         ),
         PropertyIdentifier.RELIABILITY: PropertyDefinition(
             PropertyIdentifier.RELIABILITY,
             Reliability,
             PropertyAccess.READ_ONLY,
-            required=False,
+            required=reliability_required,
+            default=reliability_default,
         ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
+    }
+    if include_out_of_service:
+        props[PropertyIdentifier.OUT_OF_SERVICE] = PropertyDefinition(
             PropertyIdentifier.OUT_OF_SERVICE,
             bool,
             PropertyAccess.READ_WRITE,
             required=True,
             default=False,
-        ),
-    }
+        )
+    return props
 
 
 def commandable_properties(
@@ -168,10 +182,12 @@ class BACnetObject:
         self._priority_array: list[Any | None] | None = None
         self._write_lock = asyncio.Lock()
 
-        # Set defaults from property definitions
+        # Set defaults from property definitions.
+        # Use copy.copy() to prevent mutable defaults (e.g. lists) from
+        # being shared across instances of the same object type.
         for prop_id, prop_def in self.PROPERTY_DEFINITIONS.items():
             if prop_def.default is not None:
-                self._properties[prop_id] = prop_def.default
+                self._properties[prop_id] = copy.copy(prop_def.default)
 
         # Set object-identifier and object-type (always required)
         self._properties[PropertyIdentifier.OBJECT_IDENTIFIER] = self._object_id
@@ -189,15 +205,18 @@ class BACnetObject:
 
     def _init_status_flags(self) -> None:
         """Initialize Status_Flags to default if not already set."""
-        if PropertyIdentifier.STATUS_FLAGS not in self._properties:
-            self._properties[PropertyIdentifier.STATUS_FLAGS] = StatusFlags()
+        self._set_default(PropertyIdentifier.STATUS_FLAGS, StatusFlags())
+
+    def _set_default(self, prop_id: PropertyIdentifier, value: Any) -> None:
+        """Set a property value only if it hasn't been set yet."""
+        if prop_id not in self._properties:
+            self._properties[prop_id] = value
 
     def _init_commandable(self, relinquish_default: Any) -> None:
         """Initialize the priority array for a commandable object."""
         self._priority_array = [None] * 16
         self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
-        if PropertyIdentifier.RELINQUISH_DEFAULT not in self._properties:
-            self._properties[PropertyIdentifier.RELINQUISH_DEFAULT] = relinquish_default
+        self._set_default(PropertyIdentifier.RELINQUISH_DEFAULT, relinquish_default)
 
     def read_property(
         self,
@@ -222,12 +241,15 @@ class BACnetObject:
         if prop_id == PropertyIdentifier.CURRENT_COMMAND_PRIORITY:
             return self._get_current_command_priority()
 
+        if prop_id == PropertyIdentifier.STATUS_FLAGS:
+            return self._get_status_flags()
+
         if prop_id not in self.PROPERTY_DEFINITIONS:
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
 
         value = self._properties.get(prop_id)
         if value is None and self.PROPERTY_DEFINITIONS[prop_id].required:
-            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.VALUE_NOT_INITIALIZED)
 
         if array_index is not None:
             if isinstance(value, (list, tuple)):
@@ -338,6 +360,41 @@ class BACnetObject:
                 return i + 1
         return None
 
+    def _get_status_flags(self) -> StatusFlags:
+        """Return StatusFlags computed from related properties (Clause 12).
+
+        IN_ALARM is True when Event_State is not NORMAL.
+        FAULT is True when Reliability is present and not NO_FAULT_DETECTED.
+        OVERRIDDEN is preserved from the stored value (hardware override).
+        OUT_OF_SERVICE is read from the stored property.
+
+        Raises UNKNOWN_PROPERTY if the object doesn't define Status_Flags.
+        """
+        if PropertyIdentifier.STATUS_FLAGS not in self.PROPERTY_DEFINITIONS:
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
+
+        # IN_ALARM: Event_State != NORMAL
+        event_state = self._properties.get(PropertyIdentifier.EVENT_STATE)
+        in_alarm = event_state is not None and event_state != EventState.NORMAL
+
+        # FAULT: Reliability present and not NO_FAULT_DETECTED
+        reliability = self._properties.get(PropertyIdentifier.RELIABILITY)
+        fault = reliability is not None and reliability != Reliability.NO_FAULT_DETECTED
+
+        # OUT_OF_SERVICE: direct property read
+        out_of_service = bool(self._properties.get(PropertyIdentifier.OUT_OF_SERVICE, False))
+
+        # OVERRIDDEN: preserve stored value (hardware override, not computable)
+        stored = self._properties.get(PropertyIdentifier.STATUS_FLAGS)
+        overridden = stored.overridden if isinstance(stored, StatusFlags) else False
+
+        return StatusFlags(
+            in_alarm=in_alarm,
+            fault=fault,
+            overridden=overridden,
+            out_of_service=out_of_service,
+        )
+
     def _is_commandable(self, prop_id: PropertyIdentifier) -> bool:
         """Check if a property supports command prioritization (Clause 19.2)."""
         return prop_id == PropertyIdentifier.PRESENT_VALUE and self._priority_array is not None
@@ -351,11 +408,16 @@ class BACnetObject:
         """Write to a commandable property using the priority array.
 
         BACnet priority 1 = highest, 16 = lowest.
-        Priority 6 is reserved for Minimum On/Off (Clause 19.2.3).
+        Priority 6 is reserved for Minimum On/Off time objects
+        (Clause 19.2.3) — writes at priority 6 are rejected when
+        the object defines Minimum_On_Time or Minimum_Off_Time.
         """
         if priority < 1 or priority > 16:
             raise BACnetError(ErrorClass.SERVICES, ErrorCode.PARAMETER_OUT_OF_RANGE)
-        if priority == 6:
+        if priority == 6 and (
+            PropertyIdentifier.MINIMUM_ON_TIME in self.PROPERTY_DEFINITIONS
+            or PropertyIdentifier.MINIMUM_OFF_TIME in self.PROPERTY_DEFINITIONS
+        ):
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.WRITE_ACCESS_DENIED)
 
         if self._priority_array is None:
@@ -432,7 +494,18 @@ class ObjectDatabase:
         return list(self._objects.keys())
 
     def __len__(self) -> int:
+        """Return the number of objects in the database."""
         return len(self._objects)
+
+    def __iter__(self) -> Iterator[ObjectIdentifier]:
+        return iter(self._objects)
+
+    def __contains__(self, object_id: object) -> bool:
+        return object_id in self._objects
+
+    def values(self) -> Iterator[BACnetObject]:
+        """Iterate over all objects in the database."""
+        return iter(self._objects.values())
 
 
 # Object type registry for factory creation

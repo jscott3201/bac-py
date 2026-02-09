@@ -7,12 +7,14 @@ from dataclasses import dataclass
 from bac_py.encoding.primitives import (
     decode_object_identifier,
     decode_unsigned,
+    encode_application_enumerated,
+    encode_context_object_id,
     encode_context_tagged,
-    encode_object_identifier,
     encode_unsigned,
 )
 from bac_py.encoding.tags import (
     TagClass,
+    as_memoryview,
     decode_tag,
     encode_closing_tag,
     encode_opening_tag,
@@ -52,8 +54,7 @@ class PropertyReference:
         Returns:
             Tuple of (PropertyReference, new offset).
         """
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         # [0] property-identifier
         tag, offset = decode_tag(data, offset)
@@ -102,15 +103,7 @@ class ReadAccessSpecification:
         """Encode read access specification."""
         buf = bytearray()
         # [0] object-identifier
-        buf.extend(
-            encode_context_tagged(
-                0,
-                encode_object_identifier(
-                    self.object_identifier.object_type,
-                    self.object_identifier.instance_number,
-                ),
-            )
-        )
+        buf.extend(encode_context_object_id(0, self.object_identifier))
         # [1] SEQUENCE OF BACnetPropertyReference
         buf.extend(encode_opening_tag(1))
         for ref in self.list_of_property_references:
@@ -125,8 +118,7 @@ class ReadAccessSpecification:
         Returns:
             Tuple of (ReadAccessSpecification, new offset).
         """
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         # [0] object-identifier
         tag, offset = decode_tag(data, offset)
@@ -177,8 +169,7 @@ class ReadPropertyMultipleRequest:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ReadPropertyMultipleRequest:
         """Decode ReadPropertyMultiple-Request from service request bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
         specs: list[ReadAccessSpecification] = []
@@ -229,8 +220,6 @@ class ReadResultElement:
             # BACnetError ::= SEQUENCE { error-class ENUMERATED, error-code ENUMERATED }
             error_class, error_code = self.property_access_error
             buf.extend(encode_opening_tag(5))
-            from bac_py.encoding.primitives import encode_application_enumerated
-
             buf.extend(encode_application_enumerated(error_class))
             buf.extend(encode_application_enumerated(error_code))
             buf.extend(encode_closing_tag(5))
@@ -239,8 +228,7 @@ class ReadResultElement:
     @classmethod
     def decode(cls, data: memoryview | bytes, offset: int) -> tuple[ReadResultElement, int]:
         """Decode a single result element from buffer at offset."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         # [2] property-identifier
         tag, offset = decode_tag(data, offset)
@@ -312,15 +300,7 @@ class ReadAccessResult:
         """Encode read access result."""
         buf = bytearray()
         # [0] object-identifier
-        buf.extend(
-            encode_context_tagged(
-                0,
-                encode_object_identifier(
-                    self.object_identifier.object_type,
-                    self.object_identifier.instance_number,
-                ),
-            )
-        )
+        buf.extend(encode_context_object_id(0, self.object_identifier))
         # [1] SEQUENCE OF results
         buf.extend(encode_opening_tag(1))
         for elem in self.list_of_results:
@@ -331,8 +311,7 @@ class ReadAccessResult:
     @classmethod
     def decode(cls, data: memoryview | bytes, offset: int) -> tuple[ReadAccessResult, int]:
         """Decode read access result from buffer at offset."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         # [0] object-identifier
         tag, offset = decode_tag(data, offset)
@@ -382,8 +361,7 @@ class ReadPropertyMultipleACK:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ReadPropertyMultipleACK:
         """Decode ReadPropertyMultiple-ACK from service ACK bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
         results: list[ReadAccessResult] = []

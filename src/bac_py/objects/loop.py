@@ -182,9 +182,6 @@ class LoopObject(BACnetObject):
         super().__init__(instance_number, **initial_properties)
         self._init_status_flags()
         # Object property references default to empty if not provided
-        if PropertyIdentifier.CONTROLLED_VARIABLE_REFERENCE not in self._properties:
-            self._properties[PropertyIdentifier.CONTROLLED_VARIABLE_REFERENCE] = None
-        if PropertyIdentifier.MANIPULATED_VARIABLE_REFERENCE not in self._properties:
-            self._properties[PropertyIdentifier.MANIPULATED_VARIABLE_REFERENCE] = None
-        if PropertyIdentifier.SETPOINT_REFERENCE not in self._properties:
-            self._properties[PropertyIdentifier.SETPOINT_REFERENCE] = None
+        self._set_default(PropertyIdentifier.CONTROLLED_VARIABLE_REFERENCE, None)
+        self._set_default(PropertyIdentifier.MANIPULATED_VARIABLE_REFERENCE, None)
+        self._set_default(PropertyIdentifier.SETPOINT_REFERENCE, None)

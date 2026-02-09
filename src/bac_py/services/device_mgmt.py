@@ -21,7 +21,7 @@ from bac_py.encoding.primitives import (
     encode_enumerated,
     encode_unsigned,
 )
-from bac_py.encoding.tags import TagClass, decode_tag
+from bac_py.encoding.tags import TagClass, as_memoryview, decode_optional_context, decode_tag
 from bac_py.types.enums import EnableDisable, ReinitializedState
 
 if TYPE_CHECKING:
@@ -61,8 +61,7 @@ class DeviceCommunicationControlRequest:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> DeviceCommunicationControlRequest:
         """Decode DeviceCommunicationControl-Request from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
         time_duration = None
@@ -80,11 +79,7 @@ class DeviceCommunicationControlRequest:
         offset = new_offset + tag.length
 
         # [2] password (optional)
-        if offset < len(data):
-            tag, new_offset = decode_tag(data, offset)
-            if tag.cls == TagClass.CONTEXT and tag.number == 2:
-                password = decode_character_string(data[new_offset : new_offset + tag.length])
-                offset = new_offset + tag.length
+        password, offset = decode_optional_context(data, offset, 2, decode_character_string)
 
         return cls(
             enable_disable=enable_disable,
@@ -121,8 +116,7 @@ class ReinitializeDeviceRequest:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ReinitializeDeviceRequest:
         """Decode ReinitializeDevice-Request from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 
@@ -134,11 +128,7 @@ class ReinitializeDeviceRequest:
         offset += tag.length
 
         # [1] password (optional)
-        password = None
-        if offset < len(data):
-            tag, new_offset = decode_tag(data, offset)
-            if tag.cls == TagClass.CONTEXT and tag.number == 1:
-                password = decode_character_string(data[new_offset : new_offset + tag.length])
+        password, _ = decode_optional_context(data, offset, 1, decode_character_string)
 
         return cls(
             reinitialized_state=reinitialized_state,
@@ -173,8 +163,7 @@ class TimeSynchronizationRequest:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> Self:
         """Decode TimeSynchronization-Request from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 

@@ -16,9 +16,9 @@ from bac_py.services.read_range import (
     ReadRangeACK,
     ResultFlags,
 )
+from bac_py.services.common import BACnetPropertyValue
 from bac_py.services.who_is import IAmRequest
 from bac_py.services.write_property_multiple import (
-    PropertyValue,
     WriteAccessSpecification,
 )
 from bac_py.types.enums import (
@@ -269,9 +269,9 @@ class TestBACnetClient:
                     WriteAccessSpecification(
                         object_identifier=ObjectIdentifier(ObjectType.ANALOG_OUTPUT, 1),
                         list_of_properties=[
-                            PropertyValue(
+                            BACnetPropertyValue(
                                 property_identifier=PropertyIdentifier.PRESENT_VALUE,
-                                property_value=b"\x44\x42\x28\x00\x00",
+                                value=b"\x44\x42\x28\x00\x00",
                                 priority=8,
                             ),
                         ],

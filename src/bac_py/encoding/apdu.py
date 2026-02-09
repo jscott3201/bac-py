@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bac_py.encoding.primitives import decode_enumerated, encode_application_enumerated
+from bac_py.encoding.tags import decode_tag
 from bac_py.types.enums import AbortReason, ErrorClass, ErrorCode, PduType, RejectReason
 
 # Max-segments encoding table (Clause 20.1.2.4)
@@ -54,7 +56,7 @@ def _encode_max_segments(value: int | None) -> int:
     """Encode max-segments value to 3-bit field."""
     if value is None:
         return _MAX_SEGMENTS_UNSPECIFIED
-    return _MAX_SEGMENTS_ENCODE.get(value, _MAX_SEGMENTS_UNSPECIFIED)
+    return _MAX_SEGMENTS_ENCODE.get(value, _MAX_SEGMENTS_OVER_64)
 
 
 def _decode_max_segments(value: int) -> int | None:
@@ -133,7 +135,12 @@ class SegmentAckPDU:
 
 @dataclass(frozen=True, slots=True)
 class ErrorPDU:
-    """BACnet Error PDU (Clause 20.1.7)."""
+    """BACnet Error PDU (Clause 20.1.7).
+
+    Represents the base error response with error-class and error-code.
+    Extended error data (e.g. ChangeList-Error, CreateObject-Error) is
+    not decoded — only the two-field base error is supported.
+    """
 
     invoke_id: int
     service_choice: int
@@ -171,6 +178,41 @@ APDU = (
 )
 
 
+# --- Segmentation field helpers ---
+
+
+def _encode_segmentation_fields(
+    buf: bytearray,
+    segmented: bool,
+    sequence_number: int | None,
+    proposed_window_size: int | None,
+) -> None:
+    """Append sequence_number and proposed_window_size if segmented."""
+    if segmented:
+        buf.append(sequence_number if sequence_number is not None else 0)
+        buf.append(proposed_window_size if proposed_window_size is not None else 1)
+
+
+def _decode_segmentation_fields(
+    data: memoryview,
+    offset: int,
+    segmented: bool,
+    min_len: int,
+    pdu_name: str,
+) -> tuple[int | None, int | None, int]:
+    """Decode sequence_number and proposed_window_size if segmented.
+
+    Returns:
+        Tuple of (sequence_number, proposed_window_size, new_offset).
+    """
+    if not segmented:
+        return None, None, offset
+    if len(data) < min_len:
+        msg = f"Segmented {pdu_name} too short: need at least {min_len} bytes, got {len(data)}"
+        raise ValueError(msg)
+    return data[offset], data[offset + 1], offset + 2
+
+
 # --- Encoding ---
 
 
@@ -200,6 +242,9 @@ def encode_apdu(pdu: APDU) -> bytes:
             return _encode_reject(pdu)
         case AbortPDU():
             return _encode_abort(pdu)
+        case _:
+            msg = f"Unknown PDU type: {type(pdu).__name__}"
+            raise TypeError(msg)
 
 
 def _encode_confirmed_request(pdu: ConfirmedRequestPDU) -> bytes:
@@ -219,9 +264,7 @@ def _encode_confirmed_request(pdu: ConfirmedRequestPDU) -> bytes:
     # Byte 2: invoke-id
     buf.append(pdu.invoke_id)
     # Segmentation fields (if segmented)
-    if pdu.segmented:
-        buf.append(pdu.sequence_number or 0)
-        buf.append(pdu.proposed_window_size or 1)
+    _encode_segmentation_fields(buf, pdu.segmented, pdu.sequence_number, pdu.proposed_window_size)
     # Service choice + data
     buf.append(pdu.service_choice)
     buf.extend(pdu.service_request)
@@ -249,9 +292,7 @@ def _encode_complex_ack(pdu: ComplexAckPDU) -> bytes:
         byte0 |= 0x04
     buf.append(byte0)
     buf.append(pdu.invoke_id)
-    if pdu.segmented:
-        buf.append(pdu.sequence_number or 0)
-        buf.append(pdu.proposed_window_size or 1)
+    _encode_segmentation_fields(buf, pdu.segmented, pdu.sequence_number, pdu.proposed_window_size)
     buf.append(pdu.service_choice)
     buf.extend(pdu.service_ack)
     return bytes(buf)
@@ -274,10 +315,6 @@ def _encode_segment_ack(pdu: SegmentAckPDU) -> bytes:
 
 
 def _encode_error(pdu: ErrorPDU) -> bytes:
-    from bac_py.encoding.primitives import (
-        encode_application_enumerated,
-    )
-
     buf = bytearray()
     buf.append(PduType.ERROR << 4)
     buf.append(pdu.invoke_id)
@@ -309,7 +346,14 @@ def decode_apdu(data: memoryview | bytes) -> APDU:
 
     Returns:
         Decoded PDU dataclass.
+
+    Raises:
+        ValueError: If data is too short to decode.
     """
+    if len(data) < 1:
+        msg = "APDU data too short: need at least 1 byte"
+        raise ValueError(msg)
+
     if isinstance(data, bytes):
         data = memoryview(data)
 
@@ -332,9 +376,15 @@ def decode_apdu(data: memoryview | bytes) -> APDU:
             return _decode_reject(data)
         case PduType.ABORT:
             return _decode_abort(data)
+        case _:
+            msg = f"Unknown PDU type: {pdu_type!r}"
+            raise TypeError(msg)
 
 
 def _decode_confirmed_request(data: memoryview) -> ConfirmedRequestPDU:
+    if len(data) < 4:
+        msg = f"ConfirmedRequest too short: need at least 4 bytes, got {len(data)}"
+        raise ValueError(msg)
     byte0 = data[0]
     segmented = bool(byte0 & 0x08)
     more_follows = bool(byte0 & 0x04)
@@ -347,13 +397,9 @@ def _decode_confirmed_request(data: memoryview) -> ConfirmedRequestPDU:
     invoke_id = data[2]
     offset = 3
 
-    sequence_number = None
-    proposed_window_size = None
-    if segmented:
-        sequence_number = data[offset]
-        offset += 1
-        proposed_window_size = data[offset]
-        offset += 1
+    sequence_number, proposed_window_size, offset = _decode_segmentation_fields(
+        data, offset, segmented, 6, "ConfirmedRequest"
+    )
 
     service_choice = data[offset]
     offset += 1
@@ -374,6 +420,9 @@ def _decode_confirmed_request(data: memoryview) -> ConfirmedRequestPDU:
 
 
 def _decode_unconfirmed_request(data: memoryview) -> UnconfirmedRequestPDU:
+    if len(data) < 2:
+        msg = f"UnconfirmedRequest too short: need at least 2 bytes, got {len(data)}"
+        raise ValueError(msg)
     service_choice = data[1]
     service_request = bytes(data[2:])
     return UnconfirmedRequestPDU(
@@ -383,10 +432,16 @@ def _decode_unconfirmed_request(data: memoryview) -> UnconfirmedRequestPDU:
 
 
 def _decode_simple_ack(data: memoryview) -> SimpleAckPDU:
+    if len(data) < 3:
+        msg = f"SimpleACK too short: need at least 3 bytes, got {len(data)}"
+        raise ValueError(msg)
     return SimpleAckPDU(invoke_id=data[1], service_choice=data[2])
 
 
 def _decode_complex_ack(data: memoryview) -> ComplexAckPDU:
+    if len(data) < 3:
+        msg = f"ComplexACK too short: need at least 3 bytes, got {len(data)}"
+        raise ValueError(msg)
     byte0 = data[0]
     segmented = bool(byte0 & 0x08)
     more_follows = bool(byte0 & 0x04)
@@ -394,13 +449,9 @@ def _decode_complex_ack(data: memoryview) -> ComplexAckPDU:
     invoke_id = data[1]
     offset = 2
 
-    sequence_number = None
-    proposed_window_size = None
-    if segmented:
-        sequence_number = data[offset]
-        offset += 1
-        proposed_window_size = data[offset]
-        offset += 1
+    sequence_number, proposed_window_size, offset = _decode_segmentation_fields(
+        data, offset, segmented, 5, "ComplexACK"
+    )
 
     service_choice = data[offset]
     offset += 1
@@ -418,6 +469,9 @@ def _decode_complex_ack(data: memoryview) -> ComplexAckPDU:
 
 
 def _decode_segment_ack(data: memoryview) -> SegmentAckPDU:
+    if len(data) < 4:
+        msg = f"SegmentACK too short: need at least 4 bytes, got {len(data)}"
+        raise ValueError(msg)
     byte0 = data[0]
     return SegmentAckPDU(
         negative_ack=bool(byte0 & 0x02),
@@ -429,8 +483,9 @@ def _decode_segment_ack(data: memoryview) -> SegmentAckPDU:
 
 
 def _decode_error(data: memoryview) -> ErrorPDU:
-    from bac_py.encoding.primitives import decode_enumerated
-    from bac_py.encoding.tags import decode_tag
+    if len(data) < 5:
+        msg = f"ErrorPDU too short: need at least 5 bytes, got {len(data)}"
+        raise ValueError(msg)
 
     invoke_id = data[1]
     service_choice = data[2]
@@ -453,6 +508,9 @@ def _decode_error(data: memoryview) -> ErrorPDU:
 
 
 def _decode_reject(data: memoryview) -> RejectPDU:
+    if len(data) < 3:
+        msg = f"RejectPDU too short: need at least 3 bytes, got {len(data)}"
+        raise ValueError(msg)
     return RejectPDU(
         invoke_id=data[1],
         reject_reason=RejectReason(data[2]),
@@ -460,6 +518,9 @@ def _decode_reject(data: memoryview) -> RejectPDU:
 
 
 def _decode_abort(data: memoryview) -> AbortPDU:
+    if len(data) < 3:
+        msg = f"AbortPDU too short: need at least 3 bytes, got {len(data)}"
+        raise ValueError(msg)
     byte0 = data[0]
     return AbortPDU(
         sent_by_server=bool(byte0 & 0x01),

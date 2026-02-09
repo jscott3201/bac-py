@@ -4,6 +4,7 @@ _data/
 _dev/
 _deprecated/
 design_docs/
+refactors/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

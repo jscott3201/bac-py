@@ -7,12 +7,14 @@ from dataclasses import dataclass
 from bac_py.encoding.primitives import (
     decode_object_identifier,
     decode_unsigned,
+    encode_context_object_id,
     encode_context_tagged,
-    encode_object_identifier,
     encode_unsigned,
 )
 from bac_py.encoding.tags import (
     TagClass,
+    as_memoryview,
+    decode_optional_context,
     decode_tag,
     encode_closing_tag,
     encode_opening_tag,
@@ -47,15 +49,7 @@ class ReadPropertyRequest:
         """
         buf = bytearray()
         # [0] object-identifier
-        buf.extend(
-            encode_context_tagged(
-                0,
-                encode_object_identifier(
-                    self.object_identifier.object_type,
-                    self.object_identifier.instance_number,
-                ),
-            )
-        )
+        buf.extend(encode_context_object_id(0, self.object_identifier))
         # [1] property-identifier
         buf.extend(encode_context_tagged(1, encode_unsigned(self.property_identifier)))
         # [2] property-array-index (optional)
@@ -73,8 +67,7 @@ class ReadPropertyRequest:
         Returns:
             Decoded ReadPropertyRequest.
         """
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 
@@ -92,11 +85,7 @@ class ReadPropertyRequest:
         offset += tag.length
 
         # [2] property-array-index (optional)
-        property_array_index = None
-        if offset < len(data):
-            tag, offset = decode_tag(data, offset)
-            if tag.cls == TagClass.CONTEXT and tag.number == 2:
-                property_array_index = decode_unsigned(data[offset : offset + tag.length])
+        property_array_index, _ = decode_optional_context(data, offset, 2, decode_unsigned)
 
         return cls(
             object_identifier=object_identifier,
@@ -136,15 +125,7 @@ class ReadPropertyACK:
         """
         buf = bytearray()
         # [0] object-identifier
-        buf.extend(
-            encode_context_tagged(
-                0,
-                encode_object_identifier(
-                    self.object_identifier.object_type,
-                    self.object_identifier.instance_number,
-                ),
-            )
-        )
+        buf.extend(encode_context_object_id(0, self.object_identifier))
         # [1] property-identifier
         buf.extend(encode_context_tagged(1, encode_unsigned(self.property_identifier)))
         # [2] property-array-index (optional)
@@ -166,8 +147,7 @@ class ReadPropertyACK:
         Returns:
             Decoded ReadPropertyACK.
         """
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 

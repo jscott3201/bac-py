@@ -9,19 +9,23 @@ from bac_py.encoding.primitives import (
     decode_object_identifier,
     decode_unsigned,
     encode_boolean,
+    encode_context_object_id,
     encode_context_tagged,
-    encode_object_identifier,
     encode_unsigned,
 )
 from bac_py.encoding.tags import (
-    TagClass,
+    as_memoryview,
+    decode_optional_context,
     decode_tag,
     encode_closing_tag,
     encode_opening_tag,
-    extract_context_value,
 )
-from bac_py.types.enums import ObjectType, PropertyIdentifier
+from bac_py.services.common import BACnetPropertyValue
+from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import ObjectIdentifier
+
+# Re-export for backward compatibility
+__all__ = ["BACnetPropertyValue", "COVNotificationRequest", "SubscribeCOVRequest"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,15 +65,7 @@ class SubscribeCOVRequest:
         # [0] subscriberProcessIdentifier
         buf.extend(encode_context_tagged(0, encode_unsigned(self.subscriber_process_identifier)))
         # [1] monitoredObjectIdentifier
-        buf.extend(
-            encode_context_tagged(
-                1,
-                encode_object_identifier(
-                    self.monitored_object_identifier.object_type,
-                    self.monitored_object_identifier.instance_number,
-                ),
-            )
-        )
+        buf.extend(encode_context_object_id(1, self.monitored_object_identifier))
         # [2] issueConfirmedNotifications (optional)
         if self.issue_confirmed_notifications is not None:
             buf.extend(
@@ -90,8 +86,7 @@ class SubscribeCOVRequest:
         Returns:
             Decoded SubscribeCOVRequest.
         """
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 
@@ -107,23 +102,12 @@ class SubscribeCOVRequest:
         monitored_object_identifier = ObjectIdentifier(ObjectType(obj_type), instance)
 
         # [2] issueConfirmedNotifications (optional)
-        issue_confirmed_notifications = None
-        if offset < len(data):
-            tag, new_offset = decode_tag(data, offset)
-            if tag.cls == TagClass.CONTEXT and tag.number == 2:
-                issue_confirmed_notifications = decode_boolean(
-                    data[new_offset : new_offset + tag.length]
-                )
-                offset = new_offset + tag.length
-            # else: don't advance offset
+        issue_confirmed_notifications, offset = decode_optional_context(
+            data, offset, 2, decode_boolean
+        )
 
         # [3] lifetime (optional)
-        lifetime = None
-        if offset < len(data):
-            tag, new_offset = decode_tag(data, offset)
-            if tag.cls == TagClass.CONTEXT and tag.number == 3:
-                lifetime = decode_unsigned(data[new_offset : new_offset + tag.length])
-                offset = new_offset + tag.length
+        lifetime, offset = decode_optional_context(data, offset, 3, decode_unsigned)
 
         return cls(
             subscriber_process_identifier=subscriber_process_identifier,
@@ -134,108 +118,8 @@ class SubscribeCOVRequest:
 
 
 @dataclass(frozen=True, slots=True)
-class BACnetPropertyValue:
-    """BACnetPropertyValue per Clause 21.
-
-    ::
-
-        BACnetPropertyValue ::= SEQUENCE {
-            propertyIdentifier  [0] BACnetPropertyIdentifier,
-            propertyArrayIndex  [1] Unsigned OPTIONAL,
-            value               [2] ABSTRACT-SYNTAX.&Type,
-            priority            [3] Unsigned (1..16) OPTIONAL
-        }
-
-    The ``value`` field contains raw application-tagged bytes.
-    """
-
-    property_identifier: PropertyIdentifier
-    property_array_index: int | None = None
-    value: bytes = b""
-    priority: int | None = None
-
-    def encode(self) -> bytes:
-        """Encode BACnetPropertyValue.
-
-        Returns:
-            Encoded bytes.
-        """
-        buf = bytearray()
-        # [0] propertyIdentifier
-        buf.extend(encode_context_tagged(0, encode_unsigned(self.property_identifier)))
-        # [1] propertyArrayIndex (optional)
-        if self.property_array_index is not None:
-            buf.extend(encode_context_tagged(1, encode_unsigned(self.property_array_index)))
-        # [2] value (opening/closing tag with raw application-tagged content)
-        buf.extend(encode_opening_tag(2))
-        buf.extend(self.value)
-        buf.extend(encode_closing_tag(2))
-        # [3] priority (optional)
-        if self.priority is not None:
-            buf.extend(encode_context_tagged(3, encode_unsigned(self.priority)))
-        return bytes(buf)
-
-    @classmethod
-    def decode_from(
-        cls, data: memoryview | bytes, offset: int = 0
-    ) -> tuple[BACnetPropertyValue, int]:
-        """Decode BACnetPropertyValue from data at given offset.
-
-        Args:
-            data: Raw bytes.
-            offset: Start offset.
-
-        Returns:
-            Tuple of (decoded BACnetPropertyValue, new offset).
-        """
-        if isinstance(data, bytes):
-            data = memoryview(data)
-
-        # [0] propertyIdentifier
-        tag, offset = decode_tag(data, offset)
-        property_identifier = PropertyIdentifier(
-            decode_unsigned(data[offset : offset + tag.length])
-        )
-        offset += tag.length
-
-        # [1] propertyArrayIndex (optional)
-        property_array_index = None
-        tag, new_offset = decode_tag(data, offset)
-        if tag.cls == TagClass.CONTEXT and tag.number == 1 and not tag.is_opening:
-            property_array_index = decode_unsigned(data[new_offset : new_offset + tag.length])
-            offset = new_offset + tag.length
-            tag, new_offset = decode_tag(data, offset)
-
-        # [2] value — opening tag 2
-        value, offset = extract_context_value(data, new_offset, 2)
-
-        # [3] priority (optional)
-        priority = None
-        if offset < len(data):
-            tag, new_offset = decode_tag(data, offset)
-            if (
-                tag.cls == TagClass.CONTEXT
-                and tag.number == 3
-                and not tag.is_opening
-                and not tag.is_closing
-            ):
-                priority = decode_unsigned(data[new_offset : new_offset + tag.length])
-                offset = new_offset + tag.length
-
-        return (
-            cls(
-                property_identifier=property_identifier,
-                property_array_index=property_array_index,
-                value=value,
-                priority=priority,
-            ),
-            offset,
-        )
-
-
-@dataclass(frozen=True, slots=True)
 class COVNotificationRequest:
-    """Confirmed/Unconfirmed COVNotification-Request per Clause 13.1.
+    """Confirmed/Unconfirmed COVNotification-Request per Clause 13.14.7/13.14.8.
 
     ::
 
@@ -267,25 +151,9 @@ class COVNotificationRequest:
         # [0] subscriberProcessIdentifier
         buf.extend(encode_context_tagged(0, encode_unsigned(self.subscriber_process_identifier)))
         # [1] initiatingDeviceIdentifier
-        buf.extend(
-            encode_context_tagged(
-                1,
-                encode_object_identifier(
-                    self.initiating_device_identifier.object_type,
-                    self.initiating_device_identifier.instance_number,
-                ),
-            )
-        )
+        buf.extend(encode_context_object_id(1, self.initiating_device_identifier))
         # [2] monitoredObjectIdentifier
-        buf.extend(
-            encode_context_tagged(
-                2,
-                encode_object_identifier(
-                    self.monitored_object_identifier.object_type,
-                    self.monitored_object_identifier.instance_number,
-                ),
-            )
-        )
+        buf.extend(encode_context_object_id(2, self.monitored_object_identifier))
         # [3] timeRemaining
         buf.extend(encode_context_tagged(3, encode_unsigned(self.time_remaining)))
         # [4] listOfValues (SEQUENCE OF BACnetPropertyValue)
@@ -305,8 +173,7 @@ class COVNotificationRequest:
         Returns:
             Decoded COVNotificationRequest.
         """
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 

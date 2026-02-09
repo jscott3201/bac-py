@@ -17,8 +17,10 @@ from bac_py.encoding.primitives import (
     encode_application_octet_string,
     encode_application_signed,
     encode_application_unsigned,
+    encode_context_tagged,
+    encode_signed,
 )
-from bac_py.encoding.tags import decode_tag, encode_closing_tag, encode_opening_tag
+from bac_py.encoding.tags import as_memoryview, decode_tag, encode_closing_tag, encode_opening_tag
 from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import ObjectIdentifier
 
@@ -90,8 +92,7 @@ class AtomicReadFileRequest:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AtomicReadFileRequest:
         """Decode AtomicReadFileRequest from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 
@@ -192,8 +193,7 @@ class AtomicReadFileACK:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AtomicReadFileACK:
         """Decode AtomicReadFileACK from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 
@@ -307,8 +307,7 @@ class AtomicWriteFileRequest:
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AtomicWriteFileRequest:
         """Decode AtomicWriteFileRequest from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
 
@@ -367,16 +366,13 @@ class AtomicWriteFileACK:
 
     def encode(self) -> bytes:
         """Encode AtomicWriteFileACK to bytes."""
-        from bac_py.encoding.primitives import encode_context_tagged, encode_signed
-
         tag_number = 0 if self.is_stream else 1
         return encode_context_tagged(tag_number, encode_signed(self.file_start))
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AtomicWriteFileACK:
         """Decode AtomicWriteFileACK from bytes."""
-        if isinstance(data, bytes):
-            data = memoryview(data)
+        data = as_memoryview(data)
 
         offset = 0
         tag, offset = decode_tag(data, offset)

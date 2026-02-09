@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+__all__ = ["Serializer", "deserialize", "get_serializer", "serialize"]
+
 
 @runtime_checkable
 class Serializer(Protocol):

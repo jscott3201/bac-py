@@ -683,8 +683,8 @@ class TestHandleReadPropertyMultiple:
 
 class TestHandleWritePropertyMultiple:
     def test_wpm_write_success(self):
+        from bac_py.services.common import BACnetPropertyValue
         from bac_py.services.write_property_multiple import (
-            PropertyValue,
             WriteAccessSpecification,
             WritePropertyMultipleRequest,
         )
@@ -697,9 +697,9 @@ class TestHandleWritePropertyMultiple:
                 WriteAccessSpecification(
                     object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
                     list_of_properties=[
-                        PropertyValue(
+                        BACnetPropertyValue(
                             property_identifier=PropertyIdentifier.OBJECT_NAME,
-                            property_value=b"\x75\x0a\x00new-name!",
+                            value=b"\x75\x0a\x00new-name!",
                         ),
                     ],
                 ),
@@ -713,8 +713,8 @@ class TestHandleWritePropertyMultiple:
         asyncio.get_event_loop().run_until_complete(run())
 
     def test_wpm_unknown_object_raises(self):
+        from bac_py.services.common import BACnetPropertyValue
         from bac_py.services.write_property_multiple import (
-            PropertyValue,
             WriteAccessSpecification,
             WritePropertyMultipleRequest,
         )
@@ -727,9 +727,9 @@ class TestHandleWritePropertyMultiple:
                 WriteAccessSpecification(
                     object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 999),
                     list_of_properties=[
-                        PropertyValue(
+                        BACnetPropertyValue(
                             property_identifier=PropertyIdentifier.PRESENT_VALUE,
-                            property_value=b"\x44\x00\x00\x00\x00",
+                            value=b"\x44\x00\x00\x00\x00",
                         ),
                     ],
                 ),
@@ -744,8 +744,8 @@ class TestHandleWritePropertyMultiple:
         asyncio.get_event_loop().run_until_complete(run())
 
     def test_wpm_read_only_raises(self):
+        from bac_py.services.common import BACnetPropertyValue
         from bac_py.services.write_property_multiple import (
-            PropertyValue,
             WriteAccessSpecification,
             WritePropertyMultipleRequest,
         )
@@ -758,9 +758,9 @@ class TestHandleWritePropertyMultiple:
                 WriteAccessSpecification(
                     object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
                     list_of_properties=[
-                        PropertyValue(
+                        BACnetPropertyValue(
                             property_identifier=PropertyIdentifier.OBJECT_IDENTIFIER,
-                            property_value=b"\xc4\x02\x00\x00\x01",
+                            value=b"\xc4\x02\x00\x00\x01",
                         ),
                     ],
                 ),

@@ -10,10 +10,9 @@ from bac_py.objects.base import (
     PropertyDefinition,
     register_object_type,
     standard_properties,
+    status_properties,
 )
-from bac_py.types.constructed import StatusFlags
 from bac_py.types.enums import (
-    EventState,
     ObjectType,
     PropertyIdentifier,
     Reliability,
@@ -35,7 +34,7 @@ class ScheduleObject(BACnetObject):
         **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
-            object,
+            object,  # Polymorphic: actual type depends on Schedule_Default
             PropertyAccess.READ_ONLY,
             required=True,
         ),
@@ -76,46 +75,20 @@ class ScheduleObject(BACnetObject):
             required=True,
             default=16,
         ),
-        PropertyIdentifier.STATUS_FLAGS: PropertyDefinition(
-            PropertyIdentifier.STATUS_FLAGS,
-            StatusFlags,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.EVENT_STATE: PropertyDefinition(
-            PropertyIdentifier.EVENT_STATE,
-            EventState,
-            PropertyAccess.READ_ONLY,
-            required=False,
-            default=EventState.NORMAL,
-        ),
-        PropertyIdentifier.RELIABILITY: PropertyDefinition(
-            PropertyIdentifier.RELIABILITY,
-            Reliability,
-            PropertyAccess.READ_ONLY,
-            required=True,
-            default=Reliability.NO_FAULT_DETECTED,
-        ),
-        PropertyIdentifier.OUT_OF_SERVICE: PropertyDefinition(
-            PropertyIdentifier.OUT_OF_SERVICE,
-            bool,
-            PropertyAccess.READ_WRITE,
-            required=True,
-            default=False,
+        **status_properties(
+            event_state_required=False,
+            reliability_required=True,
+            reliability_default=Reliability.NO_FAULT_DETECTED,
         ),
     }
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
         self._init_status_flags()
-        if PropertyIdentifier.EFFECTIVE_PERIOD not in self._properties:
-            self._properties[PropertyIdentifier.EFFECTIVE_PERIOD] = (
-                (1900, 1, 1),
-                (2155, 12, 31),
-            )
-        if PropertyIdentifier.LIST_OF_OBJECT_PROPERTY_REFERENCES not in self._properties:
-            self._properties[PropertyIdentifier.LIST_OF_OBJECT_PROPERTY_REFERENCES] = []
-        if PropertyIdentifier.PRIORITY_FOR_WRITING not in self._properties:
-            self._properties[PropertyIdentifier.PRIORITY_FOR_WRITING] = 16
-        if PropertyIdentifier.SCHEDULE_DEFAULT not in self._properties:
-            self._properties[PropertyIdentifier.SCHEDULE_DEFAULT] = None
+        self._set_default(
+            PropertyIdentifier.EFFECTIVE_PERIOD,
+            ((1900, 1, 1), (2155, 12, 31)),
+        )
+        self._set_default(PropertyIdentifier.LIST_OF_OBJECT_PROPERTY_REFERENCES, [])
+        self._set_default(PropertyIdentifier.PRIORITY_FOR_WRITING, 16)
+        self._set_default(PropertyIdentifier.SCHEDULE_DEFAULT, None)
