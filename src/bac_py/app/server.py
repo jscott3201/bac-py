@@ -10,8 +10,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from bac_py.app._object_type_sets import ANALOG_TYPES
 from bac_py.encoding.primitives import (
-    decode_all_application_values,
+    decode_and_unwrap,
     encode_application_object_id,
     encode_property_value,
 )
@@ -98,14 +99,21 @@ def _bitstring_from_bits(bit_positions: set[int]) -> BitString:
     return BitString(bytes(buf), unused_bits)
 
 
-def _encode_property_value(value: Any) -> bytes:
+def _encode_property_value(value: Any, obj_type: ObjectType | None = None) -> bytes:
     """Encode a property value to application-tagged bytes.
 
     Thin wrapper around ``encode_property_value`` that converts
     TypeError to BACnetError for the server error response path.
+
+    Args:
+        value: The value to encode.
+        obj_type: Optional object type. When the object is an analog type,
+            integers are encoded as Real instead of Unsigned.
     """
     try:
-        return encode_property_value(value)
+        return encode_property_value(
+            value, int_as_real=obj_type in ANALOG_TYPES if obj_type is not None else False
+        )
     except TypeError:
         raise BACnetError(ErrorClass.PROPERTY, ErrorCode.OTHER) from None
 
@@ -269,7 +277,7 @@ class DefaultServerHandlers:
         )
 
         # Encode the value to application-tagged bytes
-        encoded_value = _encode_property_value(value)
+        encoded_value = _encode_property_value(value, obj_id.object_type)
 
         # Build and encode the ACK
         ack = ReadPropertyACK(
@@ -311,17 +319,9 @@ class DefaultServerHandlers:
         # before storing.  This mirrors the C reference library behavior
         # where incoming values are decoded before being applied.
         try:
-            decoded_values = decode_all_application_values(request.property_value)
+            write_value = decode_and_unwrap(request.property_value)
         except (ValueError, IndexError):
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.INVALID_DATA_TYPE) from None
-
-        # Single value → unwrap; multiple values → store as list
-        if len(decoded_values) == 1:
-            write_value = decoded_values[0]
-        elif len(decoded_values) == 0:
-            write_value = None
-        else:
-            write_value = decoded_values
 
         # Write the property value (may raise BACnetError)
         await obj.async_write_property(
@@ -530,7 +530,7 @@ class DefaultServerHandlers:
                         ref.property_identifier,
                         ref.property_array_index,
                     )
-                    encoded_value = _encode_property_value(value)
+                    encoded_value = _encode_property_value(value, obj_id.object_type)
                     elements.append(
                         ReadResultElement(
                             property_identifier=ref.property_identifier,
@@ -671,7 +671,7 @@ class DefaultServerHandlers:
         # Encode items
         buf = bytearray()
         for item in items:
-            buf.extend(_encode_property_value(item))
+            buf.extend(_encode_property_value(item, obj_id.object_type))
         item_data = bytes(buf)
 
         more_items = not is_last
@@ -692,6 +692,20 @@ class DefaultServerHandlers:
 
     # --- Device management handlers ---
 
+    def _validate_password(self, request_password: str | None) -> None:
+        """Validate a request password against the configured device password.
+
+        Raises:
+            BACnetError: If the password does not match or is unexpected.
+        """
+        config_password = self._app.config.password
+        if config_password is not None:
+            if request_password != config_password:
+                raise BACnetError(ErrorClass.SECURITY, ErrorCode.PASSWORD_FAILURE)
+        elif request_password is not None:
+            # Device has no password configured but request includes one
+            raise BACnetError(ErrorClass.SECURITY, ErrorCode.PASSWORD_FAILURE)
+
     async def handle_device_communication_control(
         self,
         service_choice: int,
@@ -711,14 +725,7 @@ class DefaultServerHandlers:
         """
         request = DeviceCommunicationControlRequest.decode(data)
 
-        # Password validation per Clause 16.1.3.1
-        config_password = self._app.config.password
-        if config_password is not None:
-            if request.password != config_password:
-                raise BACnetError(ErrorClass.SECURITY, ErrorCode.PASSWORD_FAILURE)
-        elif request.password is not None:
-            # Device has no password configured but request includes one
-            raise BACnetError(ErrorClass.SECURITY, ErrorCode.PASSWORD_FAILURE)
+        self._validate_password(request.password)
 
         logger.info(
             "DeviceCommunicationControl from %s: enable_disable=%s, duration=%s",
@@ -748,13 +755,7 @@ class DefaultServerHandlers:
         """
         request = ReinitializeDeviceRequest.decode(data)
 
-        # Password validation per Clause 16.4.3.4
-        config_password = self._app.config.password
-        if config_password is not None:
-            if request.password != config_password:
-                raise BACnetError(ErrorClass.SECURITY, ErrorCode.PASSWORD_FAILURE)
-        elif request.password is not None:
-            raise BACnetError(ErrorClass.SECURITY, ErrorCode.PASSWORD_FAILURE)
+        self._validate_password(request.password)
 
         logger.info(
             "ReinitializeDevice from %s: state=%s",
@@ -929,14 +930,7 @@ class DefaultServerHandlers:
         if request.list_of_initial_values:
             for pv in request.list_of_initial_values:
                 prop_name = pv.property_identifier.name.lower()
-                # Decode raw application-tagged bytes to native Python types
-                decoded = decode_all_application_values(pv.value)
-                if len(decoded) == 1:
-                    kwargs[prop_name] = decoded[0]
-                elif len(decoded) == 0:
-                    kwargs[prop_name] = None
-                else:
-                    kwargs[prop_name] = decoded
+                kwargs[prop_name] = decode_and_unwrap(pv.value)
 
         obj = create_object(obj_type, instance, **kwargs)
         self._db.add(obj)

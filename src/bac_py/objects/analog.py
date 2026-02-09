@@ -45,9 +45,12 @@ class _AnalogBase(BACnetObject):
                 raise BACnetError(ErrorClass.PROPERTY, ErrorCode.VALUE_OUT_OF_RANGE)
             if max_val is not None and value > max_val:
                 raise BACnetError(ErrorClass.PROPERTY, ErrorCode.VALUE_OUT_OF_RANGE)
-        if prop_id == PropertyIdentifier.COV_INCREMENT and isinstance(value, (int, float)):
-            if value < 0:
-                raise BACnetError(ErrorClass.PROPERTY, ErrorCode.VALUE_OUT_OF_RANGE)
+        if (
+            prop_id == PropertyIdentifier.COV_INCREMENT
+            and isinstance(value, (int, float))
+            and value < 0
+        ):
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.VALUE_OUT_OF_RANGE)
         super().write_property(prop_id, value, priority, array_index)
 
 

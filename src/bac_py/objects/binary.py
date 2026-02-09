@@ -22,8 +22,28 @@ from bac_py.types.enums import (
 )
 
 
+class _BinaryPolarityMixin:
+    """Mixin providing polarity inversion for Present_Value reads.
+
+    Per Clause 12.6.15 / 12.7.15, when Polarity is REVERSE the
+    Present_Value returned to callers is inverted.
+    """
+
+    def read_property(
+        self,
+        prop_id: PropertyIdentifier,
+        array_index: int | None = None,
+    ) -> Any:
+        value = super().read_property(prop_id, array_index)  # type: ignore[misc]
+        if prop_id == PropertyIdentifier.PRESENT_VALUE:
+            polarity = self._properties.get(PropertyIdentifier.POLARITY, Polarity.NORMAL)  # type: ignore[attr-defined]
+            if polarity == Polarity.REVERSE:
+                value = BinaryPV.ACTIVE if value == BinaryPV.INACTIVE else BinaryPV.INACTIVE
+        return value
+
+
 @register_object_type
-class BinaryInputObject(BACnetObject):
+class BinaryInputObject(_BinaryPolarityMixin, BACnetObject):
     """BACnet Binary Input object (Clause 12.6).
 
     Represents a binary sensor input (on/off, open/closed).
@@ -81,22 +101,9 @@ class BinaryInputObject(BACnetObject):
         super().__init__(instance_number, **initial_properties)
         self._init_status_flags()
 
-    def read_property(
-        self,
-        prop_id: PropertyIdentifier,
-        array_index: int | None = None,
-    ) -> Any:
-        """Read property with polarity inversion for Present_Value (Clause 12.6.15)."""
-        value = super().read_property(prop_id, array_index)
-        if prop_id == PropertyIdentifier.PRESENT_VALUE:
-            polarity = self._properties.get(PropertyIdentifier.POLARITY, Polarity.NORMAL)
-            if polarity == Polarity.REVERSE:
-                value = BinaryPV.ACTIVE if value == BinaryPV.INACTIVE else BinaryPV.INACTIVE
-        return value
-
 
 @register_object_type
-class BinaryOutputObject(BACnetObject):
+class BinaryOutputObject(_BinaryPolarityMixin, BACnetObject):
     """BACnet Binary Output object (Clause 12.7).
 
     Represents a binary actuator output (relay, fan on/off).
@@ -167,19 +174,6 @@ class BinaryOutputObject(BACnetObject):
         # Always commandable
         self._init_commandable(BinaryPV.INACTIVE)
         self._init_status_flags()
-
-    def read_property(
-        self,
-        prop_id: PropertyIdentifier,
-        array_index: int | None = None,
-    ) -> Any:
-        """Read property with polarity inversion for Present_Value (Clause 12.7.15)."""
-        value = super().read_property(prop_id, array_index)
-        if prop_id == PropertyIdentifier.PRESENT_VALUE:
-            polarity = self._properties.get(PropertyIdentifier.POLARITY, Polarity.NORMAL)
-            if polarity == Polarity.REVERSE:
-                value = BinaryPV.ACTIVE if value == BinaryPV.INACTIVE else BinaryPV.INACTIVE
-        return value
 
 
 @register_object_type

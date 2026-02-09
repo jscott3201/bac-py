@@ -13,5 +13,13 @@ __version__ = "0.1.0"
 from bac_py.app.application import DeviceConfig
 from bac_py.app.client import DiscoveredDevice
 from bac_py.client import Client
+from bac_py.serialization import deserialize, serialize
 
-__all__ = ["Client", "DeviceConfig", "DiscoveredDevice", "__version__"]
+__all__ = [
+    "Client",
+    "DeviceConfig",
+    "DiscoveredDevice",
+    "__version__",
+    "deserialize",
+    "serialize",
+]

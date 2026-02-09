@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from bac_py.app._object_type_sets import ANALOG_TYPES
 from bac_py.encoding.primitives import (
     encode_application_bit_string,
     encode_property_value,
@@ -33,16 +34,6 @@ if TYPE_CHECKING:
     from bac_py.types.primitives import ObjectIdentifier
 
 logger = logging.getLogger(__name__)
-
-# Object types that use COV_INCREMENT for analog threshold checking
-_ANALOG_TYPES = frozenset(
-    {
-        ObjectType.ANALOG_INPUT,
-        ObjectType.ANALOG_OUTPUT,
-        ObjectType.ANALOG_VALUE,
-        ObjectType.LARGE_ANALOG_VALUE,
-    }
-)
 
 
 @dataclass
@@ -242,7 +233,7 @@ class COVManager:
             return False
 
         obj_type = obj.object_identifier.object_type
-        if obj_type in _ANALOG_TYPES:
+        if obj_type in ANALOG_TYPES:
             # Analog: use COV_INCREMENT if available
             cov_increment = self._read_cov_increment(obj)
             if cov_increment is not None and cov_increment > 0:
@@ -328,7 +319,7 @@ class COVManager:
         """Read Present_Value, returning None if not available."""
         try:
             return obj.read_property(PropertyIdentifier.PRESENT_VALUE)
-        except Exception:
+        except BACnetError:
             return None
 
     @staticmethod
@@ -336,7 +327,7 @@ class COVManager:
         """Read Status_Flags, returning None if not available."""
         try:
             return obj.read_property(PropertyIdentifier.STATUS_FLAGS)
-        except Exception:
+        except BACnetError:
             return None
 
     @staticmethod
@@ -346,7 +337,7 @@ class COVManager:
             value = obj.read_property(PropertyIdentifier.COV_INCREMENT)
             if isinstance(value, (int, float)):
                 return float(value)
-        except Exception:
+        except BACnetError:
             pass
         return None
 
@@ -359,7 +350,7 @@ class COVManager:
         encoding is used.  Returns raw application-tagged bytes suitable
         for inclusion in a BACnetPropertyValue sequence.
         """
-        return encode_property_value(value, int_as_real=obj_type in _ANALOG_TYPES)
+        return encode_property_value(value, int_as_real=obj_type in ANALOG_TYPES)
 
     @staticmethod
     def _encode_status_flags(status_flags: Any) -> bytes:

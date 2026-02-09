@@ -129,9 +129,7 @@ class BIPTransport:
         self._foreign_device: ForeignDeviceManager | None = None
         # F5: Pending BVLC client request futures, keyed by
         # (expected_response_function, source_address).
-        self._pending_bvlc: dict[
-            tuple[BvlcFunction, BIPAddress], asyncio.Future[bytes]
-        ] = {}
+        self._pending_bvlc: dict[tuple[BvlcFunction, BIPAddress], asyncio.Future[bytes]] = {}
 
     async def start(self) -> None:
         """Bind UDP socket and start listening."""
@@ -276,7 +274,7 @@ class BIPTransport:
 
         self._bbmd = BBMDManager(
             local_address=self.local_address,
-            send_callback=self._bbmd_send_raw,
+            send_callback=self._send_raw,
             local_broadcast_callback=self._bbmd_local_deliver,
             broadcast_address=BIPAddress(host=self._broadcast_address, port=self._port),
         )
@@ -330,7 +328,7 @@ class BIPTransport:
         self._foreign_device = ForeignDeviceManager(
             bbmd_address=bbmd_address,
             ttl=ttl,
-            send_callback=self._fd_send_raw,
+            send_callback=self._send_raw,
             local_address=self.local_address,
         )
         await self._foreign_device.start()
@@ -345,9 +343,7 @@ class BIPTransport:
     # F5: BBMD client functions
     # ------------------------------------------------------------------
 
-    async def read_bdt(
-        self, bbmd_address: BIPAddress, *, timeout: float = 5.0
-    ) -> list[BDTEntry]:
+    async def read_bdt(self, bbmd_address: BIPAddress, *, timeout: float = 5.0) -> list[BDTEntry]:
         """Read the Broadcast Distribution Table from a remote BBMD.
 
         Sends a Read-Broadcast-Distribution-Table request and waits for
@@ -422,9 +418,7 @@ class BIPTransport:
             return BvlcResultCode(int.from_bytes(data[:2], "big"))
         return BvlcResultCode.WRITE_BROADCAST_DISTRIBUTION_TABLE_NAK
 
-    async def read_fdt(
-        self, bbmd_address: BIPAddress, *, timeout: float = 5.0
-    ) -> list[FDTEntry]:
+    async def read_fdt(self, bbmd_address: BIPAddress, *, timeout: float = 5.0) -> list[FDTEntry]:
         """Read the Foreign Device Table from a remote BBMD.
 
         Sends a Read-Foreign-Device-Table request and waits for
@@ -460,7 +454,8 @@ class BIPTransport:
                 break
             addr = BIPAddress.decode(data[i : i + 6])
             ttl = int.from_bytes(data[i + 6 : i + 8], "big")
-            remaining = int.from_bytes(data[i + 8 : i + 10], "big")
+            # Wire bytes i+8:i+10 contain remaining-time, not retained for
+            # remote entries since it is only meaningful on the local BBMD.
             entries.append(FDTEntry(address=addr, ttl=ttl, expiry=0.0))
         return entries
 
@@ -543,20 +538,11 @@ class BIPTransport:
     # BBMD / foreign device integration helpers
     # ------------------------------------------------------------------
 
-    def _bbmd_send_raw(self, data: bytes, destination: BIPAddress) -> None:
-        """Send raw BVLL data to a destination (BBMD send callback).
+    def _send_raw(self, data: bytes, destination: BIPAddress) -> None:
+        """Send raw BVLL data to a destination.
 
-        Used by :class:`BBMDManager` to send Forwarded-NPDUs to BDT
-        peers and foreign devices.
-        """
-        if self._transport is not None:
-            self._transport.sendto(data, (destination.host, destination.port))
-
-    def _fd_send_raw(self, data: bytes, destination: BIPAddress) -> None:
-        """Send raw BVLL data to a destination (foreign device send callback).
-
-        Used by :class:`ForeignDeviceManager` to send registration
-        and distribute-broadcast messages to the BBMD.
+        Used as the send callback for :class:`BBMDManager` and
+        :class:`ForeignDeviceManager`.
         """
         if self._transport is not None:
             self._transport.sendto(data, (destination.host, destination.port))
@@ -572,7 +558,8 @@ class BIPTransport:
         if _is_confirmed_request_npdu(npdu):
             logger.debug(
                 "Dropped confirmed request via BBMD broadcast from %s:%d",
-                source.host, source.port,
+                source.host,
+                source.port,
             )
             return
         if self._receive_callback is not None:
@@ -652,7 +639,8 @@ class BIPTransport:
                 if _is_confirmed_request_npdu(msg.data):
                     logger.debug(
                         "Dropped confirmed request via broadcast from %s:%d",
-                        source.host, source.port,
+                        source.host,
+                        source.port,
                     )
                     return
                 if self._receive_callback:
@@ -671,7 +659,10 @@ class BIPTransport:
                 # F5: Route to pending client request futures first.
                 if not self._resolve_pending_bvlc(msg.function, msg.data, source):
                     self._handle_bvlc_result(msg.data, source)
-            case BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK | BvlcFunction.READ_FOREIGN_DEVICE_TABLE_ACK:
+            case (
+                BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK
+                | BvlcFunction.READ_FOREIGN_DEVICE_TABLE_ACK
+            ):
                 # F5: Route ACK responses to pending client requests.
                 if not self._resolve_pending_bvlc(msg.function, msg.data, source):
                     logger.debug("Ignoring unsolicited %s from %s", msg.function, source)
@@ -720,10 +711,9 @@ class BIPTransport:
         matches the expected BBMD address, preventing rogue devices
         from spoofing registration confirmations.
         """
-        if self._foreign_device is not None:
+        if self._foreign_device is not None and source == self._foreign_device.bbmd_address:
             # S3: Only accept BVLC-Results from the BBMD we registered with.
-            if source == self._foreign_device.bbmd_address:
-                self._foreign_device.handle_bvlc_result(data)
+            self._foreign_device.handle_bvlc_result(data)
         if len(data) >= 2:
             result_code = int.from_bytes(data[:2], "big")
             if result_code != 0:

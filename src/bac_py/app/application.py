@@ -417,15 +417,30 @@ class BACnetApplication:
         destination: BACnetAddress,
         service_choice: int,
         service_data: bytes,
+        timeout: float | None = None,
     ) -> bytes:
         """Send a confirmed request and await response.
 
-        Returns ComplexACK service data, or empty bytes for SimpleACK.
+        Args:
+            destination: Target device address.
+            service_choice: Confirmed service choice number.
+            service_data: Encoded service request bytes.
+            timeout: Optional caller-level timeout in seconds. When
+                provided, the request is cancelled if no response is
+                received within this duration (raises ``asyncio.TimeoutError``).
+                When ``None``, the TSM's built-in retry/timeout logic is
+                used exclusively.
+
+        Returns:
+            ComplexACK service data, or empty bytes for SimpleACK.
         """
         if self._client_tsm is None:
             msg = "Application not started"
             raise RuntimeError(msg)
-        return await self._client_tsm.send_request(service_choice, service_data, destination)
+        coro = self._client_tsm.send_request(service_choice, service_data, destination)
+        if timeout is not None:
+            return await asyncio.wait_for(coro, timeout)
+        return await coro
 
     def unconfirmed_request(
         self,
@@ -600,7 +615,10 @@ class BACnetApplication:
                     return
                 if self._client_tsm:
                     self._client_tsm.handle_error(
-                        source, pdu.invoke_id, pdu.error_class, pdu.error_code,
+                        source,
+                        pdu.invoke_id,
+                        pdu.error_class,
+                        pdu.error_code,
                         pdu.error_data,
                     )
             case PduType.REJECT:
@@ -778,18 +796,16 @@ class BACnetApplication:
                 source,
             )
             return
-        if self._dcc_state == EnableDisable.DISABLE_INITIATION:
-            # Only process Who-Is and Who-Has when DISABLE_INITIATION
-            if pdu.service_choice not in {
-                UnconfirmedServiceChoice.WHO_IS,
-                UnconfirmedServiceChoice.WHO_HAS,
-            }:
-                logger.debug(
-                    "DCC DISABLE_INITIATION: dropping unconfirmed service %d from %s",
-                    pdu.service_choice,
-                    source,
-                )
-                return
+        if self._dcc_state == EnableDisable.DISABLE_INITIATION and pdu.service_choice not in {
+            UnconfirmedServiceChoice.WHO_IS,
+            UnconfirmedServiceChoice.WHO_HAS,
+        }:
+            logger.debug(
+                "DCC DISABLE_INITIATION: dropping unconfirmed service %d from %s",
+                pdu.service_choice,
+                source,
+            )
+            return
 
         # Dispatch to permanent handlers
         await self._service_registry.dispatch_unconfirmed(

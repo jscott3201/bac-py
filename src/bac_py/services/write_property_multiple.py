@@ -13,9 +13,6 @@ from bac_py.services.common import BACnetPropertyValue
 from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import ObjectIdentifier
 
-# Re-export for backward compatibility
-PropertyValue = BACnetPropertyValue
-
 
 @dataclass(frozen=True, slots=True)
 class WriteAccessSpecification:

@@ -484,7 +484,12 @@ class NetworkRouter:
                 )
 
     async def stop(self) -> None:
-        """Stop all port transports."""
+        """Stop all port transports and cancel active routing table timers."""
+        # Cancel any outstanding busy-timeout handles to prevent stale callbacks
+        for entry in self._routing_table.get_all_entries():
+            if entry.busy_timeout_handle is not None:
+                entry.busy_timeout_handle.cancel()
+                entry.busy_timeout_handle = None
         for port in self._routing_table.get_all_ports():
             await port.transport.stop()
 

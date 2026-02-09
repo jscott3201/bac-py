@@ -6,10 +6,10 @@ import asyncio
 import copy
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any, Callable, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 from bac_py.services.errors import BACnetError
 from bac_py.types.constructed import StatusFlags
@@ -30,7 +30,6 @@ class PropertyAccess(IntEnum):
 
     READ_ONLY = 0
     READ_WRITE = 1
-    WRITE_ONLY = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -335,14 +334,22 @@ class BACnetObject:
         if value is None:
             return value
         dtype = prop_def.datatype
-        if dtype is not None and isinstance(value, int) and not isinstance(value, IntEnum):
-            # bool is a subclass of int -- don't coerce booleans
-            if not isinstance(value, bool) and issubclass(dtype, IntEnum):
-                try:
-                    return dtype(value)
-                except ValueError:
-                    return value
-        if dtype is BACnetDouble and isinstance(value, float) and not isinstance(value, BACnetDouble):
+        if (
+            dtype is not None
+            and isinstance(value, int)
+            and not isinstance(value, IntEnum)
+            and not isinstance(value, bool)
+            and issubclass(dtype, IntEnum)
+        ):
+            try:
+                return dtype(value)
+            except ValueError:
+                return value
+        if (
+            dtype is BACnetDouble
+            and isinstance(value, float)
+            and not isinstance(value, BACnetDouble)
+        ):
             return BACnetDouble(value)
         return value
 

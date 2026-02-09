@@ -20,7 +20,7 @@ from bac_py.types.enums import (
     PropertyIdentifier,
     Segmentation,
 )
-from bac_py.types.primitives import BitString, ObjectIdentifier
+from bac_py.types.primitives import BitString
 
 
 @register_object_type

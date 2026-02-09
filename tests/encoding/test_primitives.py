@@ -34,9 +34,7 @@ from bac_py.encoding.primitives import (
     encode_date,
     encode_double,
     encode_enumerated,
-    encode_null,
     encode_object_identifier,
-    encode_octet_string,
     encode_real,
     encode_signed,
     encode_time,
@@ -185,20 +183,9 @@ class TestDouble:
 
 
 class TestOctetString:
-    def test_identity_empty(self):
-        assert encode_octet_string(b"") == b""
-
-    def test_identity(self):
-        data = b"\x01\x02\x03\x04"
-        assert encode_octet_string(data) == data
-
     def test_decode_identity(self):
         data = b"\xde\xad\xbe\xef"
         assert decode_octet_string(data) == data
-
-    def test_round_trip(self):
-        data = b"\x00\xff\x80\x7f"
-        assert decode_octet_string(encode_octet_string(data)) == data
 
 
 class TestCharacterString:
@@ -358,11 +345,6 @@ class TestObjectIdentifier:
         obj_type, instance = 59, 100
         result = decode_object_identifier(encode_object_identifier(obj_type, instance))
         assert result == (obj_type, instance)
-
-
-class TestNull:
-    def test_encode_null(self):
-        assert encode_null() == b""
 
 
 class TestBoolean:

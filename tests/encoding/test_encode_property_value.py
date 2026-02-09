@@ -4,18 +4,19 @@ import pytest
 
 from bac_py.encoding.primitives import (
     decode_application_value,
+    encode_character_string,
     encode_context_bit_string,
     encode_context_boolean,
-    encode_context_character_string,
     encode_context_date,
-    encode_context_double,
     encode_context_enumerated,
     encode_context_octet_string,
     encode_context_real,
     encode_context_signed,
-    encode_context_time,
+    encode_context_tagged,
     encode_context_unsigned,
+    encode_double,
     encode_property_value,
+    encode_time,
 )
 from bac_py.encoding.tags import TagClass, decode_tag
 from bac_py.types.constructed import StatusFlags
@@ -356,7 +357,7 @@ class TestContextTaggedHelpers:
         assert decode_real(result[offset : offset + tag.length]) == pytest.approx(3.14, rel=1e-6)
 
     def test_context_double(self):
-        result = encode_context_double(5, 3.14159265358979)
+        result = encode_context_tagged(5, encode_double(3.14159265358979))
         tag, offset = decode_tag(result, 0)
         assert tag.number == 5
         assert tag.cls == TagClass.CONTEXT
@@ -368,7 +369,7 @@ class TestContextTaggedHelpers:
         )
 
     def test_context_character_string(self):
-        result = encode_context_character_string(6, "hello")
+        result = encode_context_tagged(6, encode_character_string("hello"))
         tag, offset = decode_tag(result, 0)
         assert tag.number == 6
         assert tag.cls == TagClass.CONTEXT
@@ -407,7 +408,7 @@ class TestContextTaggedHelpers:
 
     def test_context_time(self):
         time = BACnetTime(14, 30, 45, 50)
-        result = encode_context_time(2, time)
+        result = encode_context_tagged(2, encode_time(time))
         tag, offset = decode_tag(result, 0)
         assert tag.number == 2
         assert tag.cls == TagClass.CONTEXT

@@ -12,7 +12,6 @@ import json
 import logging
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from bac_py.network.address import BIPAddress
@@ -21,6 +20,7 @@ from bac_py.types.enums import BvlcFunction, BvlcResultCode
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+    from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -234,9 +234,7 @@ class BBMDManager:
         Called whenever the BDT changes to avoid recomputing
         ``_compute_forward_address`` on every broadcast forward.
         """
-        self._bdt_forward_cache = [
-            _compute_forward_address(entry) for entry in self._bdt
-        ]
+        self._bdt_forward_cache = [_compute_forward_address(entry) for entry in self._bdt]
 
     async def start(self) -> None:
         """Start the FDT cleanup background task.
@@ -244,7 +242,7 @@ class BBMDManager:
         If a ``bdt_backup_path`` was configured and the file exists,
         the BDT is restored from it before starting.
         """
-        self._load_bdt_backup()
+        await asyncio.to_thread(self._load_bdt_backup)
         self._cleanup_task = asyncio.create_task(self._fdt_cleanup_loop())
 
     async def stop(self) -> None:
@@ -320,9 +318,7 @@ class BBMDManager:
                 return False  # Also deliver locally via normal path
 
             case BvlcFunction.FORWARDED_NPDU:
-                self._handle_forwarded_npdu(
-                    data, source, udp_source=udp_source or source
-                )
+                self._handle_forwarded_npdu(data, source, udp_source=udp_source or source)
                 return False  # BBMD delivers via _local_broadcast callback
 
             case BvlcFunction.REGISTER_FOREIGN_DEVICE:
@@ -459,9 +455,7 @@ class BBMDManager:
         """
         # F1: Use global address as originating source when configured
         forwarded_source = (
-            self._global_address
-            if self._global_address is not None
-            else originating_source
+            self._global_address if self._global_address is not None else originating_source
         )
         forwarded = encode_bvll(
             BvlcFunction.FORWARDED_NPDU,

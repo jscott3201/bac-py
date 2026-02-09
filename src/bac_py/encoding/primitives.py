@@ -7,7 +7,13 @@ import struct
 
 from bac_py.encoding.tags import TagClass, encode_closing_tag, encode_opening_tag, encode_tag
 from bac_py.types.enums import ObjectType
-from bac_py.types.primitives import BACnetDate, BACnetTime, BitString, BACnetDouble, ObjectIdentifier
+from bac_py.types.primitives import (
+    BACnetDate,
+    BACnetDouble,
+    BACnetTime,
+    BitString,
+    ObjectIdentifier,
+)
 
 # Application tag numbers for primitive types
 _TAG_NULL = 0
@@ -46,9 +52,15 @@ def _min_unsigned_bytes(value: int) -> int:
 
 
 def encode_unsigned(value: int) -> bytes:
-    """Encode an unsigned integer using minimum octets, big-endian."""
+    """Encode an unsigned integer using minimum octets, big-endian.
+
+    BACnet unsigned integers are at most 4 bytes (0..4,294,967,295).
+    """
     if value < 0:
         msg = f"Unsigned integer must be >= 0, got {value}"
+        raise ValueError(msg)
+    if value > 0xFFFFFFFF:
+        msg = f"Unsigned integer exceeds 4-byte maximum (4294967295), got {value}"
         raise ValueError(msg)
     n = _min_unsigned_bytes(value)
     return value.to_bytes(n, "big")
@@ -78,7 +90,13 @@ def _min_signed_bytes(value: int) -> int:
 
 
 def encode_signed(value: int) -> bytes:
-    """Encode a signed integer using minimum octets, 2's complement, big-endian."""
+    """Encode a signed integer using minimum octets, 2's complement, big-endian.
+
+    BACnet signed integers are at most 4 bytes (-2,147,483,648..2,147,483,647).
+    """
+    if value < -0x80000000 or value > 0x7FFFFFFF:
+        msg = f"Signed integer out of 4-byte range (-2147483648..2147483647), got {value}"
+        raise ValueError(msg)
     n = _min_signed_bytes(value)
     return value.to_bytes(n, "big", signed=True)
 
@@ -117,11 +135,6 @@ def decode_double(data: memoryview | bytes) -> float:
 
 
 # --- Octet String (Clause 20.2.8) ---
-
-
-def encode_octet_string(value: bytes) -> bytes:
-    """Encode an octet string (identity operation)."""
-    return value
 
 
 def decode_octet_string(data: memoryview | bytes) -> bytes:
@@ -199,8 +212,17 @@ def decode_bit_string(data: memoryview | bytes) -> BitString:
 
 
 def encode_date(date: BACnetDate) -> bytes:
-    """Encode a BACnet date to 4 bytes: year-1900, month, day, day-of-week."""
-    year_byte = 0xFF if date.year == 0xFF else date.year - 1900
+    """Encode a BACnet date to 4 bytes: year-1900, month, day, day-of-week.
+
+    Valid years are 1900-2155 or 0xFF (unspecified).
+    """
+    if date.year == 0xFF:
+        year_byte = 0xFF
+    elif not 1900 <= date.year <= 2155:
+        msg = f"BACnetDate year must be 1900-2155 or 0xFF (unspecified), got {date.year}"
+        raise ValueError(msg)
+    else:
+        year_byte = date.year - 1900
     return bytes([year_byte, date.month, date.day, date.day_of_week])
 
 
@@ -255,11 +277,6 @@ def decode_object_identifier(data: memoryview | bytes) -> tuple[int, int]:
 
 
 # --- Null (Clause 20.2.2) ---
-
-
-def encode_null() -> bytes:
-    """Encode a Null value (empty contents)."""
-    return b""
 
 
 # --- Boolean (Clause 20.2.3) ---
@@ -402,16 +419,6 @@ def encode_context_real(tag_number: int, value: float) -> bytes:
     return encode_context_tagged(tag_number, encode_real(value))
 
 
-def encode_context_double(tag_number: int, value: float) -> bytes:
-    """Encode a Double with a context-specific tag."""
-    return encode_context_tagged(tag_number, encode_double(value))
-
-
-def encode_context_character_string(tag_number: int, value: str) -> bytes:
-    """Encode a character string with a context-specific tag."""
-    return encode_context_tagged(tag_number, encode_character_string(value))
-
-
 def encode_context_octet_string(tag_number: int, value: bytes) -> bytes:
     """Encode an octet string with a context-specific tag."""
     return encode_context_tagged(tag_number, value)
@@ -425,11 +432,6 @@ def encode_context_bit_string(tag_number: int, value: BitString) -> bytes:
 def encode_context_date(tag_number: int, value: BACnetDate) -> bytes:
     """Encode a date with a context-specific tag."""
     return encode_context_tagged(tag_number, encode_date(value))
-
-
-def encode_context_time(tag_number: int, value: BACnetTime) -> bytes:
-    """Encode a time with a context-specific tag."""
-    return encode_context_tagged(tag_number, encode_time(value))
 
 
 def encode_application_bit_string(value: BitString) -> bytes:
@@ -554,6 +556,30 @@ def decode_all_application_values(data: bytes | memoryview) -> list[object]:
     return results
 
 
+def decode_and_unwrap(data: bytes | memoryview) -> object:
+    """Decode application-tagged bytes and unwrap single-element lists.
+
+    Convenience wrapper around :func:`decode_all_application_values` that
+    returns a single value directly when the data contains exactly one
+    application-tagged element, ``None`` for empty data, or the full
+    list for multiple elements.
+
+    Args:
+        data: Concatenated application-tagged encoded bytes.
+
+    Returns:
+        - ``None`` if *data* decodes to zero elements.
+        - The single decoded value if exactly one element.
+        - A ``list`` of decoded values if multiple elements.
+    """
+    values = decode_all_application_values(data)
+    if len(values) == 1:
+        return values[0]
+    if len(values) == 0:
+        return None
+    return values
+
+
 def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
     """Encode a Python value to application-tagged bytes.
 
@@ -575,8 +601,8 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
         BACnetAddress,
         BACnetCalendarEntry,
         BACnetCOVSubscription,
-        BACnetDateTime,
         BACnetDateRange,
+        BACnetDateTime,
         BACnetDestination,
         BACnetDeviceObjectPropertyReference,
         BACnetLogRecord,
@@ -618,9 +644,8 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
         return _encode_calendar_entry(value)
 
     if isinstance(value, BACnetTimeValue):
-        return (
-            encode_application_time(value.time)
-            + encode_property_value(value.value, int_as_real=int_as_real)
+        return encode_application_time(value.time) + encode_property_value(
+            value.value, int_as_real=int_as_real
         )
 
     if isinstance(value, BACnetSpecialEvent):
@@ -675,9 +700,8 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
         return encode_context_real(0, 0.0)
 
     if isinstance(value, BACnetPrescale):
-        return (
-            encode_context_unsigned(0, value.multiplier)
-            + encode_context_unsigned(1, value.modulo_divide)
+        return encode_context_unsigned(0, value.multiplier) + encode_context_unsigned(
+            1, value.modulo_divide
         )
 
     if isinstance(value, BACnetLogRecord):
@@ -779,9 +803,8 @@ def _encode_special_event(event: object, *, int_as_real: bool = False) -> bytes:
         buf = encode_context_object_id(1, event.period)
     buf += encode_opening_tag(2)  # listOfTimeValues
     for tv in event.list_of_time_values:
-        buf += (
-            encode_application_time(tv.time)
-            + encode_property_value(tv.value, int_as_real=int_as_real)
+        buf += encode_application_time(tv.time) + encode_property_value(
+            tv.value, int_as_real=int_as_real
         )
     buf += encode_closing_tag(2)
     buf += encode_context_unsigned(3, event.event_priority)

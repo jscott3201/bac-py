@@ -45,6 +45,9 @@ class ObjectIdentifier:
     instance_number: int
 
     def __post_init__(self) -> None:
+        if not 0 <= int(self.object_type) <= 1023:
+            msg = f"Object type must be 0-1023 (10-bit), got {int(self.object_type)}"
+            raise ValueError(msg)
         if not 0 <= self.instance_number <= 0x3FFFFF:
             msg = f"Instance number must be 0-4194303, got {self.instance_number}"
             raise ValueError(msg)
@@ -175,6 +178,12 @@ class BitString:
             unused_bits: Number of unused trailing bits in the last byte
                 (0-7).  Must be 0 when *value* is empty.
         """
+        if not 0 <= unused_bits <= 7:
+            msg = f"unused_bits must be 0-7, got {unused_bits}"
+            raise ValueError(msg)
+        if len(value) == 0 and unused_bits != 0:
+            msg = "unused_bits must be 0 when data is empty"
+            raise ValueError(msg)
         self._data = value
         self._unused_bits = unused_bits
 

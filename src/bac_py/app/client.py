@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar
+from typing import TYPE_CHECKING
 
 from bac_py.encoding.primitives import (
     decode_object_identifier,
@@ -129,6 +130,7 @@ class BACnetClient:
         object_identifier: ObjectIdentifier,
         property_identifier: PropertyIdentifier,
         array_index: int | None = None,
+        timeout: float | None = None,
     ) -> ReadPropertyACK:
         """Read a single property from a remote device.
 
@@ -137,6 +139,7 @@ class BACnetClient:
             object_identifier: Object to read from.
             property_identifier: Property to read.
             array_index: Optional array index for array properties.
+            timeout: Optional caller-level timeout in seconds.
 
         Returns:
             Decoded ReadPropertyACK containing the property value.
@@ -156,6 +159,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.READ_PROPERTY,
             service_data=request.encode(),
+            timeout=timeout,
         )
         return ReadPropertyACK.decode(response_data)
 
@@ -167,6 +171,7 @@ class BACnetClient:
         value: bytes,
         priority: int | None = None,
         array_index: int | None = None,
+        timeout: float | None = None,
     ) -> None:
         """Write a property value to a remote device.
 
@@ -177,6 +182,7 @@ class BACnetClient:
             value: Application-tagged encoded property value bytes.
             priority: Optional write priority (1-16).
             array_index: Optional array index for array properties.
+            timeout: Optional caller-level timeout in seconds.
 
         Raises:
             BACnetError: On Error-PDU response.
@@ -195,12 +201,14 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.WRITE_PROPERTY,
             service_data=request.encode(),
+            timeout=timeout,
         )
 
     async def read_property_multiple(
         self,
         address: BACnetAddress,
         read_access_specs: list[ReadAccessSpecification],
+        timeout: float | None = None,
     ) -> ReadPropertyMultipleACK:
         """Read multiple properties from one or more objects.
 
@@ -209,6 +217,7 @@ class BACnetClient:
             read_access_specs: List of read access specifications, each
                 containing an object identifier and list of property
                 references to read.
+            timeout: Optional caller-level timeout in seconds.
 
         Returns:
             Decoded ReadPropertyMultiple-ACK with per-property results.
@@ -226,6 +235,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.READ_PROPERTY_MULTIPLE,
             service_data=request.encode(),
+            timeout=timeout,
         )
         return ReadPropertyMultipleACK.decode(response_data)
 
@@ -233,6 +243,7 @@ class BACnetClient:
         self,
         address: BACnetAddress,
         write_access_specs: list[WriteAccessSpecification],
+        timeout: float | None = None,
     ) -> None:
         """Write multiple properties to one or more objects.
 
@@ -241,6 +252,7 @@ class BACnetClient:
             write_access_specs: List of write access specifications, each
                 containing an object identifier and list of property
                 values to write.
+            timeout: Optional caller-level timeout in seconds.
 
         Raises:
             BACnetError: On Error-PDU response (first failing property).
@@ -255,117 +267,10 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.WRITE_PROPERTY_MULTIPLE,
             service_data=request.encode(),
+            timeout=timeout,
         )
 
     # --- Convenience API ---
-
-    # Object types where present-value is Real (IEEE-754 float)
-    _ANALOG_TYPES = frozenset(
-        {
-            ObjectType.ANALOG_INPUT,
-            ObjectType.ANALOG_OUTPUT,
-            ObjectType.ANALOG_VALUE,
-        }
-    )
-    # Object types where present-value is Enumerated
-    _BINARY_TYPES = frozenset(
-        {
-            ObjectType.BINARY_INPUT,
-            ObjectType.BINARY_OUTPUT,
-            ObjectType.BINARY_VALUE,
-        }
-    )
-    # Object types where present-value is Unsigned
-    _MULTISTATE_TYPES = frozenset(
-        {
-            ObjectType.MULTI_STATE_INPUT,
-            ObjectType.MULTI_STATE_OUTPUT,
-            ObjectType.MULTI_STATE_VALUE,
-        }
-    )
-
-    # Expected BACnet data type tag for well-known properties.
-    # Used by _encode_for_write() to select the correct encoding
-    # when a plain int is written to a property.
-    #
-    # Tag numbers: 1=Boolean, 2=Unsigned, 4=Real, 7=CharString, 9=Enumerated
-    _PROPERTY_TYPE_HINTS: ClassVar[dict[PropertyIdentifier, int]] = {
-        PropertyIdentifier.OBJECT_NAME: 7,
-        PropertyIdentifier.DESCRIPTION: 7,
-        PropertyIdentifier.UNITS: 9,
-        PropertyIdentifier.OUT_OF_SERVICE: 1,
-        PropertyIdentifier.POLARITY: 9,
-        PropertyIdentifier.COV_INCREMENT: 4,
-        PropertyIdentifier.HIGH_LIMIT: 4,
-        PropertyIdentifier.LOW_LIMIT: 4,
-        PropertyIdentifier.DEADBAND: 4,
-        PropertyIdentifier.RELINQUISH_DEFAULT: 4,
-        PropertyIdentifier.MIN_PRES_VALUE: 4,
-        PropertyIdentifier.MAX_PRES_VALUE: 4,
-        PropertyIdentifier.RESOLUTION: 4,
-        PropertyIdentifier.RELIABILITY: 9,
-        PropertyIdentifier.EVENT_STATE: 9,
-        PropertyIdentifier.NUMBER_OF_STATES: 2,
-        PropertyIdentifier.STATE_TEXT: 7,
-        PropertyIdentifier.ACTIVE_TEXT: 7,
-        PropertyIdentifier.INACTIVE_TEXT: 7,
-        PropertyIdentifier.NOTIFICATION_CLASS: 2,
-        PropertyIdentifier.UPDATE_INTERVAL: 2,
-        PropertyIdentifier.ELAPSED_ACTIVE_TIME: 2,
-        PropertyIdentifier.MINIMUM_OFF_TIME: 2,
-        PropertyIdentifier.MINIMUM_ON_TIME: 2,
-        PropertyIdentifier.CHANGE_OF_STATE_COUNT: 2,
-        PropertyIdentifier.FEEDBACK_VALUE: 9,
-    }
-
-    async def read(
-        self,
-        address: str | BACnetAddress,
-        object_identifier: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
-        property_identifier: str | int | PropertyIdentifier,
-        array_index: int | None = None,
-    ) -> object:
-        """Read a property and return a decoded Python value.
-
-        Convenience wrapper around ``read_property()`` that parses
-        addresses and identifiers from strings and decodes the
-        returned application-tagged bytes into native Python types.
-
-        Args:
-            address: Target device (e.g. ``"192.168.1.100"``).
-            object_identifier: Object to read (e.g. ``"analog-input,1"``
-                or ``"ai,1"``).
-            property_identifier: Property to read (e.g. ``"present-value"``
-                or ``"pv"``).
-            array_index: Optional array index.
-
-        Returns:
-            Decoded Python value (``float``, ``int``, ``str``, ``bool``,
-            etc.). Returns a ``list`` if the property contains multiple
-            application-tagged values.
-
-        Example::
-
-            value = await client.read("192.168.1.100", "ai,1", "pv")
-            name = await client.read("192.168.1.100", "ai,1", "object-name")
-        """
-        from bac_py.encoding.primitives import decode_all_application_values
-        from bac_py.network.address import parse_address
-        from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
-
-        addr = parse_address(address)
-        obj_id = parse_object_identifier(object_identifier)
-        prop_id = parse_property_identifier(property_identifier)
-
-        ack = await self.read_property(addr, obj_id, prop_id, array_index)
-
-        if not ack.property_value:
-            return None
-
-        values = decode_all_application_values(ack.property_value)
-        if len(values) == 1:
-            return values[0]
-        return values
 
     def _encode_for_write(
         self,
@@ -375,21 +280,19 @@ class BACnetClient:
     ) -> bytes:
         """Encode a Python value for writing to a specific property.
 
-        Uses object type and property identifier to select the correct
-        BACnet encoding. Falls back to ``encode_property_value()`` for
-        types and properties not in the hint tables.
+        Uses the object registry's ``PropertyDefinition.datatype`` to
+        select the correct BACnet encoding.  Falls back to
+        ``encode_property_value()`` for types or properties not found
+        in the registry.
 
         Encoding priority:
 
         1. ``None`` always encodes as Null.
-        2. For ``present-value``, object-type-aware encoding is used
-           (Real for analog, Enumerated for binary, Unsigned for
-           multi-state).
-        3. For properties in ``_PROPERTY_TYPE_HINTS``, ``int`` and
-           ``float`` values are encoded according to the expected
-           BACnet data type.
-        4. Raw ``bytes`` pass through unchanged.
-        5. All other values fall back to ``encode_property_value()``.
+        2. Raw ``bytes`` pass through unchanged (pre-encoded).
+        3. Registry-based: looks up the property's declared datatype
+           from the object registry and encodes ``int``/``float``
+           values accordingly (Real, Unsigned, Enumerated, Boolean).
+        4. All other values fall back to ``encode_property_value()``.
         """
         import enum
 
@@ -406,40 +309,102 @@ class BACnetClient:
         if value is None:
             return encode_application_null()
 
-        # For present-value, use object-type-aware encoding
-        if property_identifier == PropertyIdentifier.PRESENT_VALUE:
-            if object_type in self._ANALOG_TYPES:
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    return encode_application_real(float(value))
-            elif object_type in self._BINARY_TYPES:
-                if isinstance(value, bool):
-                    return encode_application_enumerated(1 if value else 0)
-                if isinstance(value, int) and not isinstance(value, enum.IntEnum):
-                    return encode_application_enumerated(value)
-            elif (
-                object_type in self._MULTISTATE_TYPES
-                and isinstance(value, int)
-                and not isinstance(value, enum.IntEnum)
-            ):
-                return encode_application_unsigned(int(value))
-
-        # For well-known properties, use the type hint to encode int/float correctly
-        hint = self._PROPERTY_TYPE_HINTS.get(property_identifier)
-        if hint is not None and isinstance(value, (int, float)) and not isinstance(value, bool):
-            if hint == 4:  # Real
-                return encode_application_real(float(value))
-            if hint == 9:  # Enumerated
-                return encode_application_enumerated(int(value))
-            if hint == 2:  # Unsigned
-                return encode_application_unsigned(int(value))
-            if hint == 1:  # Boolean
-                return encode_application_boolean(bool(value))
-
         # Already-encoded bytes pass through
         if isinstance(value, bytes):
             return value
 
+        # Registry-based encoding: look up the property's declared
+        # datatype from the object registry and use it to select the
+        # correct encoder for int/float/bool values.
+        datatype = self._lookup_datatype(object_type, property_identifier)
+        if datatype is not None:
+            # Handle bool values: encode as Enumerated when the property
+            # expects an IntEnum (e.g., BinaryPV), or as Boolean when
+            # the property expects bool.
+            if isinstance(value, bool):
+                if issubclass(datatype, enum.IntEnum):
+                    return encode_application_enumerated(int(value))
+                if datatype is bool:
+                    return encode_application_boolean(value)
+            elif isinstance(value, (int, float)):
+                if datatype is float or issubclass(datatype, float):
+                    return encode_application_real(float(value))
+                if issubclass(datatype, enum.IntEnum):
+                    return encode_application_enumerated(int(value))
+                if datatype is int:
+                    return encode_application_unsigned(int(value))
+                if datatype is bool:
+                    return encode_application_boolean(bool(value))
+
         return encode_property_value(value)
+
+    @staticmethod
+    def _lookup_datatype(
+        object_type: ObjectType,
+        property_identifier: PropertyIdentifier,
+    ) -> type | None:
+        """Look up a property's declared datatype from the object registry.
+
+        Returns the ``PropertyDefinition.datatype`` if the object type
+        and property are found, otherwise ``None``.
+        """
+        from bac_py.objects.base import _OBJECT_REGISTRY
+
+        obj_cls = _OBJECT_REGISTRY.get(object_type)
+        if obj_cls is None:
+            return None
+        prop_def = obj_cls.PROPERTY_DEFINITIONS.get(property_identifier)
+        if prop_def is None:
+            return None
+        return prop_def.datatype
+
+    async def read(
+        self,
+        address: str | BACnetAddress,
+        object_identifier: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
+        property_identifier: str | int | PropertyIdentifier,
+        array_index: int | None = None,
+        timeout: float | None = None,
+    ) -> object:
+        """Read a property and return a decoded Python value.
+
+        Convenience wrapper around ``read_property()`` that parses
+        addresses and identifiers from strings and decodes the
+        returned application-tagged bytes into native Python types.
+
+        Args:
+            address: Target device (e.g. ``"192.168.1.100"``).
+            object_identifier: Object to read (e.g. ``"analog-input,1"``
+                or ``"ai,1"``).
+            property_identifier: Property to read (e.g. ``"present-value"``
+                or ``"pv"``).
+            array_index: Optional array index.
+            timeout: Optional caller-level timeout in seconds.
+
+        Returns:
+            Decoded Python value (``float``, ``int``, ``str``, ``bool``,
+            etc.). Returns a ``list`` if the property contains multiple
+            application-tagged values.
+
+        Example::
+
+            value = await client.read("192.168.1.100", "ai,1", "pv")
+            name = await client.read("192.168.1.100", "ai,1", "object-name")
+        """
+        from bac_py.encoding.primitives import decode_and_unwrap
+        from bac_py.network.address import parse_address
+        from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
+
+        addr = parse_address(address)
+        obj_id = parse_object_identifier(object_identifier)
+        prop_id = parse_property_identifier(property_identifier)
+
+        ack = await self.read_property(addr, obj_id, prop_id, array_index, timeout=timeout)
+
+        if not ack.property_value:
+            return None
+
+        return decode_and_unwrap(ack.property_value)
 
     async def write(
         self,
@@ -449,6 +414,7 @@ class BACnetClient:
         value: object,
         priority: int | None = None,
         array_index: int | None = None,
+        timeout: float | None = None,
     ) -> None:
         """Write a Python value to a property.
 
@@ -477,6 +443,7 @@ class BACnetClient:
             value: Python value to write (auto-encoded).
             priority: Optional write priority (1-16).
             array_index: Optional array index.
+            timeout: Optional caller-level timeout in seconds.
 
         Example::
 
@@ -493,7 +460,9 @@ class BACnetClient:
 
         encoded = self._encode_for_write(value, prop_id, obj_id.object_type)
 
-        await self.write_property(addr, obj_id, prop_id, encoded, priority, array_index)
+        await self.write_property(
+            addr, obj_id, prop_id, encoded, priority, array_index, timeout=timeout
+        )
 
     async def read_multiple(
         self,
@@ -533,7 +502,7 @@ class BACnetClient:
                     },
                 }
         """
-        from bac_py.encoding.primitives import decode_all_application_values
+        from bac_py.encoding.primitives import decode_and_unwrap
         from bac_py.network.address import parse_address
         from bac_py.services.read_property_multiple import PropertyReference
         from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
@@ -565,8 +534,7 @@ class BACnetClient:
                 if elem.property_access_error is not None:
                     props[prop_name] = None
                 elif elem.property_value is not None and elem.property_value:
-                    values = decode_all_application_values(elem.property_value)
-                    props[prop_name] = values[0] if len(values) == 1 else values
+                    props[prop_name] = decode_and_unwrap(elem.property_value)
                 else:
                     props[prop_name] = None
             result[obj_key_str] = props
@@ -619,6 +587,7 @@ class BACnetClient:
         high_limit: int | None = None,
         destination: BACnetAddress = GLOBAL_BROADCAST,
         timeout: float = 3.0,
+        expected_count: int | None = None,
     ) -> list[IAmRequest]:
         """Discover devices via Who-Is broadcast.
 
@@ -630,16 +599,24 @@ class BACnetClient:
             high_limit: Optional upper bound of device instance range.
             destination: Broadcast address (default: global broadcast).
             timeout: Seconds to wait for responses.
+            expected_count: When set, return early once this many
+                responses have been collected instead of waiting for the
+                full timeout.
 
         Returns:
             List of I-Am responses received within the timeout.
         """
         responses: list[IAmRequest] = []
+        done_event: asyncio.Event | None = (
+            asyncio.Event() if expected_count is not None else None
+        )
 
         def on_i_am(service_data: bytes, source: BACnetAddress) -> None:
             try:
                 iam = IAmRequest.decode(service_data)
                 responses.append(iam)
+                if done_event is not None and expected_count is not None and len(responses) >= expected_count:
+                    done_event.set()
             except (ValueError, IndexError):
                 logger.debug("Dropped malformed I-Am from %s", source)
 
@@ -653,8 +630,12 @@ class BACnetClient:
                 service_choice=UnconfirmedServiceChoice.WHO_IS,
                 service_data=request.encode(),
             )
-            # Collect responses for the timeout duration
-            await asyncio.sleep(timeout)
+            # Collect responses until timeout or expected_count reached
+            if done_event is not None:
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(done_event.wait(), timeout)
+            else:
+                await asyncio.sleep(timeout)
         finally:
             self._app.unregister_temporary_handler(UnconfirmedServiceChoice.I_AM, on_i_am)
 
@@ -666,6 +647,7 @@ class BACnetClient:
         high_limit: int | None = None,
         destination: BACnetAddress = GLOBAL_BROADCAST,
         timeout: float = 3.0,
+        expected_count: int | None = None,
     ) -> list[DiscoveredDevice]:
         """Discover devices via Who-Is and return enriched results.
 
@@ -678,6 +660,9 @@ class BACnetClient:
             high_limit: Optional upper bound of device instance range.
             destination: Broadcast address (default: global broadcast).
             timeout: Seconds to wait for responses.
+            expected_count: When set, return early once this many
+                devices have been discovered instead of waiting for the
+                full timeout.
 
         Returns:
             List of discovered devices with address and device info.
@@ -689,6 +674,9 @@ class BACnetClient:
                 print(dev.instance, dev.address_str, dev.vendor_id)
         """
         devices: list[DiscoveredDevice] = []
+        done_event: asyncio.Event | None = (
+            asyncio.Event() if expected_count is not None else None
+        )
 
         def on_i_am(service_data: bytes, source: BACnetAddress) -> None:
             try:
@@ -702,6 +690,8 @@ class BACnetClient:
                         segmentation_supported=iam.segmentation_supported,
                     )
                 )
+                if done_event is not None and expected_count is not None and len(devices) >= expected_count:
+                    done_event.set()
             except (ValueError, IndexError):
                 logger.debug("Dropped malformed I-Am from %s", source)
 
@@ -713,7 +703,11 @@ class BACnetClient:
                 service_choice=UnconfirmedServiceChoice.WHO_IS,
                 service_data=request.encode(),
             )
-            await asyncio.sleep(timeout)
+            if done_event is not None:
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(done_event.wait(), timeout)
+            else:
+                await asyncio.sleep(timeout)
         finally:
             self._app.unregister_temporary_handler(UnconfirmedServiceChoice.I_AM, on_i_am)
 
@@ -1097,6 +1091,7 @@ class BACnetClient:
         high_limit: int | None = None,
         destination: BACnetAddress = GLOBAL_BROADCAST,
         timeout: float = 3.0,
+        expected_count: int | None = None,
     ) -> list[IHaveRequest]:
         """Discover objects via Who-Has broadcast per Clause 16.9.
 
@@ -1111,16 +1106,24 @@ class BACnetClient:
             high_limit: Optional upper bound of device instance range.
             destination: Broadcast address (default: global broadcast).
             timeout: Seconds to wait for responses.
+            expected_count: When set, return early once this many
+                responses have been collected instead of waiting for the
+                full timeout.
 
         Returns:
             List of I-Have responses received within the timeout.
         """
         responses: list[IHaveRequest] = []
+        done_event: asyncio.Event | None = (
+            asyncio.Event() if expected_count is not None else None
+        )
 
         def on_i_have(service_data: bytes, source: BACnetAddress) -> None:
             try:
                 ihave = IHaveRequest.decode(service_data)
                 responses.append(ihave)
+                if done_event is not None and expected_count is not None and len(responses) >= expected_count:
+                    done_event.set()
             except (ValueError, IndexError):
                 logger.debug("Dropped malformed I-Have from %s", source)
 
@@ -1137,7 +1140,11 @@ class BACnetClient:
                 service_choice=UnconfirmedServiceChoice.WHO_HAS,
                 service_data=request.encode(),
             )
-            await asyncio.sleep(timeout)
+            if done_event is not None:
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(done_event.wait(), timeout)
+            else:
+                await asyncio.sleep(timeout)
         finally:
             self._app.unregister_temporary_handler(UnconfirmedServiceChoice.I_HAVE, on_i_have)
 

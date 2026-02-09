@@ -42,9 +42,8 @@ class _MultiStateBase(BACnetObject):
             num_states = self._properties.get(PropertyIdentifier.NUMBER_OF_STATES)
             if num_states is not None and (value < 1 or value > num_states):
                 raise BACnetError(ErrorClass.PROPERTY, ErrorCode.VALUE_OUT_OF_RANGE)
-        if prop_id == PropertyIdentifier.NUMBER_OF_STATES and isinstance(value, int):
-            if value < 1:
-                raise BACnetError(ErrorClass.PROPERTY, ErrorCode.VALUE_OUT_OF_RANGE)
+        if prop_id == PropertyIdentifier.NUMBER_OF_STATES and isinstance(value, int) and value < 1:
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.VALUE_OUT_OF_RANGE)
         super().write_property(prop_id, value, priority, array_index)
 
 
