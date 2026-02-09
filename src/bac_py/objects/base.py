@@ -6,7 +6,7 @@ import asyncio
 import copy
 from dataclasses import dataclass
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any, Callable, ClassVar
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -17,11 +17,12 @@ from bac_py.types.enums import (
     ErrorClass,
     ErrorCode,
     EventState,
+    NotifyType,
     ObjectType,
     PropertyIdentifier,
     Reliability,
 )
-from bac_py.types.primitives import ObjectIdentifier
+from bac_py.types.primitives import BACnetDouble, BitString, ObjectIdentifier
 
 
 class PropertyAccess(IntEnum):
@@ -165,6 +166,104 @@ def commandable_properties(
     }
 
 
+def intrinsic_reporting_properties(
+    *,
+    include_limit: bool = False,
+) -> dict[PropertyIdentifier, PropertyDefinition]:
+    """Optional intrinsic reporting properties (Clause 12, Clause 13).
+
+    These properties enable alarm/event reporting without a separate
+    EventEnrollment object.  All are optional — objects opt in by
+    merging this dict into their PROPERTY_DEFINITIONS.
+
+    Args:
+        include_limit: If True, include analog-specific limit detection
+            properties (High_Limit, Low_Limit, Deadband, Limit_Enable).
+    """
+    props: dict[PropertyIdentifier, PropertyDefinition] = {
+        PropertyIdentifier.TIME_DELAY: PropertyDefinition(
+            PropertyIdentifier.TIME_DELAY,
+            int,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.NOTIFICATION_CLASS: PropertyDefinition(
+            PropertyIdentifier.NOTIFICATION_CLASS,
+            int,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.EVENT_ENABLE: PropertyDefinition(
+            PropertyIdentifier.EVENT_ENABLE,
+            BitString,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.ACKED_TRANSITIONS: PropertyDefinition(
+            PropertyIdentifier.ACKED_TRANSITIONS,
+            BitString,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.NOTIFY_TYPE: PropertyDefinition(
+            PropertyIdentifier.NOTIFY_TYPE,
+            NotifyType,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.EVENT_TIME_STAMPS: PropertyDefinition(
+            PropertyIdentifier.EVENT_TIME_STAMPS,
+            list,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.EVENT_DETECTION_ENABLE: PropertyDefinition(
+            PropertyIdentifier.EVENT_DETECTION_ENABLE,
+            bool,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.EVENT_MESSAGE_TEXTS: PropertyDefinition(
+            PropertyIdentifier.EVENT_MESSAGE_TEXTS,
+            list,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.EVENT_MESSAGE_TEXTS_CONFIG: PropertyDefinition(
+            PropertyIdentifier.EVENT_MESSAGE_TEXTS_CONFIG,
+            list,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+    }
+    if include_limit:
+        props[PropertyIdentifier.HIGH_LIMIT] = PropertyDefinition(
+            PropertyIdentifier.HIGH_LIMIT,
+            float,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        )
+        props[PropertyIdentifier.LOW_LIMIT] = PropertyDefinition(
+            PropertyIdentifier.LOW_LIMIT,
+            float,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        )
+        props[PropertyIdentifier.DEADBAND] = PropertyDefinition(
+            PropertyIdentifier.DEADBAND,
+            float,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        )
+        props[PropertyIdentifier.LIMIT_ENABLE] = PropertyDefinition(
+            PropertyIdentifier.LIMIT_ENABLE,
+            BitString,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        )
+    return props
+
+
 class BACnetObject:
     """Base class for all BACnet objects.
 
@@ -181,6 +280,8 @@ class BACnetObject:
         self._properties: dict[PropertyIdentifier, Any] = {}
         self._priority_array: list[Any | None] | None = None
         self._write_lock = asyncio.Lock()
+        self._object_db: ObjectDatabase | None = None
+        self._on_property_written: Callable[[PropertyIdentifier, Any, Any], None] | None = None
 
         # Set defaults from property definitions.
         # Use copy.copy() to prevent mutable defaults (e.g. lists) from
@@ -217,6 +318,33 @@ class BACnetObject:
         self._priority_array = [None] * 16
         self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
         self._set_default(PropertyIdentifier.RELINQUISH_DEFAULT, relinquish_default)
+
+    @staticmethod
+    def _coerce_value(prop_def: PropertyDefinition, value: Any) -> Any:
+        """Coerce a value to the property's declared datatype if possible.
+
+        Handles two cases:
+        - IntEnum properties: plain ``int`` from wire decoding is coerced
+          to the declared IntEnum subclass (e.g. ``1`` -> ``BinaryPV.ACTIVE``).
+        - BACnetDouble properties: plain ``float`` is wrapped in BACnetDouble
+          so it encodes as Double (tag 5) instead of Real (tag 4).
+
+        Returns the value unchanged if coercion is not applicable or the
+        value is already the correct type.
+        """
+        if value is None:
+            return value
+        dtype = prop_def.datatype
+        if dtype is not None and isinstance(value, int) and not isinstance(value, IntEnum):
+            # bool is a subclass of int -- don't coerce booleans
+            if not isinstance(value, bool) and issubclass(dtype, IntEnum):
+                try:
+                    return dtype(value)
+                except ValueError:
+                    return value
+        if dtype is BACnetDouble and isinstance(value, float) and not isinstance(value, BACnetDouble):
+            return BACnetDouble(value)
+        return value
 
     def read_property(
         self,
@@ -291,6 +419,19 @@ class BACnetObject:
         ):
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.WRITE_ACCESS_DENIED)
 
+        # Object_Name uniqueness enforcement (Clause 12.1.5)
+        if prop_id == PropertyIdentifier.OBJECT_NAME and self._object_db is not None:
+            self._object_db.validate_name_unique(value, exclude=self._object_id)
+            old_name = self._properties.get(PropertyIdentifier.OBJECT_NAME)
+            self._object_db._update_name_index(self._object_id, old_name, value)
+            self._object_db._increment_database_revision()
+
+        # Coerce value to match declared property type (enum, BACnetDouble)
+        value = self._coerce_value(prop_def, value)
+
+        # Capture old value for change notification
+        old_value = self._properties.get(prop_id)
+
         if self._is_commandable(prop_id):
             effective_priority = priority if priority is not None else 16
             self._write_with_priority(prop_id, value, effective_priority)
@@ -298,6 +439,11 @@ class BACnetObject:
             self._write_array_element(prop_id, value, array_index)
         else:
             self._properties[prop_id] = value
+
+        # Fire write-change callback if registered (A2)
+        new_value = self._properties.get(prop_id)
+        if self._on_property_written is not None and old_value != new_value:
+            self._on_property_written(prop_id, old_value, new_value)
 
     async def async_write_property(
         self,
@@ -453,20 +599,32 @@ class BACnetObject:
 
 
 class ObjectDatabase:
-    """Container for all BACnet objects in a device."""
+    """Container for all BACnet objects in a device.
+
+    Enforces Object_Name uniqueness per Clause 12.1.5.
+    """
 
     def __init__(self) -> None:
         self._objects: dict[ObjectIdentifier, BACnetObject] = {}
+        self._names: dict[str, ObjectIdentifier] = {}
 
     def add(self, obj: BACnetObject) -> None:
         """Add an object to the database.
 
         Raises:
-            BACnetError: If an object with the same identifier already exists.
+            BACnetError: If an object with the same identifier or name
+                already exists.
         """
         if obj.object_identifier in self._objects:
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.OBJECT_IDENTIFIER_ALREADY_EXISTS)
+        name = obj._properties.get(PropertyIdentifier.OBJECT_NAME)
+        if name is not None and name in self._names:
+            raise BACnetError(ErrorClass.OBJECT, ErrorCode.DUPLICATE_NAME)
         self._objects[obj.object_identifier] = obj
+        if name is not None:
+            self._names[name] = obj.object_identifier
+        obj._object_db = self
+        self._increment_database_revision()
 
     def remove(self, object_id: ObjectIdentifier) -> None:
         """Remove an object from the database.
@@ -478,7 +636,49 @@ class ObjectDatabase:
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
         if object_id.object_type == ObjectType.DEVICE:
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.OBJECT_DELETION_NOT_PERMITTED)
+        obj = self._objects[object_id]
+        name = obj._properties.get(PropertyIdentifier.OBJECT_NAME)
+        if name is not None and self._names.get(name) == object_id:
+            del self._names[name]
+        obj._object_db = None
         del self._objects[object_id]
+        self._increment_database_revision()
+
+    def validate_name_unique(self, name: str, exclude: ObjectIdentifier | None = None) -> None:
+        """Check that a name is unique within the database.
+
+        Args:
+            name: The object name to check.
+            exclude: Object identifier to exclude (for rename operations).
+
+        Raises:
+            BACnetError: If the name is already in use by another object.
+        """
+        existing = self._names.get(name)
+        if existing is not None and existing != exclude:
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.DUPLICATE_NAME)
+
+    def _update_name_index(
+        self,
+        object_id: ObjectIdentifier,
+        old_name: str | None,
+        new_name: str,
+    ) -> None:
+        """Update the name index after a rename."""
+        if old_name is not None and self._names.get(old_name) == object_id:
+            del self._names[old_name]
+        self._names[new_name] = object_id
+
+    def _increment_database_revision(self) -> None:
+        """Increment Database_Revision on the Device object (Clause 12.11.23).
+
+        Called when configuration changes: object add/remove, name changes.
+        """
+        for obj in self._objects.values():
+            if obj.object_identifier.object_type == ObjectType.DEVICE:
+                current = obj._properties.get(PropertyIdentifier.DATABASE_REVISION, 0)
+                obj._properties[PropertyIdentifier.DATABASE_REVISION] = current + 1
+                break
 
     def get(self, object_id: ObjectIdentifier) -> BACnetObject | None:
         """Get an object by identifier, or None if not found."""

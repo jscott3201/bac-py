@@ -149,6 +149,16 @@ class BACnetTime:
         )
 
 
+class BACnetDouble(float):
+    """Sentinel type to distinguish Double (64-bit) from Real (32-bit) encoding.
+
+    BACnet properties like LargeAnalogValue Present_Value are specified as
+    Double (IEEE-754 64-bit, Application tag 5) per Clause 12.42.  Since
+    Python ``float`` is always 64-bit internally, we use this subclass as a
+    marker so ``encode_property_value`` can emit the correct wire tag.
+    """
+
+
 class BitString:
     """BACnet Bit String with named-bit support.
 
@@ -195,6 +205,9 @@ class BitString:
         if not isinstance(other, BitString):
             return NotImplemented
         return self._data == other._data and self._unused_bits == other._unused_bits
+
+    def __hash__(self) -> int:
+        return hash((self._data, self._unused_bits))
 
     def __repr__(self) -> str:
         bits = "".join("1" if self[i] else "0" for i in range(len(self)))

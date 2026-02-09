@@ -451,6 +451,34 @@ class PropertyIdentifier(IntEnum):
     FAULT_LOW_LIMIT = 389
     CURRENT_COMMAND_PRIORITY = 431
 
+    # NetworkPort properties (Clause 12.56, added in revision 17+)
+    NETWORK_TYPE = 441
+    NETWORK_NUMBER = 425
+    NETWORK_NUMBER_QUALITY = 443
+    CHANGES_PENDING = 416
+    COMMAND = 417
+    MAC_ADDRESS = 423
+    APDU_LENGTH = 399
+    LINK_SPEED = 420
+    LINK_SPEEDS = 421
+    LINK_SPEED_AUTONEGOTIATE = 422
+    BACNET_IP_MODE = 408
+    IP_ADDRESS = 400
+    BACNET_IP_UDP_PORT = 412
+    IP_SUBNET_MASK = 411
+    IP_DEFAULT_GATEWAY = 401
+    IP_DHCP_ENABLE = 402
+    IP_DHCP_LEASE_TIME = 403
+    IP_DHCP_LEASE_TIME_REMAINING = 404
+    IP_DHCP_SERVER = 405
+    IP_DNS_SERVER = 406
+    BACNET_IP_GLOBAL_ADDRESS = 407
+    BACNET_IP_NAT_TRAVERSAL = 409
+    BBMD_ACCEPT_FD_REGISTRATIONS = 413
+    BBMD_BROADCAST_DISTRIBUTION_TABLE = 414
+    FD_BBMD_ADDRESS = 418
+    PROTOCOL_LEVEL = 482
+
 
 class ErrorClass(IntEnum):
     """BACnet error classes (Clause 18.1.1)."""
@@ -997,6 +1025,58 @@ class Action(IntEnum):
     REVERSE = 1
 
 
+class DeviceStatus(IntEnum):
+    """BACnetDeviceStatus values (Clause 12.11.9)."""
+
+    OPERATIONAL = 0
+    OPERATIONAL_READ_ONLY = 1
+    DOWNLOAD_REQUIRED = 2
+    DOWNLOAD_IN_PROGRESS = 3
+    NON_OPERATIONAL = 4
+    BACKUP_IN_PROGRESS = 5
+
+
+class EventType(IntEnum):
+    """BACnetEventType values (Clause 12.12.6)."""
+
+    CHANGE_OF_BITSTRING = 0
+    CHANGE_OF_STATE = 1
+    CHANGE_OF_VALUE = 2
+    COMMAND_FAILURE = 3
+    FLOATING_LIMIT = 4
+    OUT_OF_RANGE = 5
+    CHANGE_OF_LIFE_SAFETY = 8
+    EXTENDED = 9
+    BUFFER_READY = 10
+    UNSIGNED_RANGE = 11
+    ACCESS_EVENT = 13
+    DOUBLE_OUT_OF_RANGE = 14
+    SIGNED_OUT_OF_RANGE = 15
+    UNSIGNED_OUT_OF_RANGE = 16
+    CHANGE_OF_CHARACTERSTRING = 17
+    CHANGE_OF_STATUS_FLAGS = 18
+    CHANGE_OF_RELIABILITY = 19
+    NONE = 20
+    CHANGE_OF_DISCRETE_VALUE = 21
+    CHANGE_OF_TIMER = 22
+
+
+class LoggingType(IntEnum):
+    """BACnetLoggingType values (Clause 12.25.14)."""
+
+    POLLED = 0
+    COV = 1
+    TRIGGERED = 2
+
+
+class NotifyType(IntEnum):
+    """BACnetNotifyType values (Clause 12.21)."""
+
+    ALARM = 0
+    EVENT = 1
+    ACK_NOTIFICATION = 2
+
+
 class RejectMessageReason(IntEnum):
     """Reject-Message-To-Network reason codes (Clause 6.4.4)."""
 
@@ -1015,3 +1095,181 @@ class NetworkReachability(IntEnum):
     REACHABLE = 0
     BUSY = 1
     UNREACHABLE = 2
+
+
+class NetworkType(IntEnum):
+    """BACnet data link/network layer type (Clause 12.56.44)."""
+
+    ETHERNET = 0
+    ARCNET = 1
+    MSTP = 2
+    PTP = 3
+    LONTALK = 4
+    IPV4 = 5
+    ZIGBEE = 6
+    VIRTUAL = 7
+    NON_BACNET = 8  # removed in protocol revision 16
+    IPV6 = 9
+    SERIAL = 10
+
+
+class IPMode(IntEnum):
+    """IP addressing mode for a NetworkPort (Clause 12.56)."""
+
+    NORMAL = 0
+    FOREIGN = 1
+    BBMD = 2
+
+
+class NetworkPortCommand(IntEnum):
+    """Commands for a NetworkPort object (Clause 12.56.40)."""
+
+    IDLE = 0
+    DISCARD_CHANGES = 1
+    RENEW_FD_REGISTRATION = 2
+    RESTART_SLAVE_DISCOVERY = 3
+    RENEW_DHCP = 4
+    RESTART_AUTONEG = 5
+    DISCONNECT = 6
+    RESTART_PORT = 7
+
+
+class NetworkNumberQuality(IntEnum):
+    """Quality of a NetworkPort's network number (Clause 12.56.42)."""
+
+    UNKNOWN = 0
+    LEARNED = 1
+    LEARNED_CONFIGURED = 2
+    CONFIGURED = 3
+
+
+class ProtocolLevel(IntEnum):
+    """Protocol level of a NetworkPort (Clause 12.56)."""
+
+    PHYSICAL = 0
+    PROTOCOL = 1
+    BACNET_APPLICATION = 2
+    NON_BACNET_APPLICATION = 3
+
+
+class WriteStatus(IntEnum):
+    """Status of the last Channel write operation (Clause 12.53)."""
+
+    IDLE = 0
+    IN_PROGRESS = 1
+    SUCCESSFUL = 2
+    FAILED = 3
+
+
+class LifeSafetyState(IntEnum):
+    """Life safety point/zone sensor state (Clause 12.15/12.16)."""
+
+    QUIET = 0
+    PRE_ALARM = 1
+    ALARM = 2
+    FAULT = 3
+    FAULT_PRE_ALARM = 4
+    FAULT_ALARM = 5
+    NOT_READY = 6
+    ACTIVE = 7
+    TAMPER = 8
+    TEST_ALARM = 9
+    TEST_ACTIVE = 10
+    TEST_FAULT = 11
+    TEST_FAULT_ALARM = 12
+    HOLDUP = 13
+    DURESS = 14
+    TAMPER_ALARM = 15
+    ABNORMAL = 16
+    EMERGENCY_POWER = 17
+    DELAYED = 18
+    BLOCKED = 19
+    LOCAL_ALARM = 20
+    GENERAL_ALARM = 21
+    SUPERVISORY = 22
+    TEST_SUPERVISORY = 23
+
+
+class LifeSafetyMode(IntEnum):
+    """Life safety operating mode (Clause 12.15.12)."""
+
+    OFF = 0
+    ON = 1
+    TEST = 2
+    MANNED = 3
+    UNMANNED = 4
+    ARMED = 5
+    DISARMED = 6
+    PRE_ARMED = 7
+    SLOW = 8
+    FAST = 9
+    DISCONNECTED = 10
+    ENABLED = 11
+    DISABLED = 12
+    AUTOMATIC_RELEASE_DISABLED = 13
+    DEFAULT = 14
+
+
+class LifeSafetyOperation(IntEnum):
+    """Life safety commanded operation (Clause 12.15.13)."""
+
+    NONE = 0
+    SILENCE = 1
+    SILENCE_AUDIBLE = 2
+    SILENCE_VISUAL = 3
+    SILENCE_ALL = 4
+    UNSILENCE = 5
+    UNSILENCE_AUDIBLE = 6
+    UNSILENCE_VISUAL = 7
+    UNSILENCE_ALL = 8
+    RESET = 9
+    RESET_ALARM = 10
+    RESET_FAULT = 11
+
+
+class SilencedState(IntEnum):
+    """Silenced state for a life safety point/zone (Clause 12.15.14)."""
+
+    UNSILENCED = 0
+    AUDIBLE_SILENCED = 1
+    VISIBLE_SILENCED = 2
+    ALL_SILENCED = 3
+
+
+class DoorStatus(IntEnum):
+    """Door physical status (Clause 12.30)."""
+
+    CLOSED = 0
+    OPENED = 1
+    UNKNOWN = 2
+
+
+class DoorValue(IntEnum):
+    """Door commanded state (Clause 12.30)."""
+
+    LOCK = 0
+    UNLOCK = 1
+
+
+class LockStatus(IntEnum):
+    """Lock physical status (Clause 12.30)."""
+
+    LOCKED = 0
+    UNLOCKED = 1
+    LOCK_FAULT = 2
+    UNUSED = 3
+    UNKNOWN = 4
+
+
+class DoorAlarmState(IntEnum):
+    """Door alarm state (Clause 12.30)."""
+
+    NORMAL = 0
+    ALARM = 1
+    DOOR_OPEN_TOO_LONG = 2
+    FORCED_OPEN = 3
+    TAMPER = 4
+    DOOR_FAULT = 5
+    LOCK_DOWN = 6
+    FREE_ACCESS = 7
+    EGRESS_OPEN = 8

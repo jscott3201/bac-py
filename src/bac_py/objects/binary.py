@@ -9,6 +9,7 @@ from bac_py.objects.base import (
     PropertyAccess,
     PropertyDefinition,
     commandable_properties,
+    intrinsic_reporting_properties,
     register_object_type,
     standard_properties,
     status_properties,
@@ -67,11 +68,31 @@ class BinaryInputObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
+        PropertyIdentifier.ALARM_VALUE: PropertyDefinition(
+            PropertyIdentifier.ALARM_VALUE,
+            BinaryPV,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        **intrinsic_reporting_properties(),
     }
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
         self._init_status_flags()
+
+    def read_property(
+        self,
+        prop_id: PropertyIdentifier,
+        array_index: int | None = None,
+    ) -> Any:
+        """Read property with polarity inversion for Present_Value (Clause 12.6.15)."""
+        value = super().read_property(prop_id, array_index)
+        if prop_id == PropertyIdentifier.PRESENT_VALUE:
+            polarity = self._properties.get(PropertyIdentifier.POLARITY, Polarity.NORMAL)
+            if polarity == Polarity.REVERSE:
+                value = BinaryPV.ACTIVE if value == BinaryPV.INACTIVE else BinaryPV.INACTIVE
+        return value
 
 
 @register_object_type
@@ -138,6 +159,7 @@ class BinaryOutputObject(BACnetObject):
             PropertyAccess.READ_ONLY,
             required=False,
         ),
+        **intrinsic_reporting_properties(),
     }
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
@@ -145,6 +167,19 @@ class BinaryOutputObject(BACnetObject):
         # Always commandable
         self._init_commandable(BinaryPV.INACTIVE)
         self._init_status_flags()
+
+    def read_property(
+        self,
+        prop_id: PropertyIdentifier,
+        array_index: int | None = None,
+    ) -> Any:
+        """Read property with polarity inversion for Present_Value (Clause 12.7.15)."""
+        value = super().read_property(prop_id, array_index)
+        if prop_id == PropertyIdentifier.PRESENT_VALUE:
+            polarity = self._properties.get(PropertyIdentifier.POLARITY, Polarity.NORMAL)
+            if polarity == Polarity.REVERSE:
+                value = BinaryPV.ACTIVE if value == BinaryPV.INACTIVE else BinaryPV.INACTIVE
+        return value
 
 
 @register_object_type
@@ -192,6 +227,13 @@ class BinaryValueObject(BACnetObject):
             required=False,
         ),
         **commandable_properties(BinaryPV, BinaryPV.INACTIVE, required=False),
+        PropertyIdentifier.ALARM_VALUE: PropertyDefinition(
+            PropertyIdentifier.ALARM_VALUE,
+            BinaryPV,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        **intrinsic_reporting_properties(),
     }
 
     def __init__(

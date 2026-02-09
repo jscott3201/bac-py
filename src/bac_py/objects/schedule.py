@@ -12,11 +12,13 @@ from bac_py.objects.base import (
     standard_properties,
     status_properties,
 )
+from bac_py.types.constructed import BACnetDateRange
 from bac_py.types.enums import (
     ObjectType,
     PropertyIdentifier,
     Reliability,
 )
+from bac_py.types.primitives import BACnetDate
 
 
 @register_object_type
@@ -40,7 +42,7 @@ class ScheduleObject(BACnetObject):
         ),
         PropertyIdentifier.EFFECTIVE_PERIOD: PropertyDefinition(
             PropertyIdentifier.EFFECTIVE_PERIOD,
-            tuple,
+            BACnetDateRange,
             PropertyAccess.READ_WRITE,
             required=True,
         ),
@@ -87,7 +89,10 @@ class ScheduleObject(BACnetObject):
         self._init_status_flags()
         self._set_default(
             PropertyIdentifier.EFFECTIVE_PERIOD,
-            ((1900, 1, 1), (2155, 12, 31)),
+            BACnetDateRange(
+                start_date=BACnetDate(1900, 1, 1, 0xFF),
+                end_date=BACnetDate(2155, 12, 31, 0xFF),
+            ),
         )
         self._set_default(PropertyIdentifier.LIST_OF_OBJECT_PROPERTY_REFERENCES, [])
         self._set_default(PropertyIdentifier.PRIORITY_FOR_WRITING, 16)

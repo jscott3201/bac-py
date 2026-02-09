@@ -12,6 +12,7 @@ from bac_py.objects.base import (
     standard_properties,
     status_properties,
 )
+from bac_py.types.constructed import BACnetObjectPropertyReference
 from bac_py.types.enums import (
     Action,
     EngineeringUnits,
@@ -43,7 +44,7 @@ class LoopObject(BACnetObject):
         **status_properties(),
         PropertyIdentifier.CONTROLLED_VARIABLE_REFERENCE: PropertyDefinition(
             PropertyIdentifier.CONTROLLED_VARIABLE_REFERENCE,
-            object,
+            BACnetObjectPropertyReference,
             PropertyAccess.READ_WRITE,
             required=True,
         ),
@@ -63,13 +64,13 @@ class LoopObject(BACnetObject):
         ),
         PropertyIdentifier.MANIPULATED_VARIABLE_REFERENCE: PropertyDefinition(
             PropertyIdentifier.MANIPULATED_VARIABLE_REFERENCE,
-            object,
+            BACnetObjectPropertyReference,
             PropertyAccess.READ_WRITE,
             required=True,
         ),
         PropertyIdentifier.SETPOINT_REFERENCE: PropertyDefinition(
             PropertyIdentifier.SETPOINT_REFERENCE,
-            object,
+            BACnetObjectPropertyReference,
             PropertyAccess.READ_WRITE,
             required=True,
         ),

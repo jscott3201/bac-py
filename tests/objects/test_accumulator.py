@@ -5,7 +5,7 @@ import pytest
 from bac_py.objects.accumulator import AccumulatorObject
 from bac_py.objects.base import create_object
 from bac_py.services.errors import BACnetError
-from bac_py.types.constructed import StatusFlags
+from bac_py.types.constructed import BACnetScale, StatusFlags
 from bac_py.types.enums import (
     EngineeringUnits,
     ErrorCode,
@@ -62,11 +62,13 @@ class TestAccumulatorObject:
 
     def test_scale_default(self):
         acc = AccumulatorObject(1)
-        assert acc.read_property(PropertyIdentifier.SCALE) == 1.0
+        scale = acc.read_property(PropertyIdentifier.SCALE)
+        assert isinstance(scale, BACnetScale)
+        assert scale.float_scale == 1.0
 
-    def test_prescale_default(self):
+    def test_prescale_optional(self):
         acc = AccumulatorObject(1)
-        assert acc.read_property(PropertyIdentifier.PRESCALE) == 1
+        assert acc.read_property(PropertyIdentifier.PRESCALE) is None
 
     def test_max_pres_value_default(self):
         acc = AccumulatorObject(1)
@@ -92,7 +94,6 @@ class TestAccumulatorObject:
         assert PropertyIdentifier.STATUS_FLAGS in plist
         assert PropertyIdentifier.UNITS in plist
         assert PropertyIdentifier.SCALE in plist
-        assert PropertyIdentifier.PRESCALE in plist
         assert PropertyIdentifier.MAX_PRES_VALUE in plist
         assert PropertyIdentifier.OBJECT_IDENTIFIER not in plist
 

@@ -9,6 +9,7 @@ from bac_py.objects.base import (
     PropertyAccess,
     PropertyDefinition,
     commandable_properties,
+    intrinsic_reporting_properties,
     register_object_type,
     standard_properties,
     status_properties,
@@ -26,7 +27,8 @@ class _MultiStateBase(BACnetObject):
     """Shared validation for multi-state object types.
 
     Validates that Present_Value is within 1..Number_Of_States
-    on writes per Clause 12.18/12.19/12.20.
+    on writes per Clause 12.18/12.19/12.20 and that
+    Number_Of_States >= 1.
     """
 
     def write_property(
@@ -39,6 +41,9 @@ class _MultiStateBase(BACnetObject):
         if prop_id == PropertyIdentifier.PRESENT_VALUE and isinstance(value, int):
             num_states = self._properties.get(PropertyIdentifier.NUMBER_OF_STATES)
             if num_states is not None and (value < 1 or value > num_states):
+                raise BACnetError(ErrorClass.PROPERTY, ErrorCode.VALUE_OUT_OF_RANGE)
+        if prop_id == PropertyIdentifier.NUMBER_OF_STATES and isinstance(value, int):
+            if value < 1:
                 raise BACnetError(ErrorClass.PROPERTY, ErrorCode.VALUE_OUT_OF_RANGE)
         super().write_property(prop_id, value, priority, array_index)
 
@@ -81,6 +86,19 @@ class MultiStateInputObject(_MultiStateBase):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
+        PropertyIdentifier.FAULT_VALUES: PropertyDefinition(
+            PropertyIdentifier.FAULT_VALUES,
+            list,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.ALARM_VALUES: PropertyDefinition(
+            PropertyIdentifier.ALARM_VALUES,
+            list,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        **intrinsic_reporting_properties(),
     }
 
     def __init__(
@@ -135,6 +153,7 @@ class MultiStateOutputObject(_MultiStateBase):
             required=False,
         ),
         **commandable_properties(int, 1),
+        **intrinsic_reporting_properties(),
     }
 
     def __init__(
@@ -185,6 +204,19 @@ class MultiStateValueObject(_MultiStateBase):
             required=False,
         ),
         **commandable_properties(int, 1, required=False),
+        PropertyIdentifier.FAULT_VALUES: PropertyDefinition(
+            PropertyIdentifier.FAULT_VALUES,
+            list,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.ALARM_VALUES: PropertyDefinition(
+            PropertyIdentifier.ALARM_VALUES,
+            list,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        **intrinsic_reporting_properties(),
     }
 
     def __init__(

@@ -12,7 +12,10 @@ from bac_py.objects.base import (
     standard_properties,
     status_properties,
 )
+from bac_py.types.constructed import BACnetDeviceObjectPropertyReference
 from bac_py.types.enums import (
+    EventType,
+    NotifyType,
     ObjectType,
     PropertyIdentifier,
     Reliability,
@@ -34,19 +37,19 @@ class EventEnrollmentObject(BACnetObject):
         **standard_properties(),
         PropertyIdentifier.EVENT_TYPE: PropertyDefinition(
             PropertyIdentifier.EVENT_TYPE,
-            int,
+            EventType,
             PropertyAccess.READ_ONLY,
             required=True,
         ),
         PropertyIdentifier.EVENT_PARAMETERS: PropertyDefinition(
             PropertyIdentifier.EVENT_PARAMETERS,
-            object,
+            object,  # BACnetEventParameter - complex CHOICE, kept as object for now
             PropertyAccess.READ_WRITE,
             required=True,
         ),
         PropertyIdentifier.OBJECT_PROPERTY_REFERENCE: PropertyDefinition(
             PropertyIdentifier.OBJECT_PROPERTY_REFERENCE,
-            object,
+            BACnetDeviceObjectPropertyReference,
             PropertyAccess.READ_WRITE,
             required=True,
         ),
@@ -69,10 +72,10 @@ class EventEnrollmentObject(BACnetObject):
         ),
         PropertyIdentifier.NOTIFY_TYPE: PropertyDefinition(
             PropertyIdentifier.NOTIFY_TYPE,
-            int,
+            NotifyType,
             PropertyAccess.READ_WRITE,
             required=True,
-            default=0,
+            default=NotifyType.ALARM,
         ),
         PropertyIdentifier.EVENT_TIME_STAMPS: PropertyDefinition(
             PropertyIdentifier.EVENT_TIME_STAMPS,
@@ -97,8 +100,8 @@ class EventEnrollmentObject(BACnetObject):
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
-        # Default event_type to 0 (change-of-bitstring) if not set
-        self._set_default(PropertyIdentifier.EVENT_TYPE, 0)
+        # Default event_type to CHANGE_OF_BITSTRING if not set
+        self._set_default(PropertyIdentifier.EVENT_TYPE, EventType.CHANGE_OF_BITSTRING)
         # Default event_parameters if not set
         self._set_default(PropertyIdentifier.EVENT_PARAMETERS, None)
         # Default object property reference if not set

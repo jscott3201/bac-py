@@ -9,8 +9,17 @@ from bac_py.objects.base import (
     PropertyAccess,
     PropertyDefinition,
     register_object_type,
+    standard_properties,
 )
-from bac_py.types.enums import ObjectType, PropertyIdentifier, Segmentation
+from bac_py.services.errors import BACnetError
+from bac_py.types.enums import (
+    DeviceStatus,
+    ErrorClass,
+    ErrorCode,
+    ObjectType,
+    PropertyIdentifier,
+    Segmentation,
+)
 from bac_py.types.primitives import BitString, ObjectIdentifier
 
 
@@ -24,30 +33,13 @@ class DeviceObject(BACnetObject):
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.DEVICE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
+        **standard_properties(),
         PropertyIdentifier.SYSTEM_STATUS: PropertyDefinition(
             PropertyIdentifier.SYSTEM_STATUS,
-            int,
+            DeviceStatus,
             PropertyAccess.READ_ONLY,
             required=True,
-            default=0,  # operational
+            default=DeviceStatus.OPERATIONAL,
         ),
         PropertyIdentifier.VENDOR_NAME: PropertyDefinition(
             PropertyIdentifier.VENDOR_NAME,
@@ -167,18 +159,6 @@ class DeviceObject(BACnetObject):
             required=True,
             default=0,
         ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
         PropertyIdentifier.ACTIVE_COV_SUBSCRIPTIONS: PropertyDefinition(
             PropertyIdentifier.ACTIVE_COV_SUBSCRIPTIONS,
             list,
@@ -199,3 +179,20 @@ class DeviceObject(BACnetObject):
             BitString(b"\x00\x00\x00\x00\x00\x00\x00\x00", 0),
         )
         self._set_default(PropertyIdentifier.OBJECT_LIST, [])
+
+    def read_property(
+        self,
+        prop_id: PropertyIdentifier,
+        array_index: int | None = None,
+    ) -> Any:
+        """Read property with virtual Object_List from database (Clause 12.11.19)."""
+        if prop_id == PropertyIdentifier.OBJECT_LIST and self._object_db is not None:
+            all_ids = self._object_db.object_list
+            if array_index is not None:
+                if array_index == 0:
+                    return len(all_ids)
+                if 1 <= array_index <= len(all_ids):
+                    return all_ids[array_index - 1]
+                raise BACnetError(ErrorClass.PROPERTY, ErrorCode.INVALID_ARRAY_INDEX)
+            return all_ids
+        return super().read_property(prop_id, array_index)

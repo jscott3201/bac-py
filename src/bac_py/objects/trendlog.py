@@ -12,7 +12,9 @@ from bac_py.objects.base import (
     standard_properties,
     status_properties,
 )
+from bac_py.types.constructed import BACnetDateTime, BACnetDeviceObjectPropertyReference
 from bac_py.types.enums import (
+    LoggingType,
     ObjectType,
     PropertyIdentifier,
 )
@@ -75,10 +77,10 @@ class TrendLogObject(BACnetObject):
         ),
         PropertyIdentifier.LOGGING_TYPE: PropertyDefinition(
             PropertyIdentifier.LOGGING_TYPE,
-            int,
+            LoggingType,
             PropertyAccess.READ_WRITE,
             required=True,
-            default=0,
+            default=LoggingType.POLLED,
         ),
         PropertyIdentifier.LOG_INTERVAL: PropertyDefinition(
             PropertyIdentifier.LOG_INTERVAL,
@@ -88,19 +90,19 @@ class TrendLogObject(BACnetObject):
         ),
         PropertyIdentifier.START_TIME: PropertyDefinition(
             PropertyIdentifier.START_TIME,
-            object,
+            BACnetDateTime,
             PropertyAccess.READ_WRITE,
             required=False,
         ),
         PropertyIdentifier.STOP_TIME: PropertyDefinition(
             PropertyIdentifier.STOP_TIME,
-            object,
+            BACnetDateTime,
             PropertyAccess.READ_WRITE,
             required=False,
         ),
         PropertyIdentifier.LOG_DEVICE_OBJECT_PROPERTY: PropertyDefinition(
             PropertyIdentifier.LOG_DEVICE_OBJECT_PROPERTY,
-            object,
+            BACnetDeviceObjectPropertyReference,
             PropertyAccess.READ_WRITE,
             required=False,
         ),
@@ -134,4 +136,4 @@ class TrendLogObject(BACnetObject):
         super().__init__(instance_number, **initial_properties)
         self._init_status_flags()
         self._set_default(PropertyIdentifier.LOG_BUFFER, [])
-        self._set_default(PropertyIdentifier.LOGGING_TYPE, 0)
+        self._set_default(PropertyIdentifier.LOGGING_TYPE, LoggingType.POLLED)

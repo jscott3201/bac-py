@@ -12,6 +12,7 @@ from bac_py.objects.base import (
     standard_properties,
 )
 from bac_py.services.errors import BACnetError
+from bac_py.types.constructed import BACnetDateTime
 from bac_py.types.enums import (
     ErrorClass,
     ErrorCode,
@@ -49,7 +50,7 @@ class FileObject(BACnetObject):
         ),
         PropertyIdentifier.MODIFICATION_DATE: PropertyDefinition(
             PropertyIdentifier.MODIFICATION_DATE,
-            tuple,
+            BACnetDateTime,
             PropertyAccess.READ_ONLY,
             required=True,
         ),

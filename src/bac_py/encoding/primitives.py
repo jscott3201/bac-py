@@ -7,7 +7,7 @@ import struct
 
 from bac_py.encoding.tags import TagClass, encode_tag
 from bac_py.types.enums import ObjectType
-from bac_py.types.primitives import BACnetDate, BACnetTime, BitString, ObjectIdentifier
+from bac_py.types.primitives import BACnetDate, BACnetTime, BitString, BACnetDouble, ObjectIdentifier
 
 # Application tag numbers for primitive types
 _TAG_NULL = 0
@@ -373,6 +373,65 @@ def encode_context_object_id(tag_number: int, obj_id: ObjectIdentifier) -> bytes
     return encode_context_tagged(tag_number, obj_id.encode())
 
 
+def encode_context_unsigned(tag_number: int, value: int) -> bytes:
+    """Encode an unsigned integer with a context-specific tag."""
+    return encode_context_tagged(tag_number, encode_unsigned(value))
+
+
+def encode_context_signed(tag_number: int, value: int) -> bytes:
+    """Encode a signed integer with a context-specific tag."""
+    return encode_context_tagged(tag_number, encode_signed(value))
+
+
+def encode_context_enumerated(tag_number: int, value: int) -> bytes:
+    """Encode an enumerated value with a context-specific tag."""
+    return encode_context_tagged(tag_number, encode_enumerated(value))
+
+
+def encode_context_boolean(tag_number: int, value: bool) -> bytes:
+    """Encode a boolean with a context-specific tag.
+
+    Context-tagged booleans use a 1-byte contents octet, unlike
+    application-tagged booleans which encode the value in the tag LVT.
+    """
+    return encode_context_tagged(tag_number, encode_boolean(value))
+
+
+def encode_context_real(tag_number: int, value: float) -> bytes:
+    """Encode a Real with a context-specific tag."""
+    return encode_context_tagged(tag_number, encode_real(value))
+
+
+def encode_context_double(tag_number: int, value: float) -> bytes:
+    """Encode a Double with a context-specific tag."""
+    return encode_context_tagged(tag_number, encode_double(value))
+
+
+def encode_context_character_string(tag_number: int, value: str) -> bytes:
+    """Encode a character string with a context-specific tag."""
+    return encode_context_tagged(tag_number, encode_character_string(value))
+
+
+def encode_context_octet_string(tag_number: int, value: bytes) -> bytes:
+    """Encode an octet string with a context-specific tag."""
+    return encode_context_tagged(tag_number, value)
+
+
+def encode_context_bit_string(tag_number: int, value: BitString) -> bytes:
+    """Encode a bit string with a context-specific tag."""
+    return encode_context_tagged(tag_number, encode_bit_string(value))
+
+
+def encode_context_date(tag_number: int, value: BACnetDate) -> bytes:
+    """Encode a date with a context-specific tag."""
+    return encode_context_tagged(tag_number, encode_date(value))
+
+
+def encode_context_time(tag_number: int, value: BACnetTime) -> bytes:
+    """Encode a time with a context-specific tag."""
+    return encode_context_tagged(tag_number, encode_time(value))
+
+
 def encode_application_bit_string(value: BitString) -> bytes:
     """Encode an application-tagged Bit String."""
     data = encode_bit_string(value)
@@ -511,18 +570,31 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
     Raises:
         TypeError: If the value type is not supported.
     """
+    from bac_py.types.constructed import StatusFlags
+
+    if value is None:
+        return encode_application_null()
     if isinstance(value, ObjectIdentifier):
         return encode_application_object_id(value.object_type, value.instance_number)
+    if isinstance(value, StatusFlags):
+        return encode_application_bit_string(value.to_bit_string())
     if isinstance(value, BitString):
         return encode_application_bit_string(value)
+    if isinstance(value, BACnetDate):
+        return encode_application_date(value)
+    if isinstance(value, BACnetTime):
+        return encode_application_time(value)
     if isinstance(value, str):
         return encode_application_character_string(value)
     if isinstance(value, bool):
         # Must check bool before int since bool is a subclass of int
-        return encode_application_enumerated(int(value))
+        return encode_application_boolean(value)
     if isinstance(value, enum.IntEnum):
         # Must check IntEnum before int since IntEnum is a subclass of int
         return encode_application_enumerated(value)
+    if isinstance(value, BACnetDouble):
+        # Must check BACnetDouble before float since BACnetDouble is a subclass of float
+        return encode_application_double(value)
     if isinstance(value, float):
         return encode_application_real(value)
     if isinstance(value, int):

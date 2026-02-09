@@ -13,11 +13,13 @@ from bac_py.objects.base import (
     standard_properties,
     status_properties,
 )
+from bac_py.types.constructed import BACnetDateTime
 from bac_py.types.enums import (
     EngineeringUnits,
     ObjectType,
     PropertyIdentifier,
 )
+from bac_py.types.primitives import BACnetDate, BACnetDouble, BACnetTime
 
 
 @register_object_type
@@ -168,10 +170,10 @@ class LargeAnalogValueObject(BACnetObject):
         **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
-            float,
+            BACnetDouble,
             PropertyAccess.READ_WRITE,
             required=True,
-            default=0.0,
+            default=BACnetDouble(0.0),
         ),
         **status_properties(),
         PropertyIdentifier.UNITS: PropertyDefinition(
@@ -183,29 +185,29 @@ class LargeAnalogValueObject(BACnetObject):
         ),
         PropertyIdentifier.MIN_PRES_VALUE: PropertyDefinition(
             PropertyIdentifier.MIN_PRES_VALUE,
-            float,
+            BACnetDouble,
             PropertyAccess.READ_ONLY,
             required=False,
         ),
         PropertyIdentifier.MAX_PRES_VALUE: PropertyDefinition(
             PropertyIdentifier.MAX_PRES_VALUE,
-            float,
+            BACnetDouble,
             PropertyAccess.READ_ONLY,
             required=False,
         ),
         PropertyIdentifier.RESOLUTION: PropertyDefinition(
             PropertyIdentifier.RESOLUTION,
-            float,
+            BACnetDouble,
             PropertyAccess.READ_ONLY,
             required=False,
         ),
         PropertyIdentifier.COV_INCREMENT: PropertyDefinition(
             PropertyIdentifier.COV_INCREMENT,
-            float,
+            BACnetDouble,
             PropertyAccess.READ_WRITE,
             required=False,
         ),
-        **commandable_properties(float, 0.0, required=False),
+        **commandable_properties(BACnetDouble, BACnetDouble(0.0), required=False),
     }
 
     def __init__(
@@ -217,7 +219,7 @@ class LargeAnalogValueObject(BACnetObject):
     ) -> None:
         super().__init__(instance_number, **initial_properties)
         if commandable:
-            self._init_commandable(0.0)
+            self._init_commandable(BACnetDouble(0.0))
         self._init_status_flags()
 
 
@@ -261,7 +263,7 @@ class CharacterStringValueObject(BACnetObject):
 class DateTimeValueObject(BACnetObject):
     """BACnet DateTime Value object (Clause 12.40).
 
-    Represents a date/time value as a tuple.  Optionally commandable when
+    Represents a date/time value.  Optionally commandable when
     constructed with ``commandable=True``.
     """
 
@@ -271,12 +273,12 @@ class DateTimeValueObject(BACnetObject):
         **standard_properties(),
         PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
             PropertyIdentifier.PRESENT_VALUE,
-            tuple,
+            BACnetDateTime,
             PropertyAccess.READ_WRITE,
             required=True,
         ),
         **status_properties(),
-        **commandable_properties(tuple, None, required=False),
+        **commandable_properties(BACnetDateTime, None, required=False),
         PropertyIdentifier.IS_UTC: PropertyDefinition(
             PropertyIdentifier.IS_UTC,
             bool,
@@ -378,4 +380,167 @@ class OctetStringValueObject(BACnetObject):
         super().__init__(instance_number, **initial_properties)
         if commandable:
             self._init_commandable(b"")
+        self._init_status_flags()
+
+
+@register_object_type
+class DateValueObject(BACnetObject):
+    """BACnet Date Value object (Clause 12.38).
+
+    Represents a single date value.  Optionally commandable when
+    constructed with ``commandable=True``.
+    """
+
+    OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.DATE_VALUE
+
+    PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
+        **standard_properties(),
+        PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
+            PropertyIdentifier.PRESENT_VALUE,
+            BACnetDate,
+            PropertyAccess.READ_WRITE,
+            required=True,
+        ),
+        **status_properties(),
+        **commandable_properties(BACnetDate, None, required=False),
+        PropertyIdentifier.IS_UTC: PropertyDefinition(
+            PropertyIdentifier.IS_UTC,
+            bool,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+    }
+
+    def __init__(
+        self,
+        instance_number: int,
+        *,
+        commandable: bool = False,
+        **initial_properties: Any,
+    ) -> None:
+        super().__init__(instance_number, **initial_properties)
+        if commandable:
+            self._init_commandable(None)
+        self._init_status_flags()
+
+
+@register_object_type
+class DatePatternValueObject(BACnetObject):
+    """BACnet Date Pattern Value object (Clause 12.39).
+
+    Represents a date pattern with optional wildcards (0xFF).
+    """
+
+    OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.DATEPATTERN_VALUE
+
+    PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
+        **standard_properties(),
+        PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
+            PropertyIdentifier.PRESENT_VALUE,
+            BACnetDate,
+            PropertyAccess.READ_WRITE,
+            required=True,
+        ),
+        **status_properties(),
+    }
+
+    def __init__(self, instance_number: int, **initial_properties: Any) -> None:
+        super().__init__(instance_number, **initial_properties)
+        self._init_status_flags()
+
+
+@register_object_type
+class TimeValueObject(BACnetObject):
+    """BACnet Time Value object (Clause 12.46).
+
+    Represents a single time value.  Optionally commandable when
+    constructed with ``commandable=True``.
+    """
+
+    OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.TIME_VALUE
+
+    PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
+        **standard_properties(),
+        PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
+            PropertyIdentifier.PRESENT_VALUE,
+            BACnetTime,
+            PropertyAccess.READ_WRITE,
+            required=True,
+        ),
+        **status_properties(),
+        **commandable_properties(BACnetTime, None, required=False),
+        PropertyIdentifier.IS_UTC: PropertyDefinition(
+            PropertyIdentifier.IS_UTC,
+            bool,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+    }
+
+    def __init__(
+        self,
+        instance_number: int,
+        *,
+        commandable: bool = False,
+        **initial_properties: Any,
+    ) -> None:
+        super().__init__(instance_number, **initial_properties)
+        if commandable:
+            self._init_commandable(None)
+        self._init_status_flags()
+
+
+@register_object_type
+class TimePatternValueObject(BACnetObject):
+    """BACnet Time Pattern Value object (Clause 12.47).
+
+    Represents a time pattern with optional wildcards (0xFF).
+    """
+
+    OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.TIMEPATTERN_VALUE
+
+    PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
+        **standard_properties(),
+        PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
+            PropertyIdentifier.PRESENT_VALUE,
+            BACnetTime,
+            PropertyAccess.READ_WRITE,
+            required=True,
+        ),
+        **status_properties(),
+    }
+
+    def __init__(self, instance_number: int, **initial_properties: Any) -> None:
+        super().__init__(instance_number, **initial_properties)
+        self._init_status_flags()
+
+
+@register_object_type
+class DateTimePatternValueObject(BACnetObject):
+    """BACnet DateTime Pattern Value object (Clause 12.41).
+
+    Represents a date/time pattern with optional wildcards.
+    """
+
+    OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.DATETIMEPATTERN_VALUE
+
+    PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
+        **standard_properties(),
+        PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
+            PropertyIdentifier.PRESENT_VALUE,
+            BACnetDateTime,
+            PropertyAccess.READ_WRITE,
+            required=True,
+        ),
+        **status_properties(),
+        PropertyIdentifier.IS_UTC: PropertyDefinition(
+            PropertyIdentifier.IS_UTC,
+            bool,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+    }
+
+    def __init__(self, instance_number: int, **initial_properties: Any) -> None:
+        super().__init__(instance_number, **initial_properties)
         self._init_status_flags()

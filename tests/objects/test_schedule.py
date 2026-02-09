@@ -5,7 +5,7 @@ import pytest
 from bac_py.objects.base import create_object
 from bac_py.objects.schedule import ScheduleObject
 from bac_py.services.errors import BACnetError
-from bac_py.types.constructed import StatusFlags
+from bac_py.types.constructed import BACnetDateRange, StatusFlags
 from bac_py.types.enums import (
     ErrorCode,
     EventState,
@@ -36,7 +36,13 @@ class TestScheduleObject:
     def test_effective_period_default(self):
         sched = ScheduleObject(1)
         period = sched.read_property(PropertyIdentifier.EFFECTIVE_PERIOD)
-        assert period == ((1900, 1, 1), (2155, 12, 31))
+        assert isinstance(period, BACnetDateRange)
+        assert period.start_date.year == 1900
+        assert period.start_date.month == 1
+        assert period.start_date.day == 1
+        assert period.end_date.year == 2155
+        assert period.end_date.month == 12
+        assert period.end_date.day == 31
 
     def test_effective_period_writable(self):
         sched = ScheduleObject(1)

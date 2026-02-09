@@ -12,6 +12,7 @@ from bac_py.objects.base import (
     standard_properties,
     status_properties,
 )
+from bac_py.types.constructed import BACnetDateTime, BACnetPrescale, BACnetScale
 from bac_py.types.enums import (
     EngineeringUnits,
     ObjectType,
@@ -49,13 +50,13 @@ class AccumulatorObject(BACnetObject):
         ),
         PropertyIdentifier.SCALE: PropertyDefinition(
             PropertyIdentifier.SCALE,
-            object,
+            BACnetScale,
             PropertyAccess.READ_WRITE,
             required=True,
         ),
         PropertyIdentifier.PRESCALE: PropertyDefinition(
             PropertyIdentifier.PRESCALE,
-            object,
+            BACnetPrescale,
             PropertyAccess.READ_WRITE,
             required=False,
         ),
@@ -92,7 +93,7 @@ class AccumulatorObject(BACnetObject):
         ),
         PropertyIdentifier.VALUE_CHANGE_TIME: PropertyDefinition(
             PropertyIdentifier.VALUE_CHANGE_TIME,
-            object,
+            BACnetDateTime,
             PropertyAccess.READ_ONLY,
             required=False,
         ),
@@ -113,5 +114,4 @@ class AccumulatorObject(BACnetObject):
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
         self._init_status_flags()
-        self._set_default(PropertyIdentifier.SCALE, 1.0)
-        self._set_default(PropertyIdentifier.PRESCALE, 1)
+        self._set_default(PropertyIdentifier.SCALE, BACnetScale(float_scale=1.0))
