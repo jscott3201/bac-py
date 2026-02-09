@@ -50,15 +50,13 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class BBMDConfig:
-    """Configuration for BBMD on a router port.
-
-    Attributes:
-        bdt_entries: Initial Broadcast Distribution Table entries
-            (including self).  If empty, the BBMD starts with an
-            empty BDT (foreign-device-only mode).
-    """
+    """Configuration for BBMD on a router port."""
 
     bdt_entries: list[BDTEntry] = field(default_factory=list)
+    """Initial Broadcast Distribution Table entries (including self).
+
+    If empty, the BBMD starts with an empty BDT (foreign-device-only mode).
+    """
 
 
 @dataclass
@@ -82,41 +80,52 @@ class RouterConfig:
 
 @dataclass
 class DeviceConfig:
-    """Configuration for a BACnet device.
-
-    Attributes:
-        instance_number: BACnet device instance number (0-4194302).
-        name: Device object name.
-        vendor_name: Vendor name string.
-        vendor_id: ASHRAE-assigned vendor identifier.
-        model_name: Device model name string.
-        firmware_revision: Firmware revision string.
-        application_software_version: Application software version string.
-        interface: Local IP address to bind to (``"0.0.0.0"`` for all).
-        port: UDP port number (default ``0xBAC0`` / 47808).
-        apdu_timeout: APDU timeout in milliseconds.
-        apdu_segment_timeout: Segment timeout in milliseconds.
-        apdu_retries: Maximum number of APDU retries.
-        max_apdu_length: Maximum APDU length in bytes.
-        max_segments: Maximum segments accepted, or ``None`` for unlimited.
-        router_config: Optional router configuration for multi-network mode.
-    """
+    """Configuration for a BACnet device."""
 
     instance_number: int
+    """BACnet device instance number (0-4194302)."""
+
     name: str = "bac-py"
+    """Device object name."""
+
     vendor_name: str = "bac-py"
+    """Vendor name string."""
+
     vendor_id: int = 0
+    """ASHRAE-assigned vendor identifier."""
+
     model_name: str = "bac-py"
+    """Device model name string."""
+
     firmware_revision: str = "0.1.0"
+    """Firmware revision string."""
+
     application_software_version: str = "0.1.0"
+    """Application software version string."""
+
     interface: str = "0.0.0.0"
+    """Local IP address to bind to (``"0.0.0.0"`` for all)."""
+
     port: int = 0xBAC0
+    """UDP port number (default ``0xBAC0`` / 47808)."""
+
     apdu_timeout: int = 6000  # milliseconds
+    """APDU timeout in milliseconds."""
+
     apdu_segment_timeout: int = 2000  # milliseconds
+    """Segment timeout in milliseconds."""
+
     apdu_retries: int = 3
+    """Maximum number of APDU retries."""
+
     max_apdu_length: int = 1476
+    """Maximum APDU length in bytes."""
+
     max_segments: int | None = None
+    """Maximum segments accepted, or ``None`` for unlimited."""
+
     router_config: RouterConfig | None = None
+    """Optional router configuration for multi-network mode."""
 
 
 class BACnetApplication:

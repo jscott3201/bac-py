@@ -51,6 +51,7 @@ autodoc_default_options = {
     "show-inheritance": True,
     "undoc-members": False,
 }
+autodoc_mock_imports = ["orjson"]
 
 # -- sphinx-autodoc-typehints ------------------------------------------------
 

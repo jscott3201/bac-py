@@ -58,24 +58,25 @@ class RouterPort:
     Each port represents one physical or logical attachment point of the
     router to a BACnet network.  The port owns a :class:`TransportPort`
     that handles the actual data-link send/receive.
-
-    Attributes:
-        port_id: Unique port identifier (1-255).
-        network_number: DNET of the directly connected network (1-65534).
-        transport: The data-link transport for this port.
-        mac_address: Local MAC address on this network.
-        max_npdu_length: Max NPDU size for this data link.
-        network_number_configured: ``True`` if the network number was
-            manually configured, ``False`` if learned via
-            Network-Number-Is.
     """
 
     port_id: int
+    """Unique port identifier (1-255)."""
+
     network_number: int
+    """DNET of the directly connected network (1-65534)."""
+
     transport: TransportPort
+    """The data-link transport for this port."""
+
     mac_address: bytes
+    """Local MAC address on this network."""
+
     max_npdu_length: int
+    """Max NPDU size for this data link."""
+
     network_number_configured: bool = True
+    """``True`` if manually configured, ``False`` if learned via Network-Number-Is."""
 
 
 # ---------------------------------------------------------------------------
@@ -85,26 +86,24 @@ class RouterPort:
 
 @dataclass(slots=True)
 class RoutingTableEntry:
-    """A single entry in the router's routing table (Clause 6.6.1).
-
-    Attributes:
-        network_number: The reachable DNET (1-65534).
-        port_id: Which port this network is reachable through.
-        next_router_mac: MAC of the next-hop router, or ``None`` if the
-            network is directly connected to the port.
-        reachability: Current reachability status.
-        busy_timeout_handle: Handle for the 30-second congestion timer.
-            Set when the entry is marked BUSY, cancelled when the entry
-            returns to REACHABLE.
-    """
+    """A single entry in the router's routing table (Clause 6.6.1)."""
 
     network_number: int
+    """The reachable DNET (1-65534)."""
+
     port_id: int
+    """Which port this network is reachable through."""
+
     next_router_mac: bytes | None = None
+    """MAC of the next-hop router, or ``None`` if directly connected."""
+
     reachability: NetworkReachability = NetworkReachability.REACHABLE
+    """Current reachability status."""
+
     busy_timeout_handle: asyncio.TimerHandle | None = field(
         default=None, repr=False, compare=False
     )
+    """Handle for the 30-second congestion timer."""
 
 
 # ---------------------------------------------------------------------------
@@ -452,6 +451,7 @@ class NetworkRouter:
         """Start all port transports, wire callbacks, and perform startup broadcasts.
 
         Per Clause 6.6.2, after starting transports, each port receives:
+
         1. A ``Network-Number-Is`` broadcast (if the port's network
            number is configured).
         2. An ``I-Am-Router-To-Network`` broadcast listing all networks

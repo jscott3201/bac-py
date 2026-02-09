@@ -12,35 +12,40 @@ BACNET_PROTOCOL_VERSION = 1
 
 @dataclass(frozen=True, slots=True)
 class NPDU:
-    """Decoded Network Protocol Data Unit (Clause 6.2).
-
-    Attributes:
-        version: BACnet protocol version (always 1).
-        is_network_message: ``True`` for network-layer messages, ``False``
-            for application-layer APDUs.
-        expecting_reply: ``True`` when the sender expects a reply.
-        priority: Message priority (NORMAL, URGENT, etc.).
-        destination: Remote destination address, or ``None`` for local.
-        source: Originating address (populated by routers).
-        hop_count: Remaining hop count for routed messages (0-255).
-        message_type: Network message type code when *is_network_message*
-            is ``True`` (0-0xFF); vendor messages use 0x80-0xFF.
-        vendor_id: Vendor identifier for proprietary network messages.
-        apdu: Application-layer APDU payload bytes.
-        network_message_data: Payload bytes for network-layer messages.
-    """
+    """Decoded Network Protocol Data Unit (Clause 6.2)."""
 
     version: int = BACNET_PROTOCOL_VERSION
+    """BACnet protocol version (always 1)."""
+
     is_network_message: bool = False
+    """``True`` for network-layer messages, ``False`` for application-layer APDUs."""
+
     expecting_reply: bool = False
+    """``True`` when the sender expects a reply."""
+
     priority: NetworkPriority = NetworkPriority.NORMAL
+    """Message priority (NORMAL, URGENT, etc.)."""
+
     destination: BACnetAddress | None = None
+    """Remote destination address, or ``None`` for local."""
+
     source: BACnetAddress | None = None
+    """Originating address (populated by routers)."""
+
     hop_count: int = 255
+    """Remaining hop count for routed messages (0-255)."""
+
     message_type: int | None = None
+    """Network message type code when *is_network_message* is ``True``."""
+
     vendor_id: int | None = None
+    """Vendor identifier for proprietary network messages."""
+
     apdu: bytes = b""
+    """Application-layer APDU payload bytes."""
+
     network_message_data: bytes = b""
+    """Payload bytes for network-layer messages."""
 
 
 def encode_npdu(npdu: NPDU) -> bytes:

@@ -11,6 +11,13 @@ Service Base
    :members:
    :undoc-members:
 
+Common Types
+------------
+
+.. automodule:: bac_py.services.common
+   :members:
+   :undoc-members:
+
 Errors
 ------
 

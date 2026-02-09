@@ -47,33 +47,34 @@ _ANALOG_TYPES = frozenset(
 
 @dataclass
 class COVSubscription:
-    """Tracks a single COV subscription.
-
-    Attributes:
-        subscriber: BACnet address of the subscribing device.
-        process_id: Subscriber-assigned process identifier.
-        monitored_object: Object identifier being monitored.
-        confirmed: ``True`` for confirmed notifications, ``False`` for
-            unconfirmed.
-        lifetime: Subscription duration in seconds, or ``None`` for
-            indefinite subscriptions.
-        created_at: Monotonic timestamp when the subscription was created.
-        expiry_handle: Timer handle for subscription expiry, if any.
-        last_present_value: Last notified Present_Value, used for
-            change-of-value comparison (COV increment / equality).
-        last_status_flags: Last notified Status_Flags, used for
-            change detection (any bit change triggers notification).
-    """
+    """Tracks a single COV subscription."""
 
     subscriber: BACnetAddress
+    """BACnet address of the subscribing device."""
+
     process_id: int
+    """Subscriber-assigned process identifier."""
+
     monitored_object: ObjectIdentifier
+    """Object identifier being monitored."""
+
     confirmed: bool
+    """``True`` for confirmed notifications, ``False`` for unconfirmed."""
+
     lifetime: float | None  # None = indefinite; seconds
+    """Subscription duration in seconds, or ``None`` for indefinite."""
+
     created_at: float = field(default_factory=time.monotonic)
+    """Monotonic timestamp when the subscription was created."""
+
     expiry_handle: asyncio.TimerHandle | None = None
+    """Timer handle for subscription expiry, if any."""
+
     last_present_value: Any = None
+    """Last notified Present_Value, used for COV comparison."""
+
     last_status_flags: Any = None
+    """Last notified Status_Flags, used for change detection."""
 
 
 class COVManager:
