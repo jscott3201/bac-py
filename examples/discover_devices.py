@@ -14,6 +14,7 @@ from bac_py import Client
 
 
 async def main() -> None:
+    """Discover and list all BACnet devices."""
     async with Client(instance_number=999) as client:
         # Discover all devices (3-second listen window)
         devices = await client.discover(timeout=3.0)

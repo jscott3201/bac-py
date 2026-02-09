@@ -411,11 +411,7 @@ def decode_application_value(data: bytes | memoryview) -> object:
         msg = f"Expected application tag, got context tag {tag.number}"
         raise ValueError(msg)
 
-    content = (
-        data[offset : offset + tag.length]
-        if not isinstance(data, memoryview)
-        else data[offset : offset + tag.length]
-    )
+    content = data[offset : offset + tag.length]
 
     match tag.number:
         case 0:  # Null
@@ -476,10 +472,7 @@ def decode_all_application_values(data: bytes | memoryview) -> list[object]:
             raise ValueError(msg)
 
         # For booleans, the value is in the tag length field (no content bytes)
-        if tag.number == _TAG_BOOLEAN:
-            element_end = tag_end
-        else:
-            element_end = tag_end + tag.length
+        element_end = tag_end if tag.number == _TAG_BOOLEAN else tag_end + tag.length
 
         element_bytes = data[offset:element_end]
         results.append(decode_application_value(element_bytes))

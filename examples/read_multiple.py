@@ -14,6 +14,7 @@ from bac_py import Client
 
 
 async def main() -> None:
+    """Read multiple properties from multiple objects."""
     async with Client(instance_number=999) as client:
         results = await client.read_multiple(
             "192.168.1.100",

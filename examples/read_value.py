@@ -11,6 +11,7 @@ from bac_py import Client
 
 
 async def main() -> None:
+    """Read properties from an analog input."""
     async with Client(instance_number=999) as client:
         # Read present-value from analog-input 1 using short aliases
         value = await client.read("192.168.1.100", "ai,1", "pv")

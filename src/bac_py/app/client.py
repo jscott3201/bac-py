@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from bac_py.encoding.primitives import (
     decode_object_identifier,
@@ -283,7 +283,7 @@ class BACnetClient:
     # when a plain int is written to a property.
     #
     # Tag numbers: 1=Boolean, 2=Unsigned, 4=Real, 7=CharString, 9=Enumerated
-    _PROPERTY_TYPE_HINTS: dict[PropertyIdentifier, int] = {
+    _PROPERTY_TYPE_HINTS: ClassVar[dict[PropertyIdentifier, int]] = {
         PropertyIdentifier.OBJECT_NAME: 7,
         PropertyIdentifier.DESCRIPTION: 7,
         PropertyIdentifier.UNITS: 9,
@@ -410,9 +410,12 @@ class BACnetClient:
                     return encode_application_enumerated(1 if value else 0)
                 if isinstance(value, int) and not isinstance(value, enum.IntEnum):
                     return encode_application_enumerated(value)
-            elif object_type in self._MULTISTATE_TYPES:
-                if isinstance(value, int) and not isinstance(value, (bool, enum.IntEnum)):
-                    return encode_application_unsigned(value)
+            elif (
+                object_type in self._MULTISTATE_TYPES
+                and isinstance(value, int)
+                and not isinstance(value, enum.IntEnum)
+            ):
+                return encode_application_unsigned(int(value))
 
         # For well-known properties, use the type hint to encode int/float correctly
         hint = self._PROPERTY_TYPE_HINTS.get(property_identifier)

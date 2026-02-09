@@ -206,6 +206,9 @@ def parse_address(addr: str | BACnetAddress) -> BACnetAddress:
 
     # IP address with optional port
     port = int(port_str) if port_str else _DEFAULT_PORT
+    if not (0 <= port <= 65535):
+        msg = f"Port number out of range: {port}"
+        raise ValueError(msg)
     mac = BIPAddress(host=ip, port=port).encode()
 
     if network is not None:

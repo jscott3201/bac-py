@@ -22,6 +22,7 @@ PROCESS_ID = 1  # Subscriber-managed identifier
 
 
 async def main() -> None:
+    """Subscribe to COV and print notifications."""
     address = parse_address(DEVICE_ADDRESS)
     obj_id = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
 
