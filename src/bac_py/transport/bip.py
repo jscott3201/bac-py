@@ -151,6 +151,8 @@ class BIPTransport:
     def send_broadcast(self, npdu: bytes) -> None:
         """Send a local broadcast (Original-Broadcast-NPDU).
 
+        If registered as a foreign device, uses
+        Distribute-Broadcast-To-Network instead per Annex J.5.6.
         If a BBMD is attached, also forwards to BDT peers and
         registered foreign devices per Annex J.4.5.
 
@@ -160,6 +162,13 @@ class BIPTransport:
         if self._transport is None:
             msg = "Transport not started"
             raise RuntimeError(msg)
+
+        # Foreign devices must use Distribute-Broadcast-To-Network
+        # instead of Original-Broadcast-NPDU per Annex J.5.6
+        if self._foreign_device is not None and self._foreign_device.is_registered:
+            self._foreign_device.send_distribute_broadcast(npdu)
+            return
+
         bvll = encode_bvll(BvlcFunction.ORIGINAL_BROADCAST_NPDU, npdu)
         self._transport.sendto(bvll, (self._broadcast_address, self._port))
 
