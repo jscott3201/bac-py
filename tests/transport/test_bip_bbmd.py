@@ -106,7 +106,7 @@ class TestIncomingBroadcastWithBBMD:
         transport, mock_udp = _make_transport_with_mock_udp()
         try:
             local_addr = transport.local_address
-            bbmd = await transport.attach_bbmd(
+            await transport.attach_bbmd(
                 [
                     BDTEntry(address=local_addr, broadcast_mask=ALL_ONES_MASK),
                     BDTEntry(address=PEER_ADDR, broadcast_mask=ALL_ONES_MASK),
@@ -130,7 +130,7 @@ class TestIncomingBroadcastWithBBMD:
 
     @pytest.mark.asyncio
     async def test_original_broadcast_also_delivered_locally(self):
-        transport, mock_udp = _make_transport_with_mock_udp()
+        transport, _mock_udp = _make_transport_with_mock_udp()
         received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
@@ -182,7 +182,7 @@ class TestIncomingForwardedNPDU:
     @pytest.mark.asyncio
     async def test_forwarded_npdu_delivered_once(self):
         """Forwarded-NPDU should be delivered exactly once (via BBMD callback)."""
-        transport, mock_udp = _make_transport_with_mock_udp()
+        transport, _mock_udp = _make_transport_with_mock_udp()
         received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
@@ -371,7 +371,7 @@ class TestBVLCManagementExclusivelyHandled:
 
     @pytest.mark.asyncio
     async def test_register_fd_not_delivered_to_callback(self):
-        transport, mock_udp = _make_transport_with_mock_udp()
+        transport, _mock_udp = _make_transport_with_mock_udp()
         received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
@@ -386,7 +386,7 @@ class TestBVLCManagementExclusivelyHandled:
 
     @pytest.mark.asyncio
     async def test_read_bdt_not_delivered_to_callback(self):
-        transport, mock_udp = _make_transport_with_mock_udp()
+        transport, _mock_udp = _make_transport_with_mock_udp()
         received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
@@ -401,7 +401,7 @@ class TestBVLCManagementExclusivelyHandled:
 
     @pytest.mark.asyncio
     async def test_write_bdt_not_delivered_to_callback(self):
-        transport, mock_udp = _make_transport_with_mock_udp()
+        transport, _mock_udp = _make_transport_with_mock_udp()
         received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
@@ -417,7 +417,7 @@ class TestBVLCManagementExclusivelyHandled:
 
     @pytest.mark.asyncio
     async def test_read_fdt_not_delivered_to_callback(self):
-        transport, mock_udp = _make_transport_with_mock_udp()
+        transport, _mock_udp = _make_transport_with_mock_udp()
         received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:

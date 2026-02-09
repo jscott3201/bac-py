@@ -30,9 +30,7 @@ def _make_mock_transport(*, local_mac: bytes = b"\x7f\x00\x00\x01\xba\xc0") -> M
 
 
 class TestBroadcastFromBBMDPeerForwardedAcrossNetworks:
-    """When a BBMD peer sends a Forwarded-NPDU to a router port, the
-    router should forward the NPDU to other networks.
-    """
+    """When a BBMD peer sends a Forwarded-NPDU to a router port, the router should forward the NPDU to other networks."""
 
     def test_forwarded_npdu_from_peer_routed_to_other_port(self):
         # Port 1: network 10, receives Forwarded-NPDU from BBMD peer
@@ -141,7 +139,7 @@ class TestForeignDeviceRegistrationThroughRouterBBMD:
     @pytest.mark.asyncio
     async def test_fd_distribute_broadcast_reaches_callback(self):
         """Distribute-Broadcast from a registered FD is delivered via callback."""
-        transport, mock_udp = _make_bip_transport_with_mock()
+        transport, _mock_udp = _make_bip_transport_with_mock()
         received: list[tuple[bytes, bytes]] = []
         transport.on_receive(lambda d, s: received.append((d, s)))
         try:
@@ -170,9 +168,7 @@ class TestForeignDeviceRegistrationThroughRouterBBMD:
 
 
 class TestRouterBroadcastOnBBMDPortForwardsToPeers:
-    """When a router broadcasts on a BBMD-enabled port, the broadcast
-    should also be forwarded to BBMD peers.
-    """
+    """When a router broadcasts on a BBMD-enabled port, the broadcast should also be forwarded to BBMD peers."""
 
     def test_router_broadcast_forwarded_to_bbmd_peers(self):
         """Router's send_broadcast on a BBMD port sends to BDT peers."""
@@ -216,9 +212,7 @@ class TestRouterBroadcastOnBBMDPortForwardsToPeers:
 
 
 class TestGlobalBroadcastAcrossRouterWithBBMD:
-    """Global broadcast from one network should be forwarded on the BBMD
-    port and also reach BBMD peers.
-    """
+    """Global broadcast from one network should be forwarded on the BBMD port and also reach BBMD peers."""
 
     def test_global_broadcast_forwarded_and_distributed(self):
         local_addr = BIPAddress(host="192.168.1.1", port=47808)

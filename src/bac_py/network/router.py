@@ -971,8 +971,7 @@ class NetworkRouter:
             dnets = tuple(
                 e.network_number
                 for e in self._routing_table.get_all_entries()
-                if e.reachability == NetworkReachability.BUSY
-                and e.port_id == port_id
+                if e.reachability == NetworkReachability.BUSY and e.port_id == port_id
             )
         for dnet in dnets:
             self._routing_table.mark_available(dnet)

@@ -326,5 +326,3 @@ class NetworkLayer:
             network_message_data=encode_network_message(msg),
         )
         self._transport.send_broadcast(encode_npdu(npdu))
-
-

@@ -2,8 +2,6 @@
 
 import time
 
-import pytest
-
 from bac_py.network.address import BACnetAddress, BIPAddress
 from bac_py.network.layer import NetworkLayer, RouterCacheEntry
 from bac_py.network.messages import (
@@ -366,7 +364,7 @@ class TestWhatIsNetworkNumber:
     def test_configured_responds(self):
         """Configured device responds with Network-Number-Is broadcast."""
         transport = FakeTransport()
-        layer = NetworkLayer(
+        NetworkLayer(
             transport,
             network_number=10,
             network_number_configured=True,
@@ -385,7 +383,7 @@ class TestWhatIsNetworkNumber:
     def test_unconfigured_no_response(self):
         """Unconfigured device does not respond to What-Is-Network-Number."""
         transport = FakeTransport()
-        layer = NetworkLayer(transport, network_number=10, network_number_configured=False)
+        NetworkLayer(transport, network_number=10, network_number_configured=False)
 
         data = _build_what_is_network_number_npdu()
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
@@ -396,7 +394,7 @@ class TestWhatIsNetworkNumber:
     def test_no_network_number_no_response(self):
         """Device with no network number does not respond."""
         transport = FakeTransport()
-        layer = NetworkLayer(transport)
+        NetworkLayer(transport)
 
         data = _build_what_is_network_number_npdu()
         source = BIPAddress(host="192.168.1.50", port=0xBAC0)
@@ -407,7 +405,7 @@ class TestWhatIsNetworkNumber:
     def test_routed_message_ignored(self):
         """What-Is with SNET/SADR is ignored (never routed)."""
         transport = FakeTransport()
-        layer = NetworkLayer(
+        NetworkLayer(
             transport,
             network_number=10,
             network_number_configured=True,
@@ -423,7 +421,7 @@ class TestWhatIsNetworkNumber:
     def test_routed_with_destination_ignored(self):
         """What-Is with DNET/DADR is ignored (never routed)."""
         transport = FakeTransport()
-        layer = NetworkLayer(
+        NetworkLayer(
             transport,
             network_number=10,
             network_number_configured=True,

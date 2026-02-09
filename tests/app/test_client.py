@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 from bac_py.app.client import BACnetClient
 from bac_py.network.address import BACnetAddress
+from bac_py.services.common import BACnetPropertyValue
 from bac_py.services.read_property import ReadPropertyACK
 from bac_py.services.read_property_multiple import (
     PropertyReference,
@@ -16,7 +17,6 @@ from bac_py.services.read_range import (
     ReadRangeACK,
     ResultFlags,
 )
-from bac_py.services.common import BACnetPropertyValue
 from bac_py.services.who_is import IAmRequest
 from bac_py.services.write_property_multiple import (
     WriteAccessSpecification,

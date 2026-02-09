@@ -255,8 +255,10 @@ class TestMultiStateObjectsInDatabase:
 
     def test_priority_6_allowed_for_multistate(self):
         """Priority 6 is only reserved for objects with Minimum On/Off Time.
+
         MultiState Output does not define those properties, so priority 6
-        writes should succeed (Clause 19.2.3)."""
+        writes should succeed (Clause 19.2.3).
+        """
         mso = MultiStateOutputObject(1)
         mso.write_property(PropertyIdentifier.PRESENT_VALUE, 2, priority=6)
         assert mso.read_property(PropertyIdentifier.PRESENT_VALUE) == 2

@@ -259,7 +259,9 @@ class TestInitializeRoutingTable:
         assert encode_network_message(msg) == b"\x00"
 
     def test_encode_single_port(self) -> None:
-        msg = InitializeRoutingTable(ports=(RoutingTablePort(network=5, port_id=1, port_info=b""),))
+        msg = InitializeRoutingTable(
+            ports=(RoutingTablePort(network=5, port_id=1, port_info=b""),)
+        )
         # 01 (num ports) 00 05 (net) 01 (port_id) 00 (info_len)
         assert encode_network_message(msg) == b"\x01\x00\x05\x01\x00"
 
@@ -341,7 +343,9 @@ class TestInitializeRoutingTable:
 
     def test_port_id_zero_purge(self) -> None:
         """Port ID = 0 means purge entries for this DNET (Clause 6.4.7)."""
-        msg = InitializeRoutingTable(ports=(RoutingTablePort(network=5, port_id=0, port_info=b""),))
+        msg = InitializeRoutingTable(
+            ports=(RoutingTablePort(network=5, port_id=0, port_info=b""),)
+        )
         encoded = encode_network_message(msg)
         decoded = decode_network_message(NetworkMessageType.INITIALIZE_ROUTING_TABLE, encoded)
         assert decoded.ports[0].port_id == 0
