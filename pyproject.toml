@@ -73,3 +73,30 @@ warn_return_any = true
 warn_unused_configs = true
 mypy_path = "src"
 packages = ["bac_py"]
+
+[tool.ruff]
+src = ["src", "tests"]
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "F",   # pyflakes
+    "E",
+    "W",   # pycodestyle
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+    "TC",  # flake8-type-checking
+    "RUF", # ruff-specific
+    "D",   # pydocstyle
+]
+ignore = [
+    "D100", # missing docstring in public module
+    "D104", # missing docstring in public package
+    "D203", # one-blank-line-before-class (conflicts with D211)
+    "D212", # multi-line-summary-first-line (conflicts with D213)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D"] # don't require docstrings in tests
