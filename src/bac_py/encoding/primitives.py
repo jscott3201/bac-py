@@ -365,6 +365,129 @@ def encode_application_bit_string(value: BitString) -> bytes:
     return encode_application_tagged(_TAG_BIT_STRING, data)
 
 
+def decode_application_value(data: bytes | memoryview) -> object:
+    """Decode application-tagged bytes to a native Python value.
+
+    Inspects the application tag number and dispatches to the
+    appropriate decoder. Returns native Python types:
+
+        Tag 0  (Null)             -> None
+        Tag 1  (Boolean)          -> bool
+        Tag 2  (Unsigned)         -> int
+        Tag 3  (Signed)           -> int
+        Tag 4  (Real)             -> float
+        Tag 5  (Double)           -> float
+        Tag 6  (Octet String)     -> bytes
+        Tag 7  (Character String) -> str
+        Tag 8  (Bit String)       -> BitString
+        Tag 9  (Enumerated)       -> int
+        Tag 10 (Date)             -> BACnetDate
+        Tag 11 (Time)             -> BACnetTime
+        Tag 12 (Object Id)        -> ObjectIdentifier
+
+    Args:
+        data: Application-tagged encoded bytes.
+
+    Returns:
+        Decoded Python value.
+
+    Raises:
+        ValueError: If the tag is not application-class or is unrecognised.
+
+    Example::
+
+        from bac_py.encoding.primitives import (
+            decode_application_value,
+            encode_application_real,
+        )
+
+        encoded = encode_application_real(72.5)
+        value = decode_application_value(encoded)  # -> 72.5
+    """
+    from bac_py.encoding.tags import decode_tag
+
+    tag, offset = decode_tag(data, 0)
+    if tag.cls != TagClass.APPLICATION:
+        msg = f"Expected application tag, got context tag {tag.number}"
+        raise ValueError(msg)
+
+    content = (
+        data[offset : offset + tag.length]
+        if not isinstance(data, memoryview)
+        else data[offset : offset + tag.length]
+    )
+
+    match tag.number:
+        case 0:  # Null
+            return None
+        case 1:  # Boolean - value is in the tag length field
+            return tag.length != 0
+        case 2:  # Unsigned
+            return decode_unsigned(content)
+        case 3:  # Signed
+            return decode_signed(content)
+        case 4:  # Real
+            return decode_real(content)
+        case 5:  # Double
+            return decode_double(content)
+        case 6:  # Octet String
+            return decode_octet_string(content)
+        case 7:  # Character String
+            return decode_character_string(content)
+        case 8:  # Bit String
+            return decode_bit_string(content)
+        case 9:  # Enumerated
+            return decode_enumerated(content)
+        case 10:  # Date
+            return decode_date(content)
+        case 11:  # Time
+            return decode_time(content)
+        case 12:  # Object Identifier
+            obj_type, instance = decode_object_identifier(content)
+            return ObjectIdentifier(ObjectType(obj_type), instance)
+        case _:
+            msg = f"Unknown application tag number: {tag.number}"
+            raise ValueError(msg)
+
+
+def decode_all_application_values(data: bytes | memoryview) -> list[object]:
+    """Decode all application-tagged values from concatenated bytes.
+
+    Iterates through the buffer, decoding each application-tagged
+    element and collecting them into a list.
+
+    Args:
+        data: Concatenated application-tagged encoded bytes.
+
+    Returns:
+        List of decoded Python values.
+    """
+    from bac_py.encoding.tags import decode_tag
+
+    if isinstance(data, bytes):
+        data = memoryview(data)
+
+    results: list[object] = []
+    offset = 0
+    while offset < len(data):
+        tag, tag_end = decode_tag(data, offset)
+        if tag.cls != TagClass.APPLICATION:
+            msg = f"Expected application tag at offset {offset}, got context tag {tag.number}"
+            raise ValueError(msg)
+
+        # For booleans, the value is in the tag length field (no content bytes)
+        if tag.number == _TAG_BOOLEAN:
+            element_end = tag_end
+        else:
+            element_end = tag_end + tag.length
+
+        element_bytes = data[offset:element_end]
+        results.append(decode_application_value(element_bytes))
+        offset = element_end
+
+    return results
+
+
 def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
     """Encode a Python value to application-tagged bytes.
 

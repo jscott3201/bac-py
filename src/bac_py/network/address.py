@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -79,6 +80,34 @@ class BACnetAddress:
         """
         return self.network is not None and self.network != 0xFFFF and len(self.mac_address) == 0
 
+    def __str__(self) -> str:
+        """Human-readable address string.
+
+        Produces strings that round-trip through ``parse_address()``:
+
+        - ``"192.168.1.100:47808"`` for local BACnet/IP unicast
+        - ``"2:192.168.1.100:47808"`` for remote BACnet/IP unicast
+        - ``"*"`` for global broadcast
+        - ``"2:*"`` for remote broadcast on network 2
+        - ``""`` for local broadcast (no MAC)
+        """
+        if self.is_global_broadcast:
+            return "*"
+        if self.is_remote_broadcast:
+            return f"{self.network}:*"
+        if len(self.mac_address) == 6:
+            bip = BIPAddress.decode(self.mac_address)
+            ip_port = f"{bip.host}:{bip.port}"
+            if self.network is not None:
+                return f"{self.network}:{ip_port}"
+            return ip_port
+        if self.mac_address:
+            mac_hex = self.mac_address.hex()
+            if self.network is not None:
+                return f"{self.network}:{mac_hex}"
+            return mac_hex
+        return ""
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to JSON-friendly dict."""
         result: dict[str, Any] = {}
@@ -110,3 +139,75 @@ def remote_broadcast(network: int) -> BACnetAddress:
 def remote_station(network: int, mac: bytes) -> BACnetAddress:
     """Create a remote station address."""
     return BACnetAddress(network=network, mac_address=mac)
+
+
+# Default BACnet/IP port
+_DEFAULT_PORT = 0xBAC0
+
+# Pattern: optional "network:" prefix, then IP with optional ":port", or "*"
+_ADDR_RE = re.compile(
+    r"^(?:(\d+):)?"  # optional network number + colon
+    r"(?:"
+    r"(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})"  # IPv4 address
+    r"(?::(\d+))?"  # optional :port
+    r"|(\*)"  # OR wildcard broadcast
+    r")$"
+)
+
+
+def parse_address(addr: str | BACnetAddress) -> BACnetAddress:
+    """Parse a human-readable address string to a BACnetAddress.
+
+    Accepted formats::
+
+        "192.168.1.100"           -> local BACnet/IP, default port 0xBAC0
+        "192.168.1.100:47809"     -> local BACnet/IP, explicit port
+        "2:192.168.1.100"         -> remote network 2, default port
+        "2:192.168.1.100:47809"   -> remote network 2, explicit port
+        "*"                       -> global broadcast
+        "2:*"                     -> remote broadcast on network 2
+
+    If already a ``BACnetAddress``, returns it unchanged (pass-through).
+
+    Args:
+        addr: Address string or existing BACnetAddress.
+
+    Returns:
+        Parsed BACnetAddress.
+
+    Raises:
+        ValueError: If the format is not recognised.
+    """
+    if isinstance(addr, BACnetAddress):
+        return addr
+
+    addr = addr.strip()
+    if not addr:
+        msg = "Address string must not be empty"
+        raise ValueError(msg)
+
+    m = _ADDR_RE.match(addr)
+    if not m:
+        msg = (
+            f"Cannot parse address: {addr!r}. "
+            "Expected format like '192.168.1.100', '192.168.1.100:47808', "
+            "'2:192.168.1.100', or '*'"
+        )
+        raise ValueError(msg)
+
+    network_str, ip, port_str, wildcard = m.groups()
+    network = int(network_str) if network_str is not None else None
+
+    if wildcard:
+        # "*" or "N:*"
+        if network is None:
+            return GLOBAL_BROADCAST
+        return remote_broadcast(network)
+
+    # IP address with optional port
+    port = int(port_str) if port_str else _DEFAULT_PORT
+    mac = BIPAddress(host=ip, port=port).encode()
+
+    if network is not None:
+        return remote_station(network, mac)
+    return BACnetAddress(mac_address=mac)

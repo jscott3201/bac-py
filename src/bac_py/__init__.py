@@ -2,13 +2,16 @@
 
 Typical usage::
 
-    from bac_py.app import BACnetApplication, DeviceConfig
+    from bac_py import Client, DeviceConfig
 
-    config = DeviceConfig(instance_number=1234)
-    app = BACnetApplication(config)
-    await app.run()
+    async with Client(DeviceConfig(instance_number=999)) as client:
+        value = await client.read("192.168.1.100", "ai,1", "pv")
 """
 
 __version__ = "0.1.0"
 
-__all__ = ["__version__"]
+from bac_py.app.application import DeviceConfig
+from bac_py.app.client import DiscoveredDevice
+from bac_py.client import Client
+
+__all__ = ["Client", "DeviceConfig", "DiscoveredDevice", "__version__"]
