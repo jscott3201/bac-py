@@ -1,10 +1,26 @@
 """BACnet enumeration types per ASHRAE 135-2016."""
 
+from __future__ import annotations
+
 from enum import IntEnum
 
 
 class ObjectType(IntEnum):
-    """BACnet object types (Clause 12)."""
+    """BACnet object types (Clause 12).
+
+    Vendor-proprietary types (128-1023) are accepted as pseudo-members
+    via ``_missing_`` so that devices with non-standard object types do
+    not cause a ``ValueError`` during decoding.
+    """
+
+    @classmethod
+    def _missing_(cls, value: object) -> ObjectType | None:
+        if isinstance(value, int) and 0 <= value <= 1023:
+            member = int.__new__(cls, value)
+            member._name_ = f"VENDOR_{value}"
+            member._value_ = value
+            return member
+        return None
 
     ANALOG_INPUT = 0
     ANALOG_OUTPUT = 1
