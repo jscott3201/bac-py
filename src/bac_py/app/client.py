@@ -260,23 +260,29 @@ class BACnetClient:
     # --- Convenience API ---
 
     # Object types where present-value is Real (IEEE-754 float)
-    _ANALOG_TYPES = frozenset({
-        ObjectType.ANALOG_INPUT,
-        ObjectType.ANALOG_OUTPUT,
-        ObjectType.ANALOG_VALUE,
-    })
+    _ANALOG_TYPES = frozenset(
+        {
+            ObjectType.ANALOG_INPUT,
+            ObjectType.ANALOG_OUTPUT,
+            ObjectType.ANALOG_VALUE,
+        }
+    )
     # Object types where present-value is Enumerated
-    _BINARY_TYPES = frozenset({
-        ObjectType.BINARY_INPUT,
-        ObjectType.BINARY_OUTPUT,
-        ObjectType.BINARY_VALUE,
-    })
+    _BINARY_TYPES = frozenset(
+        {
+            ObjectType.BINARY_INPUT,
+            ObjectType.BINARY_OUTPUT,
+            ObjectType.BINARY_VALUE,
+        }
+    )
     # Object types where present-value is Unsigned
-    _MULTISTATE_TYPES = frozenset({
-        ObjectType.MULTI_STATE_INPUT,
-        ObjectType.MULTI_STATE_OUTPUT,
-        ObjectType.MULTI_STATE_VALUE,
-    })
+    _MULTISTATE_TYPES = frozenset(
+        {
+            ObjectType.MULTI_STATE_INPUT,
+            ObjectType.MULTI_STATE_OUTPUT,
+            ObjectType.MULTI_STATE_VALUE,
+        }
+    )
 
     # Expected BACnet data type tag for well-known properties.
     # Used by _encode_for_write() to select the correct encoding
@@ -537,9 +543,7 @@ class BACnetClient:
         access_specs: list[ReadAccessSpecification] = []
         for obj_key, prop_list in specs.items():
             obj_id = parse_object_identifier(obj_key)
-            prop_refs = [
-                PropertyReference(parse_property_identifier(p)) for p in prop_list
-            ]
+            prop_refs = [PropertyReference(parse_property_identifier(p)) for p in prop_list]
             access_specs.append(
                 ReadAccessSpecification(
                     object_identifier=obj_id,

@@ -54,6 +54,7 @@ Read a property from a remote device::
    :caption: Contents
 
    api/index
+   migration
 
 
 Indices and tables
