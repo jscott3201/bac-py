@@ -45,9 +45,8 @@ class ServiceRegistry:
     ) -> None:
         """Register a handler for a confirmed service.
 
-        Args:
-            service_choice: Confirmed service choice number.
-            handler: Async handler coroutine.
+        :param service_choice: Confirmed service choice number.
+        :param handler: Async handler coroutine.
         """
         self._confirmed[service_choice] = handler
 
@@ -58,9 +57,8 @@ class ServiceRegistry:
     ) -> None:
         """Register a handler for an unconfirmed service.
 
-        Args:
-            service_choice: Unconfirmed service choice number.
-            handler: Async handler coroutine.
+        :param service_choice: Unconfirmed service choice number.
+        :param handler: Async handler coroutine.
         """
         self._unconfirmed[service_choice] = handler
 
@@ -72,16 +70,11 @@ class ServiceRegistry:
     ) -> bytes | None:
         """Dispatch an incoming confirmed request to its handler.
 
-        Args:
-            service_choice: Confirmed service choice number.
-            request_data: Raw service request bytes.
-            source: Source address of the request.
-
-        Returns:
-            Service ACK data for ComplexACK, or None for SimpleACK.
-
-        Raises:
-            BACnetRejectError: If no handler is registered for the service.
+        :param service_choice: Confirmed service choice number.
+        :param request_data: Raw service request bytes.
+        :param source: Source address of the request.
+        :returns: Service ACK data for ComplexACK, or ``None`` for SimpleACK.
+        :raises BACnetRejectError: If no handler is registered for the service.
         """
         handler = self._confirmed.get(service_choice)
         if handler is None:
@@ -97,13 +90,12 @@ class ServiceRegistry:
         """Dispatch an incoming unconfirmed request to its handler.
 
         If no handler is registered for *service_choice*, the request
-        is silently ignored (per Clause 5.4.2 — no reject/abort is
+        is silently ignored (per Clause 5.4.2 -- no reject/abort is
         sent for unconfirmed services).
 
-        Args:
-            service_choice: Unconfirmed service choice number.
-            request_data: Raw service request bytes.
-            source: Source address of the request.
+        :param service_choice: Unconfirmed service choice number.
+        :param request_data: Raw service request bytes.
+        :param source: Source address of the request.
         """
         handler = self._unconfirmed.get(service_choice)
         if handler is not None:

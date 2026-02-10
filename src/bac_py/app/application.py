@@ -166,8 +166,7 @@ class BACnetApplication:
     def __init__(self, config: DeviceConfig) -> None:
         """Initialise the application from a device configuration.
 
-        Args:
-            config: Device and network parameters for this BACnet device.
+        :param config: Device and network parameters for this BACnet device.
         """
         self._config = config
         self._transport: BIPTransport | None = None
@@ -222,11 +221,10 @@ class BACnetApplication:
     ) -> None:
         """Set the DeviceCommunicationControl state.
 
-        Args:
-            state: New DCC state (ENABLE, DISABLE, or DISABLE_INITIATION).
-            duration: Optional duration in minutes. When provided and state
-                is not ENABLE, a timer is set to auto-re-enable after the
-                specified number of minutes.
+        :param state: New DCC state (ENABLE, DISABLE, or DISABLE_INITIATION).
+        :param duration: Optional duration in minutes. When provided and state
+            is not ENABLE, a timer is set to auto-re-enable after the
+            specified number of minutes.
         """
         # Cancel any existing DCC timer
         if self._dcc_timer is not None:
@@ -458,14 +456,11 @@ class BACnetApplication:
         to the primary transport and begins periodic re-registration
         at TTL/2 intervals.
 
-        Args:
-            bbmd_address: Address of the BBMD (e.g. ``"192.168.1.1"`` or
-                ``"192.168.1.1:47808"``).
-            ttl: Registration time-to-live in seconds.
-
-        Raises:
-            RuntimeError: If already registered, application not started,
-                or running in router mode.
+        :param bbmd_address: Address of the BBMD (e.g. ``"192.168.1.1"`` or
+            ``"192.168.1.1:47808"``).
+        :param ttl: Registration time-to-live in seconds.
+        :raises RuntimeError: If already registered, application not started,
+            or running in router mode.
         """
         if self._transport is None:
             if self._router is not None:
@@ -486,8 +481,7 @@ class BACnetApplication:
         Sends a Delete-Foreign-Device-Table-Entry to the BBMD so the
         entry is removed immediately rather than waiting for TTL expiry.
 
-        Raises:
-            RuntimeError: If not registered as a foreign device.
+        :raises RuntimeError: If not registered as a foreign device.
         """
         if self._transport is None or self._transport.foreign_device is None:
             msg = "Not registered as a foreign device"
@@ -528,11 +522,8 @@ class BACnetApplication:
         ensure broadcasts will be distributed before performing
         discovery.
 
-        Args:
-            timeout: Maximum seconds to wait.
-
-        Returns:
-            ``True`` if registered, ``False`` if timeout expired.
+        :param timeout: Maximum seconds to wait.
+        :returns: ``True`` if registered, ``False`` if timeout expired.
         """
         if self._transport is None or self._transport.foreign_device is None:
             return False
@@ -553,14 +544,11 @@ class BACnetApplication:
     ) -> None:
         """Send a network-layer message (non-APDU).
 
-        Args:
-            message_type: Network message type code.
-            data: Encoded message payload.
-            destination: Target address. If ``None``, broadcasts locally.
-
-        Raises:
-            RuntimeError: If the application is not started or is
-                running in router mode (which has its own message API).
+        :param message_type: Network message type code.
+        :param data: Encoded message payload.
+        :param destination: Target address. If ``None``, broadcasts locally.
+        :raises RuntimeError: If the application is not started or is
+            running in router mode (which has its own message API).
         """
         if self._network is None:
             msg = "Network layer not available"
@@ -574,13 +562,10 @@ class BACnetApplication:
     ) -> None:
         """Register a handler for incoming network-layer messages.
 
-        Args:
-            message_type: Network message type code to listen for.
-            handler: Called with ``(decoded_message, source_mac)`` when a
-                matching network message is received.
-
-        Raises:
-            RuntimeError: If the network layer is not available.
+        :param message_type: Network message type code to listen for.
+        :param handler: Called with ``(decoded_message, source_mac)`` when a
+            matching network message is received.
+        :raises RuntimeError: If the network layer is not available.
         """
         if self._network is None:
             msg = "Network layer not available"
@@ -594,9 +579,8 @@ class BACnetApplication:
     ) -> None:
         """Remove a network-layer message handler.
 
-        Args:
-            message_type: Network message type code.
-            handler: The handler to remove.
+        :param message_type: Network message type code.
+        :param handler: The handler to remove.
         """
         if self._network is not None:
             self._network.unregister_network_message_handler(message_type, handler)
@@ -610,18 +594,15 @@ class BACnetApplication:
     ) -> bytes:
         """Send a confirmed request and await response.
 
-        Args:
-            destination: Target device address.
-            service_choice: Confirmed service choice number.
-            service_data: Encoded service request bytes.
-            timeout: Optional caller-level timeout in seconds. When
-                provided, the request is cancelled if no response is
-                received within this duration (raises ``asyncio.TimeoutError``).
-                When ``None``, the TSM's built-in retry/timeout logic is
-                used exclusively.
-
-        Returns:
-            ComplexACK service data, or empty bytes for SimpleACK.
+        :param destination: Target device address.
+        :param service_choice: Confirmed service choice number.
+        :param service_data: Encoded service request bytes.
+        :param timeout: Optional caller-level timeout in seconds. When
+            provided, the request is cancelled if no response is
+            received within this duration (raises ``asyncio.TimeoutError``).
+            When ``None``, the TSM's built-in retry/timeout logic is
+            used exclusively.
+        :returns: ComplexACK service data, or empty bytes for SimpleACK.
         """
         if self._client_tsm is None:
             msg = "Application not started"
@@ -706,10 +687,9 @@ class BACnetApplication:
     ) -> None:
         """Register a callback for incoming COV notifications.
 
-        Args:
-            process_id: Subscriber process identifier to match.
-            callback: Called with ``(notification, source)`` when a
-                COV notification arrives for this process ID.
+        :param process_id: Subscriber process identifier to match.
+        :param callback: Called with ``(notification, source)`` when a
+            COV notification arrives for this process ID.
         """
         self._cov_callbacks[process_id] = callback
 

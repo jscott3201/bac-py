@@ -75,12 +75,9 @@ def compute_max_segment_payload(
 ) -> int:
     """Return the maximum service data bytes that fit in one segment.
 
-    Args:
-        max_apdu_length: Max APDU size for the link (e.g. 480, 1476).
-        pdu_type: Which PDU type determines the header overhead.
-
-    Returns:
-        Max payload bytes per segment.
+    :param max_apdu_length: Max APDU size for the link (e.g. 480, 1476).
+    :param pdu_type: Which PDU type determines the header overhead.
+    :returns: Max payload bytes per segment.
     """
     overhead = (
         CONFIRMED_REQUEST_SEGMENT_OVERHEAD
@@ -93,16 +90,11 @@ def compute_max_segment_payload(
 def split_payload(payload: bytes, max_segment_size: int) -> list[bytes]:
     """Split a byte payload into segments of at most max_segment_size bytes.
 
-    Args:
-        payload: The raw service data to split.
-        max_segment_size: Maximum bytes per segment.
-
-    Returns:
-        List of byte segments. At least one segment is always returned
+    :param payload: The raw service data to split.
+    :param max_segment_size: Maximum bytes per segment.
+    :returns: List of byte segments. At least one segment is always returned
         (which may be empty if the payload is empty).
-
-    Raises:
-        ValueError: If max_segment_size is not positive.
+    :raises ValueError: If max_segment_size is not positive.
     """
     if max_segment_size <= 0:
         msg = f"max_segment_size must be positive, got {max_segment_size}"
@@ -118,12 +110,9 @@ def split_payload(payload: bytes, max_segment_size: int) -> list[bytes]:
 def check_segment_count(num_segments: int, max_segments: int | None) -> bool:
     """Check that the segment count does not exceed the peer's limit.
 
-    Args:
-        num_segments: Total number of segments.
-        max_segments: Peer's max-segments-accepted (None = unlimited).
-
-    Returns:
-        True if within limits.
+    :param num_segments: Total number of segments.
+    :param max_segments: Peer's max-segments-accepted (``None`` = unlimited).
+    :returns: ``True`` if within limits.
     """
     if max_segments is None:
         return True
@@ -161,8 +150,7 @@ class SegmentSender:
     ) -> SegmentSender:
         """Create a SegmentSender by splitting the payload.
 
-        Raises:
-            SegmentationError: If the segment count exceeds peer_max_segments.
+        :raises SegmentationError: If the segment count exceeds peer_max_segments.
         """
         max_payload = compute_max_segment_payload(max_apdu_length, pdu_type)
         segments = split_payload(payload, max_payload)
@@ -183,8 +171,7 @@ class SegmentSender:
     def fill_window(self) -> list[tuple[int, bytes, bool]]:
         """Return segments for the current window.
 
-        Returns:
-            List of ``(sequence_number, segment_data, more_follows)`` tuples.
+        :returns: List of ``(sequence_number, segment_data, more_follows)`` tuples.
         """
         result: list[tuple[int, bytes, bool]] = []
         end_idx = min(len(self.segments), self._window_start_idx + self.actual_window_size)
@@ -203,13 +190,10 @@ class SegmentSender:
     ) -> bool:
         """Process a SegmentACK.
 
-        Args:
-            ack_seq: The sequence number in the SegmentACK.
-            actual_window_size: The receiver's advertised window size.
-            negative: Whether this is a negative ACK (retransmit request).
-
-        Returns:
-            True if all segments have been acknowledged.
+        :param ack_seq: The sequence number in the SegmentACK.
+        :param actual_window_size: The receiver's advertised window size.
+        :param negative: Whether this is a negative ACK (retransmit request).
+        :returns: ``True`` if all segments have been acknowledged.
         """
         acked_idx = self._seq_to_idx(ack_seq)
         self.actual_window_size = actual_window_size
@@ -289,15 +273,12 @@ class SegmentReceiver:
     ) -> SegmentReceiver:
         """Create a receiver from the first segment (sequence number 0).
 
-        Args:
-            first_segment_data: Payload of the first segment.
-            service_choice: Service choice from the PDU header.
-            proposed_window_size: Window size proposed by the sender.
-            more_follows: The more-follows flag from the first segment.
-            our_window_size: Our preferred window size.
-
-        Returns:
-            New SegmentReceiver with the first segment stored.
+        :param first_segment_data: Payload of the first segment.
+        :param service_choice: Service choice from the PDU header.
+        :param proposed_window_size: Window size proposed by the sender.
+        :param more_follows: The more-follows flag from the first segment.
+        :param our_window_size: Our preferred window size.
+        :returns: New :class:`SegmentReceiver` with the first segment stored.
         """
         actual = min(our_window_size, proposed_window_size)
         receiver = cls(
@@ -324,13 +305,10 @@ class SegmentReceiver:
         (when the window is full) or when the transfer is complete,
         not for every individual segment.
 
-        Args:
-            seq_num: 8-bit sequence number from the PDU.
-            data: Segment payload data.
-            more_follows: The more-follows flag from the PDU.
-
-        Returns:
-            ``(action, ack_sequence_number)`` indicating what the caller
+        :param seq_num: 8-bit sequence number from the PDU.
+        :param data: Segment payload data.
+        :param more_follows: The more-follows flag from the PDU.
+        :returns: ``(action, ack_sequence_number)`` indicating what the caller
             should do next. For ABORT, ack_sequence_number is -1.
             CONTINUE means the segment was stored but no ACK is needed yet.
         """
@@ -384,8 +362,7 @@ class SegmentReceiver:
     def reassemble(self) -> bytes:
         """Concatenate all segments in order.
 
-        Raises:
-            ValueError: If not all segments have been received.
+        :raises ValueError: If not all segments have been received.
         """
         if not self.is_complete:
             msg = "Cannot reassemble: not all segments received"

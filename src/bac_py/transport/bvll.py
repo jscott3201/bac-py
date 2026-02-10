@@ -27,13 +27,10 @@ def encode_bvll(
 ) -> bytes:
     """Encode a complete BVLL message.
 
-    Args:
-        function: BVLC function code.
-        payload: NPDU payload bytes.
-        originating_address: Required for Forwarded-NPDU.
-
-    Returns:
-        Complete BVLL message bytes ready for UDP transmission.
+    :param function: BVLC function code.
+    :param payload: NPDU payload bytes.
+    :param originating_address: Required for Forwarded-NPDU.
+    :returns: Complete BVLL message bytes ready for UDP transmission.
     """
     if function == BvlcFunction.FORWARDED_NPDU:
         if originating_address is None:
@@ -51,17 +48,12 @@ def encode_bvll(
 def decode_bvll(data: memoryview | bytes) -> BvllMessage:
     """Decode a BVLL message from raw UDP datagram.
 
-    Args:
-        data: Raw UDP datagram bytes.
-
-    Returns:
-        Decoded BvllMessage.
-
-    Raises:
-        ValueError: If data is too short, BVLC type byte is invalid,
-            declared length is inconsistent, or a function-specific
-            payload (e.g. Forwarded-NPDU originating address) is
-            truncated.
+    :param data: Raw UDP datagram bytes.
+    :returns: Decoded :class:`BvllMessage`.
+    :raises ValueError: If *data* is too short, BVLC type byte is invalid,
+        declared length is inconsistent, or a function-specific
+        payload (e.g. Forwarded-NPDU originating address) is
+        truncated.
     """
     if len(data) < BVLL_HEADER_LENGTH:
         msg = f"BVLL data too short: need at least {BVLL_HEADER_LENGTH} bytes, got {len(data)}"

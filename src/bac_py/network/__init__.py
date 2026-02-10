@@ -36,5 +36,15 @@ class NetworkSender(Protocol):
         expecting_reply: bool = ...,
         priority: NetworkPriority = ...,
     ) -> None:
-        """Send an APDU to the given destination address."""
+        """Send an APDU to the given destination address.
+
+        Implementations wrap the APDU in an NPDU and route it to the
+        appropriate transport.
+
+        :param apdu: Application-layer PDU bytes to send.
+        :param destination: Target :class:`BACnetAddress`.
+        :param expecting_reply: Whether the sender expects a reply
+            (affects NPDU control flags).
+        :param priority: Network priority level for the message.
+        """
         ...

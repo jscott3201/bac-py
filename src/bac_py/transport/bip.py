@@ -78,7 +78,7 @@ def _resolve_local_ip() -> str:
 
 
 class _UDPProtocol(asyncio.DatagramProtocol):
-    """Low-level asyncio DatagramProtocol wrapper."""
+    """Low-level :class:`~asyncio.DatagramProtocol` wrapper for BACnet/IP UDP communication."""
 
     def __init__(
         self,
@@ -89,7 +89,7 @@ class _UDPProtocol(asyncio.DatagramProtocol):
         self._connection_lost_callback = connection_lost_callback
 
     def datagram_received(self, data: bytes, addr: tuple[str, int]) -> None:
-        """Handle incoming UDP datagram."""
+        """Forward an incoming UDP datagram to the registered callback."""
         self._callback(data, addr)
 
     def error_received(self, exc: Exception) -> None:
@@ -118,6 +118,13 @@ class BIPTransport:
         port: int = 0xBAC0,
         broadcast_address: str = "255.255.255.255",
     ) -> None:
+        """Initialize the BACnet/IP transport.
+
+        :param interface: Local IP address to bind. ``"0.0.0.0"`` binds all
+            interfaces.
+        :param port: UDP port number. Defaults to ``0xBAC0`` (47808).
+        :param broadcast_address: Directed broadcast address for this subnet.
+        """
         self._interface = interface
         self._port = port
         self._broadcast_address = broadcast_address
@@ -170,21 +177,19 @@ class BIPTransport:
             logger.info("BIPTransport stopped")
 
     def on_receive(self, callback: Callable[[bytes, bytes], None]) -> None:
-        """Register callback for received NPDU data.
+        """Register a callback for received NPDU data.
 
-        Args:
-            callback: Called with (npdu_bytes, source_mac) for each
-                received datagram containing an NPDU.  *source_mac* is
-                the 6-byte BACnet/IP MAC (4-byte IP + 2-byte port).
+        :param callback: Called with ``(npdu_bytes, source_mac)`` for each
+            received datagram containing an NPDU.  *source_mac* is
+            the 6-byte BACnet/IP MAC (4-byte IP + 2-byte port).
         """
         self._receive_callback = callback
 
     def send_unicast(self, npdu: bytes, mac_address: bytes) -> None:
         """Send a directed message (Original-Unicast-NPDU).
 
-        Args:
-            npdu: NPDU bytes to send.
-            mac_address: 6-byte destination MAC (4-byte IP + 2-byte port).
+        :param npdu: NPDU bytes to send.
+        :param mac_address: 6-byte destination MAC (4-byte IP + 2-byte port).
         """
         if self._transport is None:
             msg = "Transport not started"
@@ -201,8 +206,7 @@ class BIPTransport:
         If a BBMD is attached, also forwards to BDT peers and
         registered foreign devices per Annex J.4.5.
 
-        Args:
-            npdu: NPDU bytes to broadcast.
+        :param npdu: NPDU bytes to broadcast.
         """
         if self._transport is None:
             msg = "Transport not started"
@@ -255,15 +259,10 @@ class BIPTransport:
         Per Annex J.7.1 this allows a single device to combine BBMD
         and router functionality.
 
-        Args:
-            bdt_entries: Optional initial BDT entries.  If ``None``,
-                the BBMD starts with an empty BDT.
-
-        Returns:
-            The attached :class:`BBMDManager` instance.
-
-        Raises:
-            RuntimeError: If transport not started or BBMD already attached.
+        :param bdt_entries: Optional initial BDT entries.  If ``None``,
+            the BBMD starts with an empty BDT.
+        :returns: The attached :class:`BBMDManager` instance.
+        :raises RuntimeError: If transport not started or BBMD already attached.
         """
         if self._transport is None:
             msg = "Transport not started"
@@ -307,16 +306,11 @@ class BIPTransport:
         Incoming BVLC-Result messages will be routed to the manager
         to track registration status.
 
-        Args:
-            bbmd_address: Address of the BBMD to register with.
-            ttl: Time-to-Live for the registration in seconds.
-
-        Returns:
-            The attached :class:`ForeignDeviceManager` instance.
-
-        Raises:
-            RuntimeError: If transport not started or foreign device
-                already attached.
+        :param bbmd_address: Address of the BBMD to register with.
+        :param ttl: Time-to-Live for the registration in seconds.
+        :returns: The attached :class:`ForeignDeviceManager` instance.
+        :raises RuntimeError: If transport not started or foreign device
+            already attached.
         """
         if self._transport is None:
             msg = "Transport not started"
@@ -349,16 +343,11 @@ class BIPTransport:
         Sends a Read-Broadcast-Distribution-Table request and waits for
         the Read-BDT-Ack response.
 
-        Args:
-            bbmd_address: Address of the BBMD to query.
-            timeout: Seconds to wait for a response.
-
-        Returns:
-            List of BDT entries from the remote BBMD.
-
-        Raises:
-            RuntimeError: If transport not started.
-            TimeoutError: If no response within *timeout*.
+        :param bbmd_address: Address of the BBMD to query.
+        :param timeout: Seconds to wait for a response.
+        :returns: List of :class:`BDTEntry` instances from the remote BBMD.
+        :raises RuntimeError: If transport not started.
+        :raises TimeoutError: If no response within *timeout*.
         """
         if self._transport is None:
             msg = "Transport not started"
@@ -390,17 +379,12 @@ class BIPTransport:
         Sends a Write-Broadcast-Distribution-Table request and waits for
         the BVLC-Result response.
 
-        Args:
-            bbmd_address: Address of the BBMD to configure.
-            entries: BDT entries to write.
-            timeout: Seconds to wait for a response.
-
-        Returns:
-            The BVLC-Result code from the BBMD.
-
-        Raises:
-            RuntimeError: If transport not started.
-            TimeoutError: If no response within *timeout*.
+        :param bbmd_address: Address of the BBMD to configure.
+        :param entries: :class:`BDTEntry` instances to write.
+        :param timeout: Seconds to wait for a response.
+        :returns: The :class:`BvlcResultCode` from the BBMD.
+        :raises RuntimeError: If transport not started.
+        :raises TimeoutError: If no response within *timeout*.
         """
         if self._transport is None:
             msg = "Transport not started"
@@ -424,18 +408,13 @@ class BIPTransport:
         Sends a Read-Foreign-Device-Table request and waits for
         the Read-FDT-Ack response.
 
-        Args:
-            bbmd_address: Address of the BBMD to query.
-            timeout: Seconds to wait for a response.
-
-        Returns:
-            List of FDT entries from the remote BBMD.  The ``expiry``
-            field is set to 0.0 since it is not meaningful for remote
-            entries; use the ``remaining`` property instead.
-
-        Raises:
-            RuntimeError: If transport not started.
-            TimeoutError: If no response within *timeout*.
+        :param bbmd_address: Address of the BBMD to query.
+        :param timeout: Seconds to wait for a response.
+        :returns: List of :class:`FDTEntry` instances from the remote BBMD.
+            The ``expiry`` field is set to ``0.0`` since it is not meaningful
+            for remote entries; use the ``remaining`` property instead.
+        :raises RuntimeError: If transport not started.
+        :raises TimeoutError: If no response within *timeout*.
         """
         if self._transport is None:
             msg = "Transport not started"
@@ -471,17 +450,12 @@ class BIPTransport:
         Sends a Delete-Foreign-Device-Table-Entry request and waits for
         the BVLC-Result response.
 
-        Args:
-            bbmd_address: Address of the BBMD.
-            entry_address: Address of the FDT entry to delete.
-            timeout: Seconds to wait for a response.
-
-        Returns:
-            The BVLC-Result code from the BBMD.
-
-        Raises:
-            RuntimeError: If transport not started.
-            TimeoutError: If no response within *timeout*.
+        :param bbmd_address: Address of the BBMD.
+        :param entry_address: Address of the FDT entry to delete.
+        :param timeout: Seconds to wait for a response.
+        :returns: The :class:`BvlcResultCode` from the BBMD.
+        :raises RuntimeError: If transport not started.
+        :raises TimeoutError: If no response within *timeout*.
         """
         if self._transport is None:
             msg = "Transport not started"
@@ -511,17 +485,12 @@ class BIPTransport:
     ) -> bytes:
         """Send a BVLC request and wait for the expected response.
 
-        Args:
-            bvll_data: Complete BVLL message to send.
-            destination: Target BBMD address.
-            expected_response: The BVLC function code expected in reply.
-            timeout: Seconds to wait.
-
-        Returns:
-            The payload data from the response message.
-
-        Raises:
-            TimeoutError: If no response within *timeout*.
+        :param bvll_data: Complete BVLL message to send.
+        :param destination: Target BBMD address.
+        :param expected_response: The :class:`BvlcFunction` code expected in reply.
+        :param timeout: Seconds to wait.
+        :returns: The payload data from the response message.
+        :raises TimeoutError: If no response within *timeout*.
         """
         key = (expected_response, destination)
         loop = asyncio.get_running_loop()
@@ -675,13 +644,10 @@ class BIPTransport:
     ) -> bool:
         """Try to resolve a pending BVLC client request future.
 
-        Args:
-            function: BVLC function code of the received message.
-            data: Payload data of the received message.
-            source: Source address of the received message.
-
-        Returns:
-            ``True`` if a pending future was resolved, ``False`` otherwise.
+        :param function: BVLC function code of the received message.
+        :param data: Payload data of the received message.
+        :param source: Source address of the received message.
+        :returns: ``True`` if a pending future was resolved, ``False`` otherwise.
         """
         key = (function, source)
         future = self._pending_bvlc.get(key)

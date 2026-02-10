@@ -52,14 +52,16 @@ class SubscribeCOVRequest:
 
     @property
     def is_cancellation(self) -> bool:
-        """True when both optional fields are None (cancellation per spec)."""
+        """Check whether this request is a subscription cancellation.
+
+        :returns: ``True`` when both optional fields are ``None`` (cancellation per spec).
+        """
         return self.issue_confirmed_notifications is None and self.lifetime is None
 
     def encode(self) -> bytes:
         """Encode SubscribeCOV-Request service parameters.
 
-        Returns:
-            Encoded service request bytes.
+        :returns: Encoded service request bytes.
         """
         buf = bytearray()
         # [0] subscriberProcessIdentifier
@@ -80,11 +82,8 @@ class SubscribeCOVRequest:
     def decode(cls, data: memoryview | bytes) -> SubscribeCOVRequest:
         """Decode SubscribeCOV-Request from service request bytes.
 
-        Args:
-            data: Raw service request bytes.
-
-        Returns:
-            Decoded SubscribeCOVRequest.
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`SubscribeCOVRequest`.
         """
         data = as_memoryview(data)
 
@@ -144,8 +143,7 @@ class COVNotificationRequest:
     def encode(self) -> bytes:
         """Encode COVNotification-Request service parameters.
 
-        Returns:
-            Encoded service request bytes.
+        :returns: Encoded service request bytes.
         """
         buf = bytearray()
         # [0] subscriberProcessIdentifier
@@ -167,11 +165,8 @@ class COVNotificationRequest:
     def decode(cls, data: memoryview | bytes) -> COVNotificationRequest:
         """Decode COVNotification-Request from service request bytes.
 
-        Args:
-            data: Raw service request bytes.
-
-        Returns:
-            Decoded COVNotificationRequest.
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`COVNotificationRequest`.
         """
         data = as_memoryview(data)
 

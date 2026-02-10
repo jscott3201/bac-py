@@ -48,7 +48,10 @@ class _ListElementRequest:
     property_array_index: int | None = None
 
     def encode(self) -> bytes:
-        """Encode request to bytes."""
+        """Encode Add/RemoveListElement-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         # [0] objectIdentifier
         buf.extend(encode_context_object_id(0, self.object_identifier))
@@ -65,7 +68,11 @@ class _ListElementRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> _ListElementRequest:
-        """Decode request from bytes."""
+        """Decode Add/RemoveListElement-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`_ListElementRequest` (or subclass).
+        """
         data = as_memoryview(data)
 
         offset = 0

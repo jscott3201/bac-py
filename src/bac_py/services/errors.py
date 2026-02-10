@@ -26,12 +26,11 @@ class BACnetError(BACnetBaseError):
     ) -> None:
         """Initialise a BACnet error.
 
-        Args:
-            error_class: The error class enumeration.
-            error_code: The error code enumeration.
-            error_data: Additional raw error data following the base
-                error class/code pair.  Currently preserved but not
-                decoded (extended error types are service-specific).
+        :param error_class: The error class enumeration.
+        :param error_code: The error code enumeration.
+        :param error_data: Additional raw error data following the base
+            error class/code pair.  Currently preserved but not
+            decoded (extended error types are service-specific).
         """
         self.error_class = error_class
         self.error_code = error_code
@@ -46,6 +45,10 @@ class BACnetRejectError(BACnetBaseError):
     """
 
     def __init__(self, reason: RejectReason) -> None:
+        """Initialise a BACnet reject error.
+
+        :param reason: The reject reason enumeration.
+        """
         self.reason = reason
         super().__init__(f"Reject: {reason.name}")
 
@@ -57,6 +60,10 @@ class BACnetAbortError(BACnetBaseError):
     """
 
     def __init__(self, reason: AbortReason) -> None:
+        """Initialise a BACnet abort error.
+
+        :param reason: The abort reason enumeration.
+        """
         self.reason = reason
         super().__init__(f"Abort: {reason.name}")
 

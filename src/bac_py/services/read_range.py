@@ -96,13 +96,20 @@ class ResultFlags:
     more_items: bool = False
 
     def to_bit_string(self) -> BitString:
-        """Encode as BACnet BitString (3 significant bits)."""
+        """Convert to a BACnet :class:`~bac_py.types.primitives.BitString`.
+
+        :returns: 3-bit BitString encoding of the result flags.
+        """
         value = (self.first_item << 2) | (self.last_item << 1) | self.more_items
         return BitString(bytes([value << 5]), unused_bits=5)
 
     @classmethod
     def from_bit_string(cls, bs: BitString) -> ResultFlags:
-        """Decode from a BACnet BitString."""
+        """Decode from a BACnet :class:`~bac_py.types.primitives.BitString`.
+
+        :param bs: BitString with up to 3 significant bits.
+        :returns: Decoded :class:`ResultFlags`.
+        """
         return cls(
             first_item=bs[0] if len(bs) > 0 else False,
             last_item=bs[1] if len(bs) > 1 else False,
@@ -136,7 +143,10 @@ class ReadRangeRequest:
     range: RangeByPosition | RangeBySequenceNumber | RangeByTime | None = None
 
     def encode(self) -> bytes:
-        """Encode ReadRange-Request service parameters."""
+        """Encode ReadRange-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         # [0] object-identifier
         buf.extend(encode_context_object_id(0, self.object_identifier))
@@ -167,7 +177,11 @@ class ReadRangeRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ReadRangeRequest:
-        """Decode ReadRange-Request from service request bytes."""
+        """Decode ReadRange-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`ReadRangeRequest`.
+        """
         data = as_memoryview(data)
 
         offset = 0
@@ -287,7 +301,10 @@ class ReadRangeACK:
     first_sequence_number: int | None = None
 
     def encode(self) -> bytes:
-        """Encode ReadRange-ACK service parameters."""
+        """Encode ReadRange-ACK service parameters.
+
+        :returns: Encoded service ACK bytes.
+        """
         buf = bytearray()
         # [0] object-identifier
         buf.extend(encode_context_object_id(0, self.object_identifier))
@@ -311,7 +328,11 @@ class ReadRangeACK:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ReadRangeACK:
-        """Decode ReadRange-ACK from service ACK bytes."""
+        """Decode ReadRange-ACK from service ACK bytes.
+
+        :param data: Raw service ACK bytes.
+        :returns: Decoded :class:`ReadRangeACK`.
+        """
         data = as_memoryview(data)
 
         offset = 0

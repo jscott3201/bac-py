@@ -31,8 +31,7 @@ class WhoIsRequest:
     def encode(self) -> bytes:
         """Encode Who-Is-Request service parameters.
 
-        Returns:
-            Encoded service request bytes (may be empty if no range).
+        :returns: Encoded service request bytes (may be empty if no range is set).
         """
         if self.low_limit is None or self.high_limit is None:
             return b""
@@ -47,11 +46,8 @@ class WhoIsRequest:
     def decode(cls, data: memoryview | bytes) -> WhoIsRequest:
         """Decode Who-Is-Request from service request bytes.
 
-        Args:
-            data: Raw service request bytes.
-
-        Returns:
-            Decoded WhoIsRequest.
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`WhoIsRequest`.
         """
         data = as_memoryview(data)
 
@@ -77,7 +73,11 @@ class WhoIsRequest:
         return cls(low_limit=low_limit, high_limit=high_limit)
 
     def __post_init__(self) -> None:
-        """Validate that both limits are present or both absent."""
+        """Validate that both limits are present or both absent.
+
+        If only one limit is provided, both are reset to ``None``
+        (per Clause 16.10.1.1.1, malformed ranges are treated as unbounded).
+        """
         if (self.low_limit is None) != (self.high_limit is None):
             # Per Clause 16.10.1.1.1, treat malformed as unbounded
             object.__setattr__(self, "low_limit", None)
@@ -99,8 +99,7 @@ class IAmRequest:
     def encode(self) -> bytes:
         """Encode I-Am-Request service parameters.
 
-        Returns:
-            Encoded service request bytes.
+        :returns: Encoded service request bytes.
         """
         buf = bytearray()
         # iAmDeviceIdentifier - application tagged object-id
@@ -122,11 +121,8 @@ class IAmRequest:
     def decode(cls, data: memoryview | bytes) -> IAmRequest:
         """Decode I-Am-Request from service request bytes.
 
-        Args:
-            data: Raw service request bytes.
-
-        Returns:
-            Decoded IAmRequest.
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`IAmRequest`.
         """
         data = as_memoryview(data)
 

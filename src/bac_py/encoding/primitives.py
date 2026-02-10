@@ -42,7 +42,11 @@ _CHARSET_DECODERS: dict[int, str] = {
 
 
 def _min_unsigned_bytes(value: int) -> int:
-    """Return minimum number of bytes to encode an unsigned integer."""
+    """Return the minimum number of bytes needed to encode an unsigned integer.
+
+    :param value: Non-negative integer to measure.
+    :returns: Byte count (1--4) required for big-endian encoding.
+    """
     if value == 0:
         return 1
     return (value.bit_length() + 7) // 8
@@ -52,9 +56,13 @@ def _min_unsigned_bytes(value: int) -> int:
 
 
 def encode_unsigned(value: int) -> bytes:
-    """Encode an unsigned integer using minimum octets, big-endian.
+    """Encode an unsigned integer using the minimum number of octets, big-endian.
 
     BACnet unsigned integers are at most 4 bytes (0..4,294,967,295).
+
+    :param value: Non-negative integer to encode (0--4,294,967,295).
+    :returns: Big-endian encoded bytes (1--4 bytes).
+    :raises ValueError: If *value* is negative or exceeds the 4-byte maximum.
     """
     if value < 0:
         msg = f"Unsigned integer must be >= 0, got {value}"
@@ -67,7 +75,11 @@ def encode_unsigned(value: int) -> bytes:
 
 
 def decode_unsigned(data: memoryview | bytes) -> int:
-    """Decode an unsigned integer from big-endian bytes."""
+    """Decode an unsigned integer from big-endian bytes.
+
+    :param data: One or more bytes encoding a big-endian unsigned integer.
+    :returns: The decoded non-negative integer.
+    """
     return int.from_bytes(data, "big")
 
 
@@ -75,10 +87,13 @@ def decode_unsigned(data: memoryview | bytes) -> int:
 
 
 def _min_signed_bytes(value: int) -> int:
-    """Return minimum number of bytes to encode a signed integer.
+    """Return the minimum number of bytes needed to encode a signed integer.
 
     Per Clause 20.2.5, signed integers shall use the minimum number
     of octets in two's-complement representation.
+
+    :param value: Signed integer to measure.
+    :returns: Byte count (1--4) required for two's-complement big-endian encoding.
     """
     if value == 0:
         return 1
@@ -90,9 +105,13 @@ def _min_signed_bytes(value: int) -> int:
 
 
 def encode_signed(value: int) -> bytes:
-    """Encode a signed integer using minimum octets, 2's complement, big-endian.
+    """Encode a signed integer using minimum octets, two's complement, big-endian.
 
     BACnet signed integers are at most 4 bytes (-2,147,483,648..2,147,483,647).
+
+    :param value: Signed integer to encode (-2,147,483,648..2,147,483,647).
+    :returns: Two's-complement big-endian encoded bytes (1--4 bytes).
+    :raises ValueError: If *value* is outside the 4-byte signed range.
     """
     if value < -0x80000000 or value > 0x7FFFFFFF:
         msg = f"Signed integer out of 4-byte range (-2147483648..2147483647), got {value}"
@@ -102,7 +121,11 @@ def encode_signed(value: int) -> bytes:
 
 
 def decode_signed(data: memoryview | bytes) -> int:
-    """Decode a signed integer from 2's complement big-endian bytes."""
+    """Decode a signed integer from two's-complement big-endian bytes.
+
+    :param data: One or more bytes encoding a two's-complement big-endian signed integer.
+    :returns: The decoded signed integer.
+    """
     return int.from_bytes(data, "big", signed=True)
 
 
@@ -110,12 +133,20 @@ def decode_signed(data: memoryview | bytes) -> int:
 
 
 def encode_real(value: float) -> bytes:
-    """Encode an IEEE-754 single precision float."""
+    """Encode an IEEE-754 single-precision (32-bit) float.
+
+    :param value: Floating-point value to encode.
+    :returns: 4 bytes in big-endian IEEE-754 single-precision format.
+    """
     return struct.pack(">f", value)
 
 
 def decode_real(data: memoryview | bytes) -> float:
-    """Decode an IEEE-754 single precision float."""
+    """Decode an IEEE-754 single-precision (32-bit) float.
+
+    :param data: At least 4 bytes of big-endian IEEE-754 single-precision data.
+    :returns: The decoded floating-point value.
+    """
     result: float = struct.unpack(">f", data[:4])[0]
     return result
 
@@ -124,12 +155,20 @@ def decode_real(data: memoryview | bytes) -> float:
 
 
 def encode_double(value: float) -> bytes:
-    """Encode an IEEE-754 double precision float."""
+    """Encode an IEEE-754 double-precision (64-bit) float.
+
+    :param value: Floating-point value to encode.
+    :returns: 8 bytes in big-endian IEEE-754 double-precision format.
+    """
     return struct.pack(">d", value)
 
 
 def decode_double(data: memoryview | bytes) -> float:
-    """Decode an IEEE-754 double precision float."""
+    """Decode an IEEE-754 double-precision (64-bit) float.
+
+    :param data: At least 8 bytes of big-endian IEEE-754 double-precision data.
+    :returns: The decoded floating-point value.
+    """
     result: float = struct.unpack(">d", data[:8])[0]
     return result
 
@@ -138,7 +177,11 @@ def decode_double(data: memoryview | bytes) -> float:
 
 
 def decode_octet_string(data: memoryview | bytes) -> bytes:
-    """Decode an octet string."""
+    """Decode an octet string by copying the raw bytes.
+
+    :param data: Raw octet-string content bytes.
+    :returns: A copy of the input as a ``bytes`` object.
+    """
     return bytes(data)
 
 
@@ -146,14 +189,12 @@ def decode_octet_string(data: memoryview | bytes) -> bytes:
 
 
 def encode_character_string(value: str, charset: int = 0) -> bytes:
-    """Encode a character string with leading charset byte.
+    """Encode a character string with a leading charset byte.
 
-    Args:
-        value: The string to encode.
-        charset: Character set identifier (default 0x00 = UTF-8).
-
-    Returns:
-        Encoded bytes with leading charset byte.
+    :param value: The string to encode.
+    :param charset: Character set identifier (default ``0x00`` = UTF-8).
+    :returns: Encoded bytes with leading charset byte.
+    :raises ValueError: If *charset* is not a supported BACnet character set.
     """
     encoding = _CHARSET_DECODERS.get(charset)
     if encoding is None:
@@ -166,6 +207,10 @@ def decode_character_string(data: memoryview | bytes) -> str:
     """Decode a character string from contents octets.
 
     The first byte is the character set identifier.
+
+    :param data: Contents octets with leading charset byte.
+    :returns: The decoded Python string.
+    :raises ValueError: If *data* is empty or the charset is unsupported.
     """
     if len(data) < 1:
         msg = "CharacterString data too short: need at least 1 byte for charset"
@@ -182,12 +227,20 @@ def decode_character_string(data: memoryview | bytes) -> str:
 
 
 def encode_enumerated(value: int) -> bytes:
-    """Encode an enumerated value (same encoding as unsigned)."""
+    """Encode an enumerated value (same encoding as unsigned).
+
+    :param value: Enumerated value to encode.
+    :returns: Big-endian encoded bytes.
+    """
     return encode_unsigned(value)
 
 
 def decode_enumerated(data: memoryview | bytes) -> int:
-    """Decode an enumerated value (same encoding as unsigned)."""
+    """Decode an enumerated value (same encoding as unsigned).
+
+    :param data: Big-endian encoded bytes.
+    :returns: The decoded enumerated value as an integer.
+    """
     return decode_unsigned(data)
 
 
@@ -195,12 +248,21 @@ def decode_enumerated(data: memoryview | bytes) -> int:
 
 
 def encode_bit_string(value: BitString) -> bytes:
-    """Encode a bit string with leading unused-bits count byte."""
+    """Encode a bit string with a leading unused-bits count byte.
+
+    :param value: The :class:`BitString` to encode.
+    :returns: Encoded bytes with leading unused-bits count followed by the bit data.
+    """
     return bytes([value.unused_bits]) + value.data
 
 
 def decode_bit_string(data: memoryview | bytes) -> BitString:
-    """Decode a bit string from contents octets."""
+    """Decode a bit string from contents octets.
+
+    :param data: Contents octets with leading unused-bits count byte.
+    :returns: The decoded :class:`BitString`.
+    :raises ValueError: If *data* is empty.
+    """
     if len(data) < 1:
         msg = "BitString data too short: need at least 1 byte for unused-bits count"
         raise ValueError(msg)
@@ -212,9 +274,13 @@ def decode_bit_string(data: memoryview | bytes) -> BitString:
 
 
 def encode_date(date: BACnetDate) -> bytes:
-    """Encode a BACnet date to 4 bytes: year-1900, month, day, day-of-week.
+    """Encode a :class:`BACnetDate` to 4 bytes: year-1900, month, day, day-of-week.
 
-    Valid years are 1900-2155 or 0xFF (unspecified).
+    Valid years are 1900--2155 or ``0xFF`` (unspecified).
+
+    :param date: The :class:`BACnetDate` to encode.
+    :returns: 4 bytes representing the encoded date.
+    :raises ValueError: If the year is outside the valid range.
     """
     if date.year == 0xFF:
         year_byte = 0xFF
@@ -227,7 +293,12 @@ def encode_date(date: BACnetDate) -> bytes:
 
 
 def decode_date(data: memoryview | bytes) -> BACnetDate:
-    """Decode a BACnet date from 4 bytes."""
+    """Decode a :class:`BACnetDate` from 4 bytes.
+
+    :param data: At least 4 bytes of encoded date data.
+    :returns: The decoded :class:`BACnetDate`.
+    :raises ValueError: If *data* contains fewer than 4 bytes.
+    """
     if len(data) < 4:
         msg = f"Date data too short: need 4 bytes, got {len(data)}"
         raise ValueError(msg)
@@ -239,12 +310,21 @@ def decode_date(data: memoryview | bytes) -> BACnetDate:
 
 
 def encode_time(time: BACnetTime) -> bytes:
-    """Encode a BACnet time to 4 bytes: hour, minute, second, hundredth."""
+    """Encode a :class:`BACnetTime` to 4 bytes: hour, minute, second, hundredth.
+
+    :param time: The :class:`BACnetTime` to encode.
+    :returns: 4 bytes representing the encoded time.
+    """
     return bytes([time.hour, time.minute, time.second, time.hundredth])
 
 
 def decode_time(data: memoryview | bytes) -> BACnetTime:
-    """Decode a BACnet time from 4 bytes."""
+    """Decode a :class:`BACnetTime` from 4 bytes.
+
+    :param data: At least 4 bytes of encoded time data.
+    :returns: The decoded :class:`BACnetTime`.
+    :raises ValueError: If *data* contains fewer than 4 bytes.
+    """
     if len(data) < 4:
         msg = f"Time data too short: need 4 bytes, got {len(data)}"
         raise ValueError(msg)
@@ -257,8 +337,12 @@ def decode_time(data: memoryview | bytes) -> BACnetTime:
 def encode_object_identifier(obj_type: int, instance: int) -> bytes:
     """Encode a BACnet object identifier to 4 bytes.
 
-    Object type is a 10-bit field (0-1023). Instance is a 22-bit field
-    (0-4194303). Delegates to ObjectIdentifier.encode().
+    Object type is a 10-bit field (0--1023). Instance is a 22-bit field
+    (0--4,194,303). Delegates to :class:`ObjectIdentifier` for encoding.
+
+    :param obj_type: Object type number (0--1023).
+    :param instance: Instance number (0--4,194,303).
+    :returns: 4 bytes encoding the object identifier.
     """
     return ObjectIdentifier(ObjectType(obj_type), instance).encode()
 
@@ -266,8 +350,9 @@ def encode_object_identifier(obj_type: int, instance: int) -> bytes:
 def decode_object_identifier(data: memoryview | bytes) -> tuple[int, int]:
     """Decode a BACnet object identifier from 4 bytes.
 
-    Returns:
-        Tuple of (object_type, instance_number).
+    :param data: At least 4 bytes of encoded object identifier data.
+    :returns: Tuple of ``(object_type, instance_number)``.
+    :raises ValueError: If *data* contains fewer than 4 bytes.
     """
     if len(data) < 4:
         msg = f"ObjectIdentifier data too short: need 4 bytes, got {len(data)}"
@@ -290,12 +375,19 @@ def encode_boolean(value: bool) -> bytes:
 
     For context-tagged booleans. Application-tagged booleans encode the
     value in the tag itself.
+
+    :param value: The boolean value to encode.
+    :returns: A single byte (``0x01`` for ``True``, ``0x00`` for ``False``).
     """
     return bytes([1 if value else 0])
 
 
 def decode_boolean(data: memoryview | bytes) -> bool:
-    """Decode a boolean value from a single contents octet."""
+    """Decode a boolean value from a single contents octet.
+
+    :param data: At least 1 byte; the first byte is interpreted as the boolean value.
+    :returns: ``True`` if the first byte is non-zero, ``False`` otherwise.
+    """
     return bool(data[0])
 
 
@@ -303,17 +395,30 @@ def decode_boolean(data: memoryview | bytes) -> bool:
 
 
 def encode_application_tagged(tag_number: int, data: bytes) -> bytes:
-    """Encode data with an application tag."""
+    """Encode data with an application tag.
+
+    :param tag_number: Application tag number identifying the data type.
+    :param data: Encoded content bytes to wrap with the tag.
+    :returns: Application-tagged encoded bytes.
+    """
     return encode_tag(tag_number, TagClass.APPLICATION, len(data)) + data
 
 
 def encode_context_tagged(tag_number: int, data: bytes) -> bytes:
-    """Encode data with a context-specific tag."""
+    """Encode data with a context-specific tag.
+
+    :param tag_number: Context tag number.
+    :param data: Encoded content bytes to wrap with the tag.
+    :returns: Context-tagged encoded bytes.
+    """
     return encode_tag(tag_number, TagClass.CONTEXT, len(data)) + data
 
 
 def encode_application_null() -> bytes:
-    """Encode an application-tagged Null."""
+    """Encode an application-tagged Null.
+
+    :returns: Application-tagged Null encoding (tag only, no content).
+    """
     return encode_application_tagged(_TAG_NULL, b"")
 
 
@@ -322,86 +427,150 @@ def encode_application_boolean(value: bool) -> bytes:
 
     Per Clause 20.2.3, the value is encoded in the L/V/T bits of the tag
     with no contents octet.
+
+    :param value: The boolean value to encode.
+    :returns: Application-tagged Boolean encoding.
     """
     return encode_tag(_TAG_BOOLEAN, TagClass.APPLICATION, 1 if value else 0)
 
 
 def encode_application_unsigned(value: int) -> bytes:
-    """Encode an application-tagged Unsigned Integer."""
+    """Encode an application-tagged Unsigned Integer.
+
+    :param value: Non-negative integer to encode.
+    :returns: Application-tagged Unsigned Integer encoding.
+    """
     data = encode_unsigned(value)
     return encode_application_tagged(_TAG_UNSIGNED, data)
 
 
 def encode_application_signed(value: int) -> bytes:
-    """Encode an application-tagged Signed Integer."""
+    """Encode an application-tagged Signed Integer.
+
+    :param value: Signed integer to encode.
+    :returns: Application-tagged Signed Integer encoding.
+    """
     data = encode_signed(value)
     return encode_application_tagged(_TAG_SIGNED, data)
 
 
 def encode_application_real(value: float) -> bytes:
-    """Encode an application-tagged Real."""
+    """Encode an application-tagged Real.
+
+    :param value: Floating-point value to encode.
+    :returns: Application-tagged Real encoding.
+    """
     data = encode_real(value)
     return encode_application_tagged(_TAG_REAL, data)
 
 
 def encode_application_double(value: float) -> bytes:
-    """Encode an application-tagged Double."""
+    """Encode an application-tagged Double.
+
+    :param value: Floating-point value to encode.
+    :returns: Application-tagged Double encoding.
+    """
     data = encode_double(value)
     return encode_application_tagged(_TAG_DOUBLE, data)
 
 
 def encode_application_octet_string(value: bytes) -> bytes:
-    """Encode an application-tagged Octet String."""
+    """Encode an application-tagged Octet String.
+
+    :param value: Raw bytes to encode.
+    :returns: Application-tagged Octet String encoding.
+    """
     return encode_application_tagged(_TAG_OCTET_STRING, value)
 
 
 def encode_application_character_string(value: str) -> bytes:
-    """Encode an application-tagged Character String."""
+    """Encode an application-tagged Character String.
+
+    :param value: String to encode (UTF-8 by default).
+    :returns: Application-tagged Character String encoding.
+    """
     data = encode_character_string(value)
     return encode_application_tagged(_TAG_CHARACTER_STRING, data)
 
 
 def encode_application_enumerated(value: int) -> bytes:
-    """Encode an application-tagged Enumerated."""
+    """Encode an application-tagged Enumerated.
+
+    :param value: Enumerated value to encode.
+    :returns: Application-tagged Enumerated encoding.
+    """
     data = encode_enumerated(value)
     return encode_application_tagged(_TAG_ENUMERATED, data)
 
 
 def encode_application_date(date: BACnetDate) -> bytes:
-    """Encode an application-tagged Date."""
+    """Encode an application-tagged Date.
+
+    :param date: The :class:`BACnetDate` to encode.
+    :returns: Application-tagged Date encoding.
+    """
     data = encode_date(date)
     return encode_application_tagged(_TAG_DATE, data)
 
 
 def encode_application_time(time: BACnetTime) -> bytes:
-    """Encode an application-tagged Time."""
+    """Encode an application-tagged Time.
+
+    :param time: The :class:`BACnetTime` to encode.
+    :returns: Application-tagged Time encoding.
+    """
     data = encode_time(time)
     return encode_application_tagged(_TAG_TIME, data)
 
 
 def encode_application_object_id(obj_type: int, instance: int) -> bytes:
-    """Encode an application-tagged Object Identifier."""
+    """Encode an application-tagged Object Identifier.
+
+    :param obj_type: Object type number.
+    :param instance: Instance number.
+    :returns: Application-tagged Object Identifier encoding.
+    """
     data = encode_object_identifier(obj_type, instance)
     return encode_application_tagged(_TAG_OBJECT_IDENTIFIER, data)
 
 
 def encode_context_object_id(tag_number: int, obj_id: ObjectIdentifier) -> bytes:
-    """Encode an ObjectIdentifier with a context-specific tag."""
+    """Encode an :class:`ObjectIdentifier` with a context-specific tag.
+
+    :param tag_number: Context tag number.
+    :param obj_id: The :class:`ObjectIdentifier` to encode.
+    :returns: Context-tagged Object Identifier encoding.
+    """
     return encode_context_tagged(tag_number, obj_id.encode())
 
 
 def encode_context_unsigned(tag_number: int, value: int) -> bytes:
-    """Encode an unsigned integer with a context-specific tag."""
+    """Encode an unsigned integer with a context-specific tag.
+
+    :param tag_number: Context tag number.
+    :param value: Non-negative integer to encode.
+    :returns: Context-tagged unsigned integer encoding.
+    """
     return encode_context_tagged(tag_number, encode_unsigned(value))
 
 
 def encode_context_signed(tag_number: int, value: int) -> bytes:
-    """Encode a signed integer with a context-specific tag."""
+    """Encode a signed integer with a context-specific tag.
+
+    :param tag_number: Context tag number.
+    :param value: Signed integer to encode.
+    :returns: Context-tagged signed integer encoding.
+    """
     return encode_context_tagged(tag_number, encode_signed(value))
 
 
 def encode_context_enumerated(tag_number: int, value: int) -> bytes:
-    """Encode an enumerated value with a context-specific tag."""
+    """Encode an enumerated value with a context-specific tag.
+
+    :param tag_number: Context tag number.
+    :param value: Enumerated value to encode.
+    :returns: Context-tagged enumerated encoding.
+    """
     return encode_context_tagged(tag_number, encode_enumerated(value))
 
 
@@ -410,32 +579,60 @@ def encode_context_boolean(tag_number: int, value: bool) -> bytes:
 
     Context-tagged booleans use a 1-byte contents octet, unlike
     application-tagged booleans which encode the value in the tag LVT.
+
+    :param tag_number: Context tag number.
+    :param value: The boolean value to encode.
+    :returns: Context-tagged boolean encoding.
     """
     return encode_context_tagged(tag_number, encode_boolean(value))
 
 
 def encode_context_real(tag_number: int, value: float) -> bytes:
-    """Encode a Real with a context-specific tag."""
+    """Encode a Real with a context-specific tag.
+
+    :param tag_number: Context tag number.
+    :param value: Floating-point value to encode.
+    :returns: Context-tagged Real encoding.
+    """
     return encode_context_tagged(tag_number, encode_real(value))
 
 
 def encode_context_octet_string(tag_number: int, value: bytes) -> bytes:
-    """Encode an octet string with a context-specific tag."""
+    """Encode an octet string with a context-specific tag.
+
+    :param tag_number: Context tag number.
+    :param value: Raw bytes to encode.
+    :returns: Context-tagged octet string encoding.
+    """
     return encode_context_tagged(tag_number, value)
 
 
 def encode_context_bit_string(tag_number: int, value: BitString) -> bytes:
-    """Encode a bit string with a context-specific tag."""
+    """Encode a bit string with a context-specific tag.
+
+    :param tag_number: Context tag number.
+    :param value: The :class:`BitString` to encode.
+    :returns: Context-tagged bit string encoding.
+    """
     return encode_context_tagged(tag_number, encode_bit_string(value))
 
 
 def encode_context_date(tag_number: int, value: BACnetDate) -> bytes:
-    """Encode a date with a context-specific tag."""
+    """Encode a date with a context-specific tag.
+
+    :param tag_number: Context tag number.
+    :param value: The :class:`BACnetDate` to encode.
+    :returns: Context-tagged date encoding.
+    """
     return encode_context_tagged(tag_number, encode_date(value))
 
 
 def encode_application_bit_string(value: BitString) -> bytes:
-    """Encode an application-tagged Bit String."""
+    """Encode an application-tagged Bit String.
+
+    :param value: The :class:`BitString` to encode.
+    :returns: Application-tagged Bit String encoding.
+    """
     data = encode_bit_string(value)
     return encode_application_tagged(_TAG_BIT_STRING, data)
 
@@ -446,28 +643,23 @@ def decode_application_value(data: bytes | memoryview) -> object:
     Inspects the application tag number and dispatches to the
     appropriate decoder. Returns native Python types:
 
-        Tag 0  (Null)             -> None
-        Tag 1  (Boolean)          -> bool
-        Tag 2  (Unsigned)         -> int
-        Tag 3  (Signed)           -> int
-        Tag 4  (Real)             -> float
-        Tag 5  (Double)           -> float
-        Tag 6  (Octet String)     -> bytes
-        Tag 7  (Character String) -> str
-        Tag 8  (Bit String)       -> BitString
-        Tag 9  (Enumerated)       -> int
-        Tag 10 (Date)             -> BACnetDate
-        Tag 11 (Time)             -> BACnetTime
-        Tag 12 (Object Id)        -> ObjectIdentifier
+        Tag 0  (Null)             -> ``None``
+        Tag 1  (Boolean)          -> ``bool``
+        Tag 2  (Unsigned)         -> ``int``
+        Tag 3  (Signed)           -> ``int``
+        Tag 4  (Real)             -> ``float``
+        Tag 5  (Double)           -> ``float``
+        Tag 6  (Octet String)     -> ``bytes``
+        Tag 7  (Character String) -> ``str``
+        Tag 8  (Bit String)       -> :class:`BitString`
+        Tag 9  (Enumerated)       -> ``int``
+        Tag 10 (Date)             -> :class:`BACnetDate`
+        Tag 11 (Time)             -> :class:`BACnetTime`
+        Tag 12 (Object Id)        -> :class:`ObjectIdentifier`
 
-    Args:
-        data: Application-tagged encoded bytes.
-
-    Returns:
-        Decoded Python value.
-
-    Raises:
-        ValueError: If the tag is not application-class or is unrecognised.
+    :param data: Application-tagged encoded bytes.
+    :returns: Decoded Python value.
+    :raises ValueError: If the tag is not application-class or is unrecognised.
 
     Example::
 
@@ -527,11 +719,9 @@ def decode_all_application_values(data: bytes | memoryview) -> list[object]:
     Iterates through the buffer, decoding each application-tagged
     element and collecting them into a list.
 
-    Args:
-        data: Concatenated application-tagged encoded bytes.
-
-    Returns:
-        List of decoded Python values.
+    :param data: Concatenated application-tagged encoded bytes.
+    :returns: List of decoded Python values.
+    :raises ValueError: If a non-application tag is encountered.
     """
     from bac_py.encoding.tags import decode_tag
 
@@ -564,13 +754,10 @@ def decode_and_unwrap(data: bytes | memoryview) -> object:
     application-tagged element, ``None`` for empty data, or the full
     list for multiple elements.
 
-    Args:
-        data: Concatenated application-tagged encoded bytes.
-
-    Returns:
-        - ``None`` if *data* decodes to zero elements.
-        - The single decoded value if exactly one element.
-        - A ``list`` of decoded values if multiple elements.
+    :param data: Concatenated application-tagged encoded bytes.
+    :returns: ``None`` if *data* decodes to zero elements, the single decoded
+        value if exactly one element, or a ``list`` of decoded values if
+        multiple elements.
     """
     values = decode_all_application_values(data)
     if len(values) == 1:
@@ -586,16 +773,11 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
     Handles the common types stored in BACnet object properties,
     including both primitive and constructed BACnet types.
 
-    Args:
-        value: The value to encode.
-        int_as_real: If True, encode plain ints as Real instead of Unsigned
-            (used for analog object types where Present_Value is Real).
-
-    Returns:
-        Application-tagged encoded bytes.
-
-    Raises:
-        TypeError: If the value type is not supported.
+    :param value: The value to encode.
+    :param int_as_real: If ``True``, encode plain ``int`` values as Real instead
+        of Unsigned (used for analog object types where Present_Value is Real).
+    :returns: Application-tagged encoded bytes.
+    :raises TypeError: If the value type is not supported.
     """
     from bac_py.types.constructed import (
         BACnetAddress,
@@ -768,7 +950,12 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
 
 
 def _encode_calendar_entry(entry: object) -> bytes:
-    """Encode a BACnetCalendarEntry CHOICE with context tags."""
+    """Encode a ``BACnetCalendarEntry`` CHOICE with context tags.
+
+    :param entry: A ``BACnetCalendarEntry`` instance containing a
+        :class:`BACnetDate`, ``BACnetDateRange``, or ``BACnetWeekNDay``.
+    :returns: Context-tagged encoded bytes for the calendar entry.
+    """
     from bac_py.types.constructed import BACnetCalendarEntry, BACnetDateRange, BACnetWeekNDay
 
     assert isinstance(entry, BACnetCalendarEntry)
@@ -792,7 +979,12 @@ def _encode_calendar_entry(entry: object) -> bytes:
 
 
 def _encode_special_event(event: object, *, int_as_real: bool = False) -> bytes:
-    """Encode a BACnetSpecialEvent SEQUENCE."""
+    """Encode a ``BACnetSpecialEvent`` SEQUENCE.
+
+    :param event: A ``BACnetSpecialEvent`` instance.
+    :param int_as_real: If ``True``, encode integer time-values as Real.
+    :returns: Encoded bytes for the special event.
+    """
     from bac_py.types.constructed import BACnetCalendarEntry, BACnetSpecialEvent
 
     assert isinstance(event, BACnetSpecialEvent)
@@ -814,7 +1006,12 @@ def _encode_special_event(event: object, *, int_as_real: bool = False) -> bytes:
 
 
 def _encode_recipient(recipient: object) -> bytes:
-    """Encode a BACnetRecipient CHOICE."""
+    """Encode a ``BACnetRecipient`` CHOICE.
+
+    :param recipient: A ``BACnetRecipient`` instance with either a device
+        or address field populated.
+    :returns: Context-tagged encoded bytes for the recipient.
+    """
     from bac_py.types.constructed import BACnetRecipient
 
     assert isinstance(recipient, BACnetRecipient)
@@ -833,7 +1030,11 @@ def _encode_recipient(recipient: object) -> bytes:
 
 
 def _encode_cov_subscription(sub: object) -> bytes:
-    """Encode a BACnetCOVSubscription SEQUENCE."""
+    """Encode a ``BACnetCOVSubscription`` SEQUENCE.
+
+    :param sub: A ``BACnetCOVSubscription`` instance.
+    :returns: Encoded bytes for the COV subscription.
+    """
     from bac_py.types.constructed import BACnetCOVSubscription
 
     assert isinstance(sub, BACnetCOVSubscription)

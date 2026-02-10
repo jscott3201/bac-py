@@ -45,8 +45,7 @@ class BACnetPropertyValue:
     def encode(self) -> bytes:
         """Encode BACnetPropertyValue.
 
-        Returns:
-            Encoded bytes.
+        :returns: Encoded bytes for this property value sequence.
         """
         buf = bytearray()
         # [0] propertyIdentifier
@@ -67,14 +66,12 @@ class BACnetPropertyValue:
     def decode_from(
         cls, data: memoryview | bytes, offset: int = 0
     ) -> tuple[BACnetPropertyValue, int]:
-        """Decode BACnetPropertyValue from data at given offset.
+        """Decode BACnetPropertyValue from data at a given offset.
 
-        Args:
-            data: Raw bytes.
-            offset: Start offset.
-
-        Returns:
-            Tuple of (decoded BACnetPropertyValue, new offset).
+        :param data: Raw bytes containing encoded property value data.
+        :param offset: Byte offset to start decoding from.
+        :returns: Tuple of (decoded :class:`BACnetPropertyValue`, new offset).
+        :raises BACnetRejectError: If *priority* is outside the 1--16 range.
         """
         data = as_memoryview(data)
 

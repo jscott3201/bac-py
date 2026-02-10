@@ -40,7 +40,10 @@ class PropertyReference:
     property_array_index: int | None = None
 
     def encode(self) -> bytes:
-        """Encode property reference."""
+        """Encode this property reference as context-tagged bytes.
+
+        :returns: Encoded property reference bytes.
+        """
         buf = bytearray()
         buf.extend(encode_context_tagged(0, encode_unsigned(self.property_identifier)))
         if self.property_array_index is not None:
@@ -49,10 +52,11 @@ class PropertyReference:
 
     @classmethod
     def decode(cls, data: memoryview | bytes, offset: int) -> tuple[PropertyReference, int]:
-        """Decode property reference from buffer at offset.
+        """Decode a property reference from a buffer at the given offset.
 
-        Returns:
-            Tuple of (PropertyReference, new offset).
+        :param data: Raw bytes containing encoded property reference data.
+        :param offset: Byte offset to start decoding from.
+        :returns: Tuple of (:class:`PropertyReference`, new offset).
         """
         data = as_memoryview(data)
 
@@ -100,7 +104,10 @@ class ReadAccessSpecification:
     list_of_property_references: list[PropertyReference]
 
     def encode(self) -> bytes:
-        """Encode read access specification."""
+        """Encode this read access specification as context-tagged bytes.
+
+        :returns: Encoded read access specification bytes.
+        """
         buf = bytearray()
         # [0] object-identifier
         buf.extend(encode_context_object_id(0, self.object_identifier))
@@ -113,10 +120,11 @@ class ReadAccessSpecification:
 
     @classmethod
     def decode(cls, data: memoryview | bytes, offset: int) -> tuple[ReadAccessSpecification, int]:
-        """Decode read access specification from buffer at offset.
+        """Decode a read access specification from a buffer at the given offset.
 
-        Returns:
-            Tuple of (ReadAccessSpecification, new offset).
+        :param data: Raw bytes containing encoded read access specification data.
+        :param offset: Byte offset to start decoding from.
+        :returns: Tuple of (:class:`ReadAccessSpecification`, new offset).
         """
         data = as_memoryview(data)
 
@@ -160,7 +168,10 @@ class ReadPropertyMultipleRequest:
     list_of_read_access_specs: list[ReadAccessSpecification]
 
     def encode(self) -> bytes:
-        """Encode ReadPropertyMultiple-Request service parameters."""
+        """Encode ReadPropertyMultiple-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         for spec in self.list_of_read_access_specs:
             buf.extend(spec.encode())
@@ -168,7 +179,11 @@ class ReadPropertyMultipleRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ReadPropertyMultipleRequest:
-        """Decode ReadPropertyMultiple-Request from service request bytes."""
+        """Decode ReadPropertyMultiple-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`ReadPropertyMultipleRequest`.
+        """
         data = as_memoryview(data)
 
         offset = 0
@@ -203,7 +218,11 @@ class ReadResultElement:
     property_access_error: tuple[ErrorClass, ErrorCode] | None = None
 
     def encode(self) -> bytes:
-        """Encode a single result element."""
+        """Encode a single read result element.
+
+        :returns: Encoded result element bytes containing either a property
+            value (success) or a property access error (failure).
+        """
         buf = bytearray()
         # [2] property-identifier
         buf.extend(encode_context_tagged(2, encode_unsigned(self.property_identifier)))
@@ -227,7 +246,12 @@ class ReadResultElement:
 
     @classmethod
     def decode(cls, data: memoryview | bytes, offset: int) -> tuple[ReadResultElement, int]:
-        """Decode a single result element from buffer at offset."""
+        """Decode a single read result element from a buffer at the given offset.
+
+        :param data: Raw bytes containing encoded result element data.
+        :param offset: Byte offset to start decoding from.
+        :returns: Tuple of (:class:`ReadResultElement`, new offset).
+        """
         data = as_memoryview(data)
 
         # [2] property-identifier
@@ -297,7 +321,10 @@ class ReadAccessResult:
     list_of_results: list[ReadResultElement]
 
     def encode(self) -> bytes:
-        """Encode read access result."""
+        """Encode this read access result as context-tagged bytes.
+
+        :returns: Encoded read access result bytes.
+        """
         buf = bytearray()
         # [0] object-identifier
         buf.extend(encode_context_object_id(0, self.object_identifier))
@@ -310,7 +337,12 @@ class ReadAccessResult:
 
     @classmethod
     def decode(cls, data: memoryview | bytes, offset: int) -> tuple[ReadAccessResult, int]:
-        """Decode read access result from buffer at offset."""
+        """Decode a read access result from a buffer at the given offset.
+
+        :param data: Raw bytes containing encoded read access result data.
+        :param offset: Byte offset to start decoding from.
+        :returns: Tuple of (:class:`ReadAccessResult`, new offset).
+        """
         data = as_memoryview(data)
 
         # [0] object-identifier
@@ -352,7 +384,10 @@ class ReadPropertyMultipleACK:
     list_of_read_access_results: list[ReadAccessResult]
 
     def encode(self) -> bytes:
-        """Encode ReadPropertyMultiple-ACK service parameters."""
+        """Encode ReadPropertyMultiple-ACK service parameters.
+
+        :returns: Encoded service ACK bytes.
+        """
         buf = bytearray()
         for result in self.list_of_read_access_results:
             buf.extend(result.encode())
@@ -360,7 +395,11 @@ class ReadPropertyMultipleACK:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ReadPropertyMultipleACK:
-        """Decode ReadPropertyMultiple-ACK from service ACK bytes."""
+        """Decode ReadPropertyMultiple-ACK from service ACK bytes.
+
+        :param data: Raw service ACK bytes.
+        :returns: Decoded :class:`ReadPropertyMultipleACK`.
+        """
         data = as_memoryview(data)
 
         offset = 0

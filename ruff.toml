@@ -35,7 +35,7 @@ ignore = [
 ]
 
 [lint.pydocstyle]
-convention = "google"
+convention = "pep257"
 
 [lint.isort]
 known-first-party = ["bac_py"]

@@ -92,13 +92,10 @@ class COVManager:
     ) -> None:
         """Add or update a COV subscription.
 
-        Args:
-            subscriber: Address of the subscribing device.
-            request: The decoded SubscribeCOV-Request.
-            object_db: Object database to validate the object exists.
-
-        Raises:
-            BACnetError: If the monitored object does not exist.
+        :param subscriber: Address of the subscribing device.
+        :param request: The decoded SubscribeCOV-Request.
+        :param object_db: Object database to validate the object exists.
+        :raises BACnetError: If the monitored object does not exist.
         """
         obj_id = request.monitored_object_identifier
         obj = object_db.get(obj_id)
@@ -165,9 +162,8 @@ class COVManager:
         Called after a property write. Compares current values against
         last-reported values using COV increment logic per Clause 13.1.
 
-        Args:
-            obj: The object whose property was changed.
-            changed_property: The property that was written.
+        :param obj: The object whose property was changed.
+        :param changed_property: The property that was written.
         """
         obj_id = obj.object_identifier
         for _key, sub in list(self._subscriptions.items()):

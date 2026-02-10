@@ -5,7 +5,6 @@ from __future__ import annotations
 from bac_py.types.enums import ObjectType, PropertyIdentifier
 from bac_py.types.primitives import ObjectIdentifier
 
-# Short aliases for commonly used object types.
 OBJECT_TYPE_ALIASES: dict[str, ObjectType] = {
     "ai": ObjectType.ANALOG_INPUT,
     "ao": ObjectType.ANALOG_OUTPUT,
@@ -18,8 +17,8 @@ OBJECT_TYPE_ALIASES: dict[str, ObjectType] = {
     "msv": ObjectType.MULTI_STATE_VALUE,
     "dev": ObjectType.DEVICE,
 }
+"""Short aliases for commonly used object types."""
 
-# Short aliases for commonly used property identifiers.
 PROPERTY_ALIASES: dict[str, PropertyIdentifier] = {
     "pv": PropertyIdentifier.PRESENT_VALUE,
     "name": PropertyIdentifier.OBJECT_NAME,
@@ -30,28 +29,31 @@ PROPERTY_ALIASES: dict[str, PropertyIdentifier] = {
     "cov-inc": PropertyIdentifier.COV_INCREMENT,
     "reliability": PropertyIdentifier.RELIABILITY,
 }
+"""Short aliases for commonly used property identifiers."""
 
 
 def _resolve_object_type(name: str) -> ObjectType:
-    """Resolve an object type name (alias, hyphenated, or underscore) to an ObjectType.
+    """Resolve an object type name to an :class:`~bac_py.types.enums.ObjectType`.
 
-    Raises:
-        ValueError: If the name is not recognised.
+    Accepts short aliases (e.g. ``"ai"``), hyphenated names
+    (e.g. ``"analog-input"``), underscore names (e.g. ``"ANALOG_INPUT"``),
+    or raw integer strings.
+
+    :param name: Object type name in any supported format.
+    :returns: Resolved :class:`~bac_py.types.enums.ObjectType` member.
+    :raises ValueError: If *name* is not recognised.
     """
     lower = name.lower().strip()
 
-    # Check short aliases first
     if lower in OBJECT_TYPE_ALIASES:
         return OBJECT_TYPE_ALIASES[lower]
 
-    # Try hyphenated -> UPPER_SNAKE
     enum_name = lower.replace("-", "_").upper()
     try:
         return ObjectType[enum_name]
     except KeyError:
         pass
 
-    # Try as raw integer
     try:
         return ObjectType(int(lower))
     except (ValueError, KeyError):
@@ -64,7 +66,7 @@ def _resolve_object_type(name: str) -> ObjectType:
 def parse_object_identifier(
     obj: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
 ) -> ObjectIdentifier:
-    """Parse a flexible object identifier to ObjectIdentifier.
+    """Parse a flexible object identifier to :class:`~bac_py.types.primitives.ObjectIdentifier`.
 
     Accepted formats::
 
@@ -76,14 +78,9 @@ def parse_object_identifier(
         (0, 1)                            -> ObjectIdentifier(ANALOG_INPUT, 1)
         ObjectIdentifier(...)             -> pass-through
 
-    Args:
-        obj: Object identifier in any supported format.
-
-    Returns:
-        Parsed ObjectIdentifier.
-
-    Raises:
-        ValueError: If the format is not recognised.
+    :param obj: Object identifier in any supported format.
+    :returns: Parsed :class:`~bac_py.types.primitives.ObjectIdentifier`.
+    :raises ValueError: If the format is not recognised.
     """
     if isinstance(obj, ObjectIdentifier):
         return obj
@@ -103,7 +100,6 @@ def parse_object_identifier(
         raise ValueError(msg)
 
     if isinstance(obj, str):
-        # Split on comma or colon
         for sep in (",", ":"):
             if sep in obj:
                 parts = obj.split(sep, 1)
@@ -126,25 +122,27 @@ def parse_object_identifier(
 
 
 def _resolve_property_identifier(name: str) -> PropertyIdentifier:
-    """Resolve a property name (alias, hyphenated, or underscore) to a PropertyIdentifier.
+    """Resolve a property name to a :class:`~bac_py.types.enums.PropertyIdentifier`.
 
-    Raises:
-        ValueError: If the name is not recognised.
+    Accepts short aliases (e.g. ``"pv"``), hyphenated names
+    (e.g. ``"present-value"``), underscore names (e.g. ``"PRESENT_VALUE"``),
+    or raw integer strings.
+
+    :param name: Property name in any supported format.
+    :returns: Resolved :class:`~bac_py.types.enums.PropertyIdentifier` member.
+    :raises ValueError: If *name* is not recognised.
     """
     lower = name.lower().strip()
 
-    # Check short aliases first
     if lower in PROPERTY_ALIASES:
         return PROPERTY_ALIASES[lower]
 
-    # Try hyphenated -> UPPER_SNAKE
     enum_name = lower.replace("-", "_").upper()
     try:
         return PropertyIdentifier[enum_name]
     except KeyError:
         pass
 
-    # Try as raw integer
     try:
         return PropertyIdentifier(int(lower))
     except (ValueError, KeyError):
@@ -157,7 +155,7 @@ def _resolve_property_identifier(name: str) -> PropertyIdentifier:
 def parse_property_identifier(
     prop: str | int | PropertyIdentifier,
 ) -> PropertyIdentifier:
-    """Parse a flexible property identifier to PropertyIdentifier.
+    """Parse a flexible property identifier to :class:`~bac_py.types.enums.PropertyIdentifier`.
 
     Accepted formats::
 
@@ -169,14 +167,9 @@ def parse_property_identifier(
         85                                -> PropertyIdentifier(85)
         PropertyIdentifier.PRESENT_VALUE  -> pass-through
 
-    Args:
-        prop: Property identifier in any supported format.
-
-    Returns:
-        Parsed PropertyIdentifier.
-
-    Raises:
-        ValueError: If the format is not recognised.
+    :param prop: Property identifier in any supported format.
+    :returns: Parsed :class:`~bac_py.types.enums.PropertyIdentifier`.
+    :raises ValueError: If the format is not recognised.
     """
     if isinstance(prop, PropertyIdentifier):
         return prop

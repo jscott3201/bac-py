@@ -44,8 +44,7 @@ class ReadPropertyRequest:
     def encode(self) -> bytes:
         """Encode ReadProperty-Request service parameters.
 
-        Returns:
-            Encoded service request bytes.
+        :returns: Encoded service request bytes.
         """
         buf = bytearray()
         # [0] object-identifier
@@ -61,11 +60,8 @@ class ReadPropertyRequest:
     def decode(cls, data: memoryview | bytes) -> ReadPropertyRequest:
         """Decode ReadProperty-Request from service request bytes.
 
-        Args:
-            data: Raw service request bytes.
-
-        Returns:
-            Decoded ReadPropertyRequest.
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`ReadPropertyRequest`.
         """
         data = as_memoryview(data)
 
@@ -120,8 +116,7 @@ class ReadPropertyACK:
     def encode(self) -> bytes:
         """Encode ReadProperty-ACK service parameters.
 
-        Returns:
-            Encoded service ACK bytes.
+        :returns: Encoded service ACK bytes.
         """
         buf = bytearray()
         # [0] object-identifier
@@ -141,11 +136,8 @@ class ReadPropertyACK:
     def decode(cls, data: memoryview | bytes) -> ReadPropertyACK:
         """Decode ReadProperty-ACK from service ACK bytes.
 
-        Args:
-            data: Raw service ACK bytes.
-
-        Returns:
-            Decoded ReadPropertyACK.
+        :param data: Raw service ACK bytes.
+        :returns: Decoded :class:`ReadPropertyACK`.
         """
         data = as_memoryview(data)
 

@@ -132,14 +132,14 @@ class RoutingTable:
     # -- Port management ----------------------------------------------------
 
     def add_port(self, port: RouterPort) -> None:
-        """Register a router port and create a directly-connected entry.
+        """Register a router port and create a directly-connected routing entry.
 
         The port's *network_number* is automatically added to the
         routing table as a directly-connected entry (no next-hop router).
 
-        Raises:
-            ValueError: If a port with the same *port_id* or a route for
-                the same *network_number* already exists.
+        :param port: The :class:`RouterPort` to register.
+        :raises ValueError: If a port with the same *port_id* or a route for
+            the same *network_number* already exists.
         """
         if port.port_id in self._ports:
             msg = f"Port {port.port_id} already registered"
@@ -156,20 +156,27 @@ class RoutingTable:
         )
 
     def get_port(self, port_id: int) -> RouterPort | None:
-        """Look up a port by its identifier."""
+        """Look up a :class:`RouterPort` by its identifier.
+
+        :param port_id: The port identifier to look up.
+        :returns: The :class:`RouterPort`, or ``None`` if not found.
+        """
         return self._ports.get(port_id)
 
     def get_all_ports(self) -> list[RouterPort]:
-        """Return all registered ports."""
+        """Return all registered :class:`RouterPort` instances.
+
+        :returns: A list of all ports managed by this routing table.
+        """
         return list(self._ports.values())
 
     # -- Route queries ------------------------------------------------------
 
     def get_port_for_network(self, dnet: int) -> tuple[RouterPort, RoutingTableEntry] | None:
-        """Find the port and entry that can reach *dnet*.
+        """Find the port and routing entry that can reach *dnet*.
 
-        Returns:
-            A ``(RouterPort, RoutingTableEntry)`` tuple, or ``None`` if
+        :param dnet: The destination network number to look up.
+        :returns: A ``(RouterPort, RoutingTableEntry)`` tuple, or ``None`` if
             no route to *dnet* is known.
         """
         entry = self._entries.get(dnet)
@@ -181,7 +188,12 @@ class RoutingTable:
         return port, entry
 
     def port_for_directly_connected(self, dnet: int) -> RouterPort | None:
-        """Return the port if *dnet* is directly connected, else ``None``."""
+        """Return the port if *dnet* is directly connected, else ``None``.
+
+        :param dnet: The network number to check.
+        :returns: The :class:`RouterPort` if the network is directly connected,
+            or ``None`` if it is remote or unknown.
+        """
         entry = self._entries.get(dnet)
         if entry is None or entry.next_router_mac is not None:
             return None
@@ -193,16 +205,16 @@ class RoutingTable:
         exclude_port: int | None = None,
         include_busy: bool = False,
     ) -> list[int]:
-        """Return network numbers of reachable entries.
+        """Return network numbers of reachable routing table entries.
 
-        Args:
-            exclude_port: If given, exclude networks reachable through
-                this port.  Used when responding to Who-Is-Router so we
-                don't advertise networks back to the port that asked.
-            include_busy: If ``True``, include networks marked BUSY
-                (temporarily unreachable due to congestion).  Per
-                Clause 6.6.3.2, Who-Is-Router responses must include
-                temporarily unreachable networks.
+        :param exclude_port: If given, exclude networks reachable through
+            this port.  Used when responding to Who-Is-Router so we
+            don't advertise networks back to the port that asked.
+        :param include_busy: If ``True``, include networks marked BUSY
+            (temporarily unreachable due to congestion).  Per
+            Clause 6.6.3.2, Who-Is-Router responses must include
+            temporarily unreachable networks.
+        :returns: A list of reachable DNET numbers.
         """
         result: list[int] = []
         for entry in self._entries.values():
@@ -216,11 +228,18 @@ class RoutingTable:
         return result
 
     def get_all_entries(self) -> list[RoutingTableEntry]:
-        """Return all routing table entries."""
+        """Return all routing table entries.
+
+        :returns: A list of all :class:`RoutingTableEntry` instances.
+        """
         return list(self._entries.values())
 
     def get_entry(self, dnet: int) -> RoutingTableEntry | None:
-        """Look up a routing table entry by network number."""
+        """Look up a routing table entry by network number.
+
+        :param dnet: The destination network number to look up.
+        :returns: The :class:`RoutingTableEntry`, or ``None`` if not found.
+        """
         return self._entries.get(dnet)
 
     # -- Route mutation -----------------------------------------------------
@@ -237,14 +256,11 @@ class RoutingTable:
         reachability are updated.  If the entry is new, it is created
         as REACHABLE.
 
-        Args:
-            dnet: Destination network number.
-            port_id: The port through which *dnet* is reachable.
-            next_router_mac: MAC of the next-hop router, or ``None``
-                if directly connected.
-
-        Raises:
-            ValueError: If *port_id* is not a registered port.
+        :param dnet: Destination network number.
+        :param port_id: The port through which *dnet* is reachable.
+        :param next_router_mac: MAC of the next-hop router, or ``None``
+            if directly connected.
+        :raises ValueError: If *port_id* is not a registered port.
         """
         if port_id not in self._ports:
             msg = f"Unknown port {port_id}"
@@ -271,6 +287,8 @@ class RoutingTable:
 
         Any pending busy timer is cancelled.  Silently does nothing if
         the entry does not exist.
+
+        :param dnet: The network number to remove.
         """
         entry = self._entries.pop(dnet, None)
         if entry is not None and entry.busy_timeout_handle is not None:
@@ -284,13 +302,10 @@ class RoutingTable:
         Updates both the port's ``network_number`` and the routing
         table entry key so they remain consistent.
 
-        Args:
-            port_id: The port whose network number changed.
-            new_network: The new network number.
-
-        Raises:
-            ValueError: If a route for *new_network* already exists
-                (other than the port's own entry).
+        :param port_id: The port whose network number changed.
+        :param new_network: The new network number.
+        :raises ValueError: If a route for *new_network* already exists
+            (other than the port's own entry).
         """
         port = self._ports.get(port_id)
         if port is None:
@@ -327,21 +342,19 @@ class RoutingTable:
         """Mark a network as BUSY (congestion control).
 
         Starts a timer that will call *timeout_callback* after
-        *timeout_seconds* (default 30s per the BACnet specification).
+        *timeout_seconds* (default 30 s per the BACnet specification).
         The callback is typically used to automatically restore the
         entry to REACHABLE.
 
         Does nothing if the entry does not exist.
 
-        Args:
-            dnet: Network number to mark as busy.
-            timeout_callback: Called when the busy timer expires.
-            timeout_seconds: Timer duration in seconds.
+        :param dnet: Network number to mark as busy.
+        :param timeout_callback: Called when the busy timer expires.
+        :param timeout_seconds: Timer duration in seconds.
         """
         entry = self._entries.get(dnet)
         if entry is None:
             return
-        # Cancel any existing timer.
         if entry.busy_timeout_handle is not None:
             entry.busy_timeout_handle.cancel()
             entry.busy_timeout_handle = None
@@ -355,6 +368,8 @@ class RoutingTable:
 
         Cancels any pending busy timer.  Does nothing if the entry
         does not exist.
+
+        :param dnet: Network number to mark as available.
         """
         entry = self._entries.get(dnet)
         if entry is None:
@@ -369,6 +384,8 @@ class RoutingTable:
 
         Cancels any pending busy timer.  Does nothing if the entry
         does not exist.
+
+        :param dnet: Network number to mark as unreachable.
         """
         entry = self._entries.get(dnet)
         if entry is None:
@@ -400,7 +417,12 @@ _MSG_TYPE_MAP: dict[type[NetworkMessage], int] = {
 
 
 def _message_type_for(msg: NetworkMessage) -> int:
-    """Return the ``NetworkMessageType`` value for a message dataclass."""
+    """Return the :class:`NetworkMessageType` value for a message dataclass.
+
+    :param msg: The :class:`NetworkMessage` instance to look up.
+    :returns: The integer message type code.
+    :raises TypeError: If no mapping exists for the message type.
+    """
     mt = _MSG_TYPE_MAP.get(type(msg))
     if mt is None:
         raise TypeError(f"No message type mapping for {type(msg).__name__}")
@@ -432,17 +454,16 @@ class NetworkRouter:
     ) -> None:
         """Initialise the network router.
 
-        Args:
-            ports: Router ports to manage.  Each port must have a
-                unique *port_id* and *network_number*.
-            application_port_id: If given, the port on which the
-                router's own application entity resides.  Local
-                traffic (and the local copy of global broadcasts)
-                will be delivered to *application_callback* via this
-                port.
-            application_callback: Called with ``(apdu_bytes,
-                source_address)`` when an APDU is delivered to the
-                local application entity.
+        :param ports: Router ports to manage.  Each port must have a
+            unique *port_id* and *network_number*.
+        :param application_port_id: If given, the port on which the
+            router's own application entity resides.  Local
+            traffic (and the local copy of global broadcasts)
+            will be delivered to *application_callback* via this
+            port.
+        :param application_callback: Called with ``(apdu_bytes,
+            source_address)`` when an APDU is delivered to the
+            local application entity.
         """
         self._routing_table = RoutingTable()
         self._application_port_id = application_port_id
@@ -454,7 +475,7 @@ class NetworkRouter:
     # -- Lifecycle ----------------------------------------------------------
 
     async def start(self) -> None:
-        """Start all port transports, wire callbacks, and perform startup broadcasts.
+        """Start all port transports, wire receive callbacks, and perform startup broadcasts.
 
         Per Clause 6.6.2, after starting transports, each port receives:
 
@@ -503,7 +524,11 @@ class NetworkRouter:
     # -- Receive path -------------------------------------------------------
 
     def _on_port_receive(self, port_id: int, data: bytes, source_mac: bytes) -> None:
-        """Transport callback: raw NPDU received on a port."""
+        """Handle a raw NPDU received on a port from the transport layer.
+
+        Decodes the NPDU and delegates to :meth:`_process_npdu`.  Malformed
+        NPDUs are logged and silently dropped.
+        """
         try:
             npdu = decode_npdu(memoryview(data))
         except (ValueError, IndexError):
@@ -513,15 +538,16 @@ class NetworkRouter:
         self._process_npdu(port_id, npdu, source_mac)
 
     def _process_npdu(self, port_id: int, npdu: NPDU, source_mac: bytes) -> None:
-        """Implement the forwarding flowchart (Figure 6-12).
+        """Route an NPDU per the forwarding flowchart (Figure 6-12).
 
-        Steps:
-        1. Network message? -> delegate to _handle_network_message
-        2. No DNET? -> local delivery
-        3. DNET == 0xFFFF? -> local delivery + flood all other ports
-        4. DNET directly connected? -> deliver on that port
-        5. DNET in routing table? -> forward to next-hop router
-        6. Unknown DNET -> discard with warning
+        Decision sequence:
+
+        1. Network message -- delegate to :meth:`_handle_network_message`.
+        2. No DNET -- local delivery to the application entity.
+        3. DNET == 0xFFFF -- local delivery + flood all other ports.
+        4. DNET directly connected -- deliver on that port.
+        5. DNET in routing table -- forward to next-hop router.
+        6. Unknown DNET -- send Reject-Message-To-Network back.
         """
         if npdu.is_network_message:
             self._handle_network_message(port_id, npdu, source_mac)
@@ -548,11 +574,15 @@ class NetworkRouter:
     # -- Local application delivery -----------------------------------------
 
     def _deliver_to_application(self, port_id: int, npdu: NPDU, source_mac: bytes) -> None:
-        """Deliver an APDU to the local application entity (if present)."""
+        """Deliver an APDU to the local application entity, if one is registered.
+
+        Reconstructs the source :class:`~bac_py.network.address.BACnetAddress`
+        from the NPDU's SNET/SADR (for routed messages) or from the arrival
+        port's network number and the data-link source MAC.
+        """
         if self._application_callback is None:
             return
 
-        # Build source BACnetAddress
         if npdu.source is not None:
             src_addr = npdu.source
         else:
@@ -567,7 +597,10 @@ class NetworkRouter:
     def _forward_global_broadcast(
         self, arrival_port_id: int, npdu: NPDU, source_mac: bytes
     ) -> None:
-        """Forward a global broadcast to all ports except the arrival port."""
+        """Forward a global broadcast NPDU to all ports except the arrival port.
+
+        Injects SNET/SADR and decrements the hop count before forwarding.
+        """
         forwarded_npdu = self._prepare_forwarded_npdu(arrival_port_id, npdu, source_mac)
         if forwarded_npdu is None:
             return
@@ -626,7 +659,6 @@ class NetworkRouter:
             )
             return
 
-        # Check if DNET is directly connected
         if entry.next_router_mac is None:
             self._deliver_to_directly_connected(arrival_port_id, npdu, source_mac, dest_port)
         else:
@@ -646,7 +678,6 @@ class NetworkRouter:
         """
         assert npdu.destination is not None
 
-        # Inject SNET/SADR if not present
         source = self._inject_source(arrival_port_id, npdu, source_mac)
 
         # Build new NPDU without destination (local delivery on target port)
@@ -680,7 +711,11 @@ class NetworkRouter:
         dest_port: RouterPort,
         entry: RoutingTableEntry,
     ) -> None:
-        """Forward to a remote network via a next-hop router."""
+        """Forward an NPDU to a remote network via a next-hop router.
+
+        Injects SNET/SADR, decrements hop count, and unicasts to
+        the next-hop router's MAC address.
+        """
         forwarded = self._prepare_forwarded_npdu(arrival_port_id, npdu, source_mac)
         if forwarded is None:
             return
@@ -695,9 +730,10 @@ class NetworkRouter:
         npdu: NPDU,
         source_mac: bytes,
     ) -> NPDU | None:
-        """Prepare an NPDU for forwarding: inject SNET/SADR, decrement hop count.
+        """Prepare an NPDU for forwarding: inject SNET/SADR and decrement hop count.
 
-        Returns ``None`` if the hop count has reached zero.
+        :returns: A new :class:`~bac_py.network.npdu.NPDU` ready for
+            forwarding, or ``None`` if the hop count has been exhausted.
         """
         # Q2: Log if a routed NPDU (has SNET/SADR) still has the default
         # hop count of 255, which suggests no prior router decremented it.
@@ -707,7 +743,6 @@ class NetworkRouter:
                 npdu.source.network,
             )
 
-        # Hop count check
         new_hop_count = npdu.hop_count - 1
         if new_hop_count <= 0:
             logger.debug("Hop count exhausted, discarding NPDU")
@@ -762,12 +797,11 @@ class NetworkRouter:
     ) -> None:
         """Build and send a network-layer message on a specific port.
 
-        Args:
-            port_id: The port to send on.
-            msg: The network message dataclass to encode.
-            broadcast: If ``True``, send as local broadcast.
-            dest_mac: If *broadcast* is ``False``, the destination
-                MAC address for unicast delivery.
+        :param port_id: The port to send on.
+        :param msg: The network message dataclass to encode.
+        :param broadcast: If ``True``, send as a local broadcast.
+        :param dest_mac: If *broadcast* is ``False``, the destination
+            MAC address for unicast delivery.
         """
         port = self._routing_table.get_port(port_id)
         if port is None:
@@ -790,7 +824,11 @@ class NetworkRouter:
         exclude_port_id: int,
         msg: NetworkMessage,
     ) -> None:
-        """Broadcast a network-layer message on all ports except one."""
+        """Broadcast a network-layer message on all ports except the specified one.
+
+        Used to re-broadcast messages received on one port to all other
+        ports, as required by several Clause 6.6.3 message handlers.
+        """
         for port in self._routing_table.get_all_ports():
             if port.port_id == exclude_port_id:
                 continue
@@ -856,6 +894,13 @@ class NetworkRouter:
         npdu: NPDU,
         source_mac: bytes,
     ) -> None:
+        """Process a Who-Is-Router-To-Network message (Clause 6.6.3.2).
+
+        If a specific DNET is requested and reachable through a different
+        port, responds with I-Am-Router.  If the DNET is unknown, forwards
+        the query to all other ports.  A wildcard query (no DNET) triggers
+        an I-Am-Router listing all reachable networks (including BUSY).
+        """
         if msg.network is not None:
             # Specific DNET requested.
             result = self._routing_table.get_port_for_network(msg.network)
@@ -927,7 +972,6 @@ class NetworkRouter:
         Updates routing-table reachability based on the reject reason
         and relays the reject toward the original DADR destination.
         """
-        # Update routing table based on reason.
         if msg.reason == RejectMessageReason.NOT_DIRECTLY_CONNECTED:
             self._routing_table.mark_unreachable(msg.network)
         elif msg.reason == RejectMessageReason.ROUTER_BUSY:
@@ -1013,6 +1057,13 @@ class NetworkRouter:
         msg: InitializeRoutingTable,
         source_mac: bytes,
     ) -> None:
+        """Process an Initialize-Routing-Table message (Clause 6.6.3.8).
+
+        An empty ports list is interpreted as a query: the complete routing
+        table is returned in an Initialize-Routing-Table-Ack.  A non-empty
+        ports list modifies the routing table (port_id 0 removes an entry)
+        and the modification is acknowledged with an empty Ack.
+        """
         if len(msg.ports) == 0:
             # Query: return full routing table.
             reply_ports: list[RoutingTablePort] = []
@@ -1063,7 +1114,6 @@ class NetworkRouter:
         This is a response to a prior routing-table query.  Currently
         only logged for diagnostics; no routing-table updates are applied.
         """
-        # Response to a prior query.  Log for diagnostics.
         logger.debug(
             "Received Initialize-Routing-Table-Ack with %d port(s)",
             len(msg.ports),
@@ -1076,6 +1126,13 @@ class NetworkRouter:
         port_id: int,
         npdu: NPDU,
     ) -> None:
+        """Respond to a What-Is-Network-Number request (Clause 6.4.19).
+
+        Per spec, this message must not be routed -- it is silently
+        ignored if SNET/SADR or DNET/DADR are present in the NPCI.
+        Responds with Network-Number-Is only when the port's network
+        number has been statically configured.
+        """
         # Never routed -- ignore if SNET/SADR or DNET/DADR present.
         if npdu.source is not None or npdu.destination is not None:
             return
@@ -1095,6 +1152,13 @@ class NetworkRouter:
         msg: NetworkNumberIs,
         npdu: NPDU,
     ) -> None:
+        """Learn a network number from a Network-Number-Is message (Clause 6.4.20).
+
+        Per spec, this message must not be routed -- it is silently
+        ignored if SNET/SADR or DNET/DADR are present.  Only learns
+        the number if the port's network number is not already statically
+        configured and the source claims to be authoritative (configured=True).
+        """
         # Never routed -- ignore if SNET/SADR or DNET/DADR present.
         if npdu.source is not None or npdu.destination is not None:
             return
@@ -1171,7 +1235,13 @@ class NetworkRouter:
         reason: RejectMessageReason,
         dnet: int,
     ) -> None:
-        """Send a Reject-Message-To-Network to a specific station."""
+        """Send a Reject-Message-To-Network to a specific station.
+
+        :param port_id: The port to send the reject on.
+        :param dest_mac: Data-link MAC address of the recipient.
+        :param reason: The :class:`RejectMessageReason` code.
+        :param dnet: The network number being rejected.
+        """
         self._send_network_message_on_port(
             port_id,
             RejectMessageToNetwork(reason=reason, network=dnet),
@@ -1237,17 +1307,18 @@ class NetworkRouter:
         expecting_reply: bool = True,
         priority: NetworkPriority = NetworkPriority.NORMAL,
     ) -> None:
-        """Send an APDU to a destination address.
+        """Send an APDU from the router's local application entity.
 
         This is called by the application layer to send outbound
         messages.  The router wraps the APDU in an NPDU and routes
-        it to the appropriate port.
+        it to the appropriate port based on the destination address.
 
-        Args:
-            apdu: Application-layer PDU bytes.
-            destination: Target BACnet address.
-            expecting_reply: Whether a reply is expected.
-            priority: Network priority level.
+        :param apdu: Application-layer PDU bytes.
+        :param destination: Target :class:`~bac_py.network.address.BACnetAddress`.
+        :param expecting_reply: Whether a reply is expected.
+        :param priority: Network priority level.
+        :raises RuntimeError: If no application port is configured or the
+            configured application port is not found.
         """
         if self._application_port_id is None:
             msg = "No application port configured"

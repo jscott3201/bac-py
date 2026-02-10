@@ -16,9 +16,8 @@ class JsonSerializer:
     plain strings — callers must use ``bytes.fromhex()`` when
     round-tripping binary data.
 
-    Args:
-        pretty: Indent output with 2 spaces.
-        sort_keys: Sort dict keys alphabetically.
+    :param pretty: Indent output with 2 spaces.
+    :param sort_keys: Sort dict keys alphabetically.
     """
 
     def __init__(

@@ -94,11 +94,8 @@ def _compute_forward_address(entry: BDTEntry) -> BIPAddress:
 
         dest_ip = entry_ip | ~mask
 
-    Args:
-        entry: BDT entry with address and broadcast mask.
-
-    Returns:
-        Computed forwarding BIPAddress.
+    :param entry: BDT entry with address and broadcast mask.
+    :returns: Computed forwarding :class:`BIPAddress`.
     """
     ip_bytes = bytes(int(x) for x in entry.address.host.split("."))
     mask = entry.broadcast_mask
@@ -137,42 +134,41 @@ class BBMDManager:
     ) -> None:
         """Initialize BBMD manager.
 
-        Args:
-            local_address: This BBMD's B/IP address.
-            send_callback: Called with (raw_bytes, destination) to send
-                a UDP datagram. Typically BIPTransport._transport.sendto
-                wrapped to accept BIPAddress.
-            local_broadcast_callback: Called with (npdu_bytes, source_address)
-                to deliver an NPDU to the BBMD's own application/router
-                layer.
-            broadcast_address: The local subnet broadcast address. When
-                set, Forwarded-NPDUs arriving via unicast (BDT all-ones
-                mask) are re-broadcast on the local wire so other
-                devices on the subnet can receive them.
-            max_fdt_entries: Maximum number of foreign device table
-                entries. New registrations are NAKed when the limit
-                is reached. Re-registrations of existing entries are
-                always accepted regardless of the limit.
-            accept_fd_registrations: Whether to accept foreign device
-                registrations. When ``False``, all registration
-                requests are NAKed. Defaults to ``True``.
-            allow_write_bdt: Whether to accept Write-BDT requests.
-                Defaults to ``False`` per protocol revision >= 17.
-                Set to ``True`` to allow remote BDT configuration.
-            global_address: Optional public/NAT address per Annex J.7.8.
-                When set, outgoing Forwarded-NPDUs for locally originated
-                broadcasts use this address as the originating source
-                instead of the actual sender's local address.  BDT
-                entries whose computed forward address matches this
-                address are skipped to prevent NAT loops.
-            bdt_backup_path: Optional path to persist the BDT as JSON.
-                When set, the BDT is saved to this file whenever it
-                changes (via ``set_bdt`` or Write-BDT).  On ``start()``,
-                the BDT is restored from this file if it exists and
-                is valid.
-            fdt_cleanup_interval: How often (in seconds) the FDT cleanup
-                loop runs to purge expired foreign device entries.
-                Defaults to 10 seconds.
+        :param local_address: This BBMD's B/IP address.
+        :param send_callback: Called with ``(raw_bytes, destination)`` to send
+            a UDP datagram. Typically ``BIPTransport._transport.sendto``
+            wrapped to accept :class:`BIPAddress`.
+        :param local_broadcast_callback: Called with ``(npdu_bytes, source_address)``
+            to deliver an NPDU to the BBMD's own application/router
+            layer.
+        :param broadcast_address: The local subnet broadcast address. When
+            set, Forwarded-NPDUs arriving via unicast (BDT all-ones
+            mask) are re-broadcast on the local wire so other
+            devices on the subnet can receive them.
+        :param max_fdt_entries: Maximum number of foreign device table
+            entries. New registrations are NAKed when the limit
+            is reached. Re-registrations of existing entries are
+            always accepted regardless of the limit.
+        :param accept_fd_registrations: Whether to accept foreign device
+            registrations. When ``False``, all registration
+            requests are NAKed. Defaults to ``True``.
+        :param allow_write_bdt: Whether to accept Write-BDT requests.
+            Defaults to ``False`` per protocol revision >= 17.
+            Set to ``True`` to allow remote BDT configuration.
+        :param global_address: Optional public/NAT address per Annex J.7.8.
+            When set, outgoing Forwarded-NPDUs for locally originated
+            broadcasts use this address as the originating source
+            instead of the actual sender's local address.  BDT
+            entries whose computed forward address matches this
+            address are skipped to prevent NAT loops.
+        :param bdt_backup_path: Optional path to persist the BDT as JSON.
+            When set, the BDT is saved to this file whenever it
+            changes (via ``set_bdt`` or Write-BDT).  On ``start()``,
+            the BDT is restored from this file if it exists and
+            is valid.
+        :param fdt_cleanup_interval: How often (in seconds) the FDT cleanup
+            loop runs to purge expired foreign device entries.
+            Defaults to 10 seconds.
         """
         self._local_address = local_address
         self._send = send_callback
@@ -220,8 +216,7 @@ class BBMDManager:
     def set_bdt(self, entries: list[BDTEntry]) -> None:
         """Set the Broadcast Distribution Table.
 
-        Args:
-            entries: New BDT entries. Should include this BBMD's own entry.
+        :param entries: New BDT entries. Should include this BBMD's own entry.
         """
         self._bdt = list(entries)
         self._rebuild_forward_cache()
@@ -279,21 +274,18 @@ class BBMDManager:
     ) -> bool:
         """Process a BVLC message directed at the BBMD.
 
-        Args:
-            function: BVLC function code.
-            data: Payload after BVLL header (for most functions) or
-                full payload including originating address (for Forwarded-NPDU,
-                which is pre-parsed by decode_bvll).
-            source: For most functions this is the UDP source address.
-                For ``FORWARDED_NPDU`` this is the **originating**
-                address extracted from the BVLL header.
-            udp_source: The actual UDP peer address.  Only needed for
-                ``FORWARDED_NPDU`` where *source* is the originating
-                address.  Used for BDT mask lookup to decide whether
-                to re-broadcast the NPDU on the local wire.
-
-        Returns:
-            ``True`` if the message was fully consumed by the BBMD and
+        :param function: BVLC function code.
+        :param data: Payload after BVLL header (for most functions) or
+            full payload including originating address (for Forwarded-NPDU,
+            which is pre-parsed by :func:`~bac_py.transport.bvll.decode_bvll`).
+        :param source: For most functions this is the UDP source address.
+            For ``FORWARDED_NPDU`` this is the **originating**
+            address extracted from the BVLL header.
+        :param udp_source: The actual UDP peer address.  Only needed for
+            ``FORWARDED_NPDU`` where *source* is the originating
+            address.  Used for BDT mask lookup to decide whether
+            to re-broadcast the NPDU on the local wire.
+        :returns: ``True`` if the message was fully consumed by the BBMD and
             should *not* be delivered locally.  ``False`` if the NPDU
             should also be processed by the normal receive path (this
             is the case for Original-Broadcast-NPDU and Forwarded-NPDU,
@@ -448,10 +440,9 @@ class BBMDManager:
         computed forward address matches the global address are also
         skipped to prevent NAT loops.
 
-        Args:
-            npdu: Raw NPDU bytes to forward.
-            originating_source: Original source B/IP address.
-            exclude_fd: Optional foreign device to exclude (the sender).
+        :param npdu: Raw NPDU bytes to forward.
+        :param originating_source: Original source B/IP address.
+        :param exclude_fd: Optional foreign device to exclude (the sender).
         """
         # F1: Use global address as originating source when configured
         forwarded_source = (

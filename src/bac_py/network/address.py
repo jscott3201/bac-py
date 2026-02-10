@@ -9,30 +9,47 @@ from typing import Any
 
 @dataclass(frozen=True, slots=True)
 class BIPAddress:
-    """6-octet BACnet/IP address: 4 bytes IP + 2 bytes port."""
+    """A 6-octet BACnet/IP address composed of a 4-byte IPv4 address and a 2-byte UDP port.
+
+    Used as the MAC-layer address for BACnet/IP data links (Annex J).
+    """
 
     host: str
     port: int
 
     def encode(self) -> bytes:
-        """Encode to 6-byte wire format."""
+        """Encode this address to the 6-byte BACnet/IP wire format.
+
+        :returns: A 6-byte ``bytes`` object (4 octets IP + 2 octets port, big-endian).
+        """
         parts = [int(x) for x in self.host.split(".")]
         return bytes(parts) + self.port.to_bytes(2, "big")
 
     @classmethod
     def decode(cls, data: bytes | memoryview) -> BIPAddress:
-        """Decode from 6-byte wire format."""
+        """Decode a :class:`BIPAddress` from the 6-byte BACnet/IP wire format.
+
+        :param data: At least 6 bytes of raw address data.
+        :returns: The decoded :class:`BIPAddress`.
+        """
         host = f"{data[0]}.{data[1]}.{data[2]}.{data[3]}"
         port = int.from_bytes(data[4:6], "big")
         return cls(host=host, port=port)
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to JSON-friendly dict."""
+        """Serialize this address to a JSON-friendly dictionary.
+
+        :returns: A dict with ``"host"`` and ``"port"`` keys.
+        """
         return {"host": self.host, "port": self.port}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BIPAddress:
-        """Reconstruct from JSON-friendly dict."""
+        """Reconstruct a :class:`BIPAddress` from a dictionary produced by :meth:`to_dict`.
+
+        :param data: Dictionary containing ``"host"`` and ``"port"`` keys.
+        :returns: The reconstructed :class:`BIPAddress`.
+        """
         return cls(host=data["host"], port=data["port"])
 
 
@@ -48,6 +65,7 @@ class BACnetAddress:
     mac_address: bytes = b""
 
     def __post_init__(self) -> None:
+        """Validate the network number range per Clause 6.2.1."""
         if (
             self.network is not None
             and self.network != 0xFFFF
@@ -58,17 +76,17 @@ class BACnetAddress:
 
     @property
     def is_local(self) -> bool:
-        """True if addressing the local network."""
+        """``True`` if this address targets the local network (no DNET specified)."""
         return self.network is None
 
     @property
     def is_broadcast(self) -> bool:
-        """True if this is any type of broadcast address."""
+        """``True`` if this is any type of broadcast address (global, remote, or local)."""
         return self.network == 0xFFFF or len(self.mac_address) == 0
 
     @property
     def is_global_broadcast(self) -> bool:
-        """True if this is a global broadcast address."""
+        """``True`` if this is a global broadcast (DNET = 0xFFFF)."""
         return self.network == 0xFFFF
 
     @property
@@ -109,7 +127,10 @@ class BACnetAddress:
         return ""
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to JSON-friendly dict."""
+        """Serialize this address to a JSON-friendly dictionary.
+
+        :returns: A dict with optional ``"network"`` and ``"mac_address"`` keys.
+        """
         result: dict[str, Any] = {}
         if self.network is not None:
             result["network"] = self.network
@@ -119,7 +140,11 @@ class BACnetAddress:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BACnetAddress:
-        """Reconstruct from JSON-friendly dict."""
+        """Reconstruct a :class:`BACnetAddress` from a dictionary produced by :meth:`to_dict`.
+
+        :param data: Dictionary with optional ``"network"`` and ``"mac_address"`` keys.
+        :returns: The reconstructed :class:`BACnetAddress`.
+        """
         network = data.get("network")
         mac_hex = data.get("mac_address", "")
         mac = bytes.fromhex(mac_hex) if mac_hex else b""
@@ -132,12 +157,23 @@ GLOBAL_BROADCAST = BACnetAddress(network=0xFFFF)
 
 
 def remote_broadcast(network: int) -> BACnetAddress:
-    """Create a remote broadcast address for a specific network."""
+    """Create a remote broadcast address for a specific network.
+
+    A remote broadcast has the DNET set and an empty MAC address (DLEN=0).
+
+    :param network: The target network number (1--65534).
+    :returns: A :class:`BACnetAddress` representing a directed broadcast on *network*.
+    """
     return BACnetAddress(network=network, mac_address=b"")
 
 
 def remote_station(network: int, mac: bytes) -> BACnetAddress:
-    """Create a remote station address."""
+    """Create a unicast address for a station on a remote network.
+
+    :param network: The target network number (1--65534).
+    :param mac: The MAC address of the station on that network.
+    :returns: A :class:`BACnetAddress` with both DNET and DADR set.
+    """
     return BACnetAddress(network=network, mac_address=mac)
 
 
@@ -167,16 +203,11 @@ def parse_address(addr: str | BACnetAddress) -> BACnetAddress:
         "*"                       -> global broadcast
         "2:*"                     -> remote broadcast on network 2
 
-    If already a ``BACnetAddress``, returns it unchanged (pass-through).
+    If already a :class:`BACnetAddress`, returns it unchanged (pass-through).
 
-    Args:
-        addr: Address string or existing BACnetAddress.
-
-    Returns:
-        Parsed BACnetAddress.
-
-    Raises:
-        ValueError: If the format is not recognised.
+    :param addr: Address string or existing :class:`BACnetAddress`.
+    :returns: The parsed :class:`BACnetAddress`.
+    :raises ValueError: If the format is not recognised.
     """
     if isinstance(addr, BACnetAddress):
         return addr

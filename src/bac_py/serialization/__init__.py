@@ -32,16 +32,11 @@ class Serializer(Protocol):
 def get_serializer(format: str = "json", **kwargs: Any) -> Serializer:
     """Get a serializer instance for the given format.
 
-    Args:
-        format: Output format. Currently supported: ``"json"``.
-        **kwargs: Format-specific options passed to the serializer constructor.
-
-    Returns:
-        A Serializer instance.
-
-    Raises:
-        ValueError: If the format is not supported.
-        ImportError: If the required dependency is not installed.
+    :param format: Output format. Currently supported: ``"json"``.
+    :param kwargs: Format-specific options passed to the serializer constructor.
+    :returns: A :class:`Serializer` instance.
+    :raises ValueError: If the format is not supported.
+    :raises ImportError: If the required dependency is not installed.
     """
     if format == "json":
         from bac_py.serialization.json import JsonSerializer
@@ -56,13 +51,10 @@ def serialize(obj: Any, format: str = "json", **kwargs: Any) -> bytes:
 
     Accepts any object with a ``to_dict()`` method, or a plain dict.
 
-    Args:
-        obj: Object to serialize.
-        format: Output format (default ``"json"``).
-        **kwargs: Format-specific options.
-
-    Returns:
-        Serialized bytes.
+    :param obj: Object to serialize.
+    :param format: Output format (default ``"json"``).
+    :param kwargs: Format-specific options.
+    :returns: Serialized bytes.
     """
     serializer = get_serializer(format, **kwargs)
     data = obj.to_dict() if hasattr(obj, "to_dict") else obj
@@ -72,12 +64,9 @@ def serialize(obj: Any, format: str = "json", **kwargs: Any) -> bytes:
 def deserialize(raw: bytes, format: str = "json") -> dict[str, Any]:
     """Deserialize bytes to a dict.
 
-    Args:
-        raw: Bytes to deserialize.
-        format: Input format (default ``"json"``).
-
-    Returns:
-        Deserialized dict.
+    :param raw: Bytes to deserialize.
+    :param format: Input format (default ``"json"``).
+    :returns: Deserialized dict.
     """
     serializer = get_serializer(format)
     return serializer.decode(raw)

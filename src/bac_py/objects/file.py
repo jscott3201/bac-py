@@ -83,17 +83,27 @@ class FileObject(BACnetObject):
         file_access_method: FileAccessMethod = FileAccessMethod.STREAM_ACCESS,
         **initial_properties: Any,
     ) -> None:
+        """Initialize a File object with the given access method.
+
+        :param instance_number: The BACnet instance number for this object.
+        :param file_access_method: The :class:`FileAccessMethod` determining
+            whether the file uses stream or record access.
+        :param initial_properties: Additional property overrides.
+        """
         super().__init__(instance_number, **initial_properties)
         self._properties[PropertyIdentifier.FILE_ACCESS_METHOD] = file_access_method
 
-        # Internal storage
         self._file_data: bytes = b""
         self._record_data: list[bytes] = []
 
         self._update_file_size()
 
     def _update_file_size(self) -> None:
-        """Update the FILE_SIZE property based on current data."""
+        """Recalculate the FILE_SIZE property from internal storage.
+
+        For stream access, FILE_SIZE is the byte length.  For record access,
+        it is the number of records.
+        """
         access_method = self._properties[PropertyIdentifier.FILE_ACCESS_METHOD]
         if access_method == FileAccessMethod.STREAM_ACCESS:
             self._properties[PropertyIdentifier.FILE_SIZE] = len(self._file_data)
@@ -103,15 +113,10 @@ class FileObject(BACnetObject):
     def read_stream(self, start: int, count: int) -> tuple[bytes, bool]:
         """Read stream data from the file.
 
-        Args:
-            start: Starting byte position.
-            count: Number of bytes to read.
-
-        Returns:
-            Tuple of (data, end_of_file).
-
-        Raises:
-            BACnetError: If access method is not stream.
+        :param start: Starting byte position.
+        :param count: Number of bytes to read.
+        :returns: Tuple of ``(data, end_of_file)``.
+        :raises BACnetError: If access method is not stream.
         """
         if (
             self._properties[PropertyIdentifier.FILE_ACCESS_METHOD]
@@ -126,15 +131,10 @@ class FileObject(BACnetObject):
     def write_stream(self, start: int, data: bytes) -> int:
         """Write stream data to the file.
 
-        Args:
-            start: Starting byte position. Use -1 to append.
-            data: Data to write.
-
-        Returns:
-            The actual file start position used.
-
-        Raises:
-            BACnetError: If access method is not stream or file is read-only.
+        :param start: Starting byte position. Use ``-1`` to append.
+        :param data: Data to write.
+        :returns: The actual file start position used.
+        :raises BACnetError: If access method is not stream or file is read-only.
         """
         if (
             self._properties[PropertyIdentifier.FILE_ACCESS_METHOD]
@@ -151,7 +151,6 @@ class FileObject(BACnetObject):
         if start > len(self._file_data):
             self._file_data += b"\x00" * (start - len(self._file_data))
 
-        # Overwrite from start position
         before = self._file_data[:start]
         after_end = start + len(data)
         after = self._file_data[after_end:] if after_end < len(self._file_data) else b""
@@ -162,15 +161,10 @@ class FileObject(BACnetObject):
     def read_records(self, start: int, count: int) -> tuple[list[bytes], bool]:
         """Read records from the file.
 
-        Args:
-            start: Starting record index.
-            count: Number of records to read.
-
-        Returns:
-            Tuple of (records, end_of_file).
-
-        Raises:
-            BACnetError: If access method is not record.
+        :param start: Starting record index.
+        :param count: Number of records to read.
+        :returns: Tuple of ``(records, end_of_file)``.
+        :raises BACnetError: If access method is not record.
         """
         if (
             self._properties[PropertyIdentifier.FILE_ACCESS_METHOD]
@@ -185,15 +179,10 @@ class FileObject(BACnetObject):
     def write_records(self, start: int, records: list[bytes]) -> int:
         """Write records to the file.
 
-        Args:
-            start: Starting record index. Use -1 to append.
-            records: Records to write.
-
-        Returns:
-            The actual file start record used.
-
-        Raises:
-            BACnetError: If access method is not record or file is read-only.
+        :param start: Starting record index. Use ``-1`` to append.
+        :param records: Records to write.
+        :returns: The actual file start record used.
+        :raises BACnetError: If access method is not record or file is read-only.
         """
         if (
             self._properties[PropertyIdentifier.FILE_ACCESS_METHOD]
@@ -210,7 +199,6 @@ class FileObject(BACnetObject):
         while start > len(self._record_data):
             self._record_data.append(b"")
 
-        # Overwrite/insert records
         for i, record in enumerate(records):
             idx = start + i
             if idx < len(self._record_data):

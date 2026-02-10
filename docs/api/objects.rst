@@ -102,6 +102,27 @@ Accumulator Object
    :members:
    :undoc-members:
 
+Network Port Object
+-------------------
+
+.. automodule:: bac_py.objects.network_port
+   :members:
+   :undoc-members:
+
+Channel Object
+--------------
+
+.. automodule:: bac_py.objects.channel
+   :members:
+   :undoc-members:
+
+Life Safety Objects
+-------------------
+
+.. automodule:: bac_py.objects.life_safety
+   :members:
+   :undoc-members:
+
 Value Type Objects
 ------------------
 

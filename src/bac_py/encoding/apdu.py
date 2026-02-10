@@ -53,24 +53,41 @@ _MAX_APDU_DECODE: dict[int, int] = {
 
 
 def _encode_max_segments(value: int | None) -> int:
-    """Encode max-segments value to 3-bit field."""
+    """Encode a max-segments value to a 3-bit field per Clause 20.1.2.4.
+
+    :param value: Maximum number of segments (2, 4, 8, 16, 32, 64) or
+        ``None`` for unspecified.
+    :returns: 3-bit encoded field value (0-7).
+    """
     if value is None:
         return _MAX_SEGMENTS_UNSPECIFIED
     return _MAX_SEGMENTS_ENCODE.get(value, _MAX_SEGMENTS_OVER_64)
 
 
 def _decode_max_segments(value: int) -> int | None:
-    """Decode 3-bit max-segments field."""
+    """Decode a 3-bit max-segments field per Clause 20.1.2.4.
+
+    :param value: 3-bit field value from the PDU header.
+    :returns: Segment count, or ``None`` if unspecified or >64.
+    """
     return _MAX_SEGMENTS_DECODE.get(value)
 
 
 def _encode_max_apdu(value: int) -> int:
-    """Encode max-APDU-length to 4-bit field."""
+    """Encode a max-APDU-length to a 4-bit field per Clause 20.1.2.5.
+
+    :param value: Maximum APDU length in bytes (50, 128, 206, 480, 1024, 1476).
+    :returns: 4-bit encoded field value (0-5), defaults to 5 (1476).
+    """
     return _MAX_APDU_ENCODE.get(value, 5)
 
 
 def _decode_max_apdu(value: int) -> int:
-    """Decode 4-bit max-APDU-length field."""
+    """Decode a 4-bit max-APDU-length field per Clause 20.1.2.5.
+
+    :param value: 4-bit field value from the PDU header.
+    :returns: Maximum APDU length in bytes, defaults to 1476.
+    """
     return _MAX_APDU_DECODE.get(value, 1476)
 
 
@@ -82,15 +99,34 @@ class ConfirmedRequestPDU:
     """BACnet Confirmed-Request PDU (Clause 20.1.2)."""
 
     segmented: bool
+    """Whether this PDU is a segment of a larger message."""
+
     more_follows: bool
+    """Whether more segments follow this one."""
+
     segmented_response_accepted: bool
+    """Whether the sender can accept a segmented response."""
+
     max_segments: int | None
+    """Maximum number of segments the sender can accept, or ``None`` for unspecified."""
+
     max_apdu_length: int
+    """Maximum APDU length in bytes the sender can accept."""
+
     invoke_id: int
+    """Invoke ID for matching requests to responses (0-255)."""
+
     sequence_number: int | None
+    """Segment sequence number, or ``None`` if not segmented."""
+
     proposed_window_size: int | None
+    """Proposed window size for segmentation, or ``None`` if not segmented."""
+
     service_choice: int
+    """Confirmed service choice number."""
+
     service_request: bytes
+    """Encoded service request parameters."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -98,7 +134,10 @@ class UnconfirmedRequestPDU:
     """BACnet Unconfirmed-Request PDU (Clause 20.1.3)."""
 
     service_choice: int
+    """Unconfirmed service choice number."""
+
     service_request: bytes
+    """Encoded service request parameters."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,7 +145,10 @@ class SimpleAckPDU:
     """BACnet SimpleACK PDU (Clause 20.1.4)."""
 
     invoke_id: int
+    """Invoke ID of the confirmed request being acknowledged."""
+
     service_choice: int
+    """Service choice of the confirmed request being acknowledged."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,12 +156,25 @@ class ComplexAckPDU:
     """BACnet ComplexACK PDU (Clause 20.1.5)."""
 
     segmented: bool
+    """Whether this PDU is a segment of a larger response."""
+
     more_follows: bool
+    """Whether more segments follow this one."""
+
     invoke_id: int
+    """Invoke ID of the confirmed request being acknowledged."""
+
     sequence_number: int | None
+    """Segment sequence number, or ``None`` if not segmented."""
+
     proposed_window_size: int | None
+    """Proposed window size for segmentation, or ``None`` if not segmented."""
+
     service_choice: int
+    """Service choice of the confirmed request being acknowledged."""
+
     service_ack: bytes
+    """Encoded service response parameters."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,10 +182,19 @@ class SegmentAckPDU:
     """BACnet SegmentACK PDU (Clause 20.1.6)."""
 
     negative_ack: bool
+    """Whether this is a negative acknowledgement (requesting retransmission)."""
+
     sent_by_server: bool
+    """Whether the server (not the client) sent this SegmentACK."""
+
     invoke_id: int
+    """Invoke ID of the segmented transaction."""
+
     sequence_number: int
+    """Sequence number of the last segment received."""
+
     actual_window_size: int
+    """Actual window size the sender can accept."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -143,10 +207,19 @@ class ErrorPDU:
     """
 
     invoke_id: int
+    """Invoke ID of the confirmed request that caused the error."""
+
     service_choice: int
+    """Service choice of the confirmed request that caused the error."""
+
     error_class: ErrorClass
+    """Error class categorising the error (e.g. object, property, resource)."""
+
     error_code: ErrorCode
+    """Specific error code within the error class."""
+
     error_data: bytes = b""
+    """Optional trailing bytes for extended error types."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -154,7 +227,10 @@ class RejectPDU:
     """BACnet Reject PDU (Clause 20.1.8)."""
 
     invoke_id: int
+    """Invoke ID of the confirmed request being rejected."""
+
     reject_reason: RejectReason
+    """Reason the request was rejected."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,8 +238,13 @@ class AbortPDU:
     """BACnet Abort PDU (Clause 20.1.9)."""
 
     sent_by_server: bool
+    """Whether the server (not the client) initiated the abort."""
+
     invoke_id: int
+    """Invoke ID of the transaction being aborted."""
+
     abort_reason: AbortReason
+    """Reason the transaction was aborted."""
 
 
 # Union of all PDU types
@@ -188,7 +269,13 @@ def _encode_segmentation_fields(
     sequence_number: int | None,
     proposed_window_size: int | None,
 ) -> None:
-    """Append sequence_number and proposed_window_size if segmented."""
+    """Append segmentation fields to *buf* if the PDU is segmented.
+
+    :param buf: Mutable byte buffer to append to.
+    :param segmented: Whether the PDU is segmented.
+    :param sequence_number: Segment sequence number.
+    :param proposed_window_size: Proposed window size.
+    """
     if segmented:
         buf.append(sequence_number if sequence_number is not None else 0)
         buf.append(proposed_window_size if proposed_window_size is not None else 1)
@@ -201,10 +288,15 @@ def _decode_segmentation_fields(
     min_len: int,
     pdu_name: str,
 ) -> tuple[int | None, int | None, int]:
-    """Decode sequence_number and proposed_window_size if segmented.
+    """Decode segmentation fields if the PDU is segmented.
 
-    Returns:
-        Tuple of (sequence_number, proposed_window_size, new_offset).
+    :param data: Buffer containing the raw PDU bytes.
+    :param offset: Current position in the buffer.
+    :param segmented: Whether the PDU is segmented.
+    :param min_len: Minimum buffer length required for segmented PDUs.
+    :param pdu_name: PDU type name for error messages.
+    :returns: Tuple of (sequence_number, proposed_window_size, new_offset).
+    :raises ValueError: If the buffer is too short for segmented fields.
     """
     if not segmented:
         return None, None, offset
@@ -218,13 +310,13 @@ def _decode_segmentation_fields(
 
 
 def encode_apdu(pdu: APDU) -> bytes:
-    """Encode an APDU to bytes.
+    """Encode an APDU dataclass to wire-format bytes.
 
-    Args:
-        pdu: The PDU dataclass to encode.
+    Dispatches to the appropriate encoder based on the PDU type.
 
-    Returns:
-        Encoded APDU bytes.
+    :param pdu: The PDU dataclass instance to encode.
+    :returns: Encoded APDU bytes ready for transmission.
+    :raises TypeError: If *pdu* is not a recognised PDU type.
     """
     match pdu:
         case ConfirmedRequestPDU():
@@ -249,6 +341,11 @@ def encode_apdu(pdu: APDU) -> bytes:
 
 
 def _encode_confirmed_request(pdu: ConfirmedRequestPDU) -> bytes:
+    """Encode a :class:`ConfirmedRequestPDU` to bytes per Clause 20.1.2.
+
+    :param pdu: Confirmed request to encode.
+    :returns: Encoded PDU bytes.
+    """
     buf = bytearray()
     # Byte 0: PDU type + flags
     byte0 = PduType.CONFIRMED_REQUEST << 4
@@ -262,17 +359,19 @@ def _encode_confirmed_request(pdu: ConfirmedRequestPDU) -> bytes:
     # Byte 1: max-segments + max-APDU-length
     byte1 = (_encode_max_segments(pdu.max_segments) << 4) | _encode_max_apdu(pdu.max_apdu_length)
     buf.append(byte1)
-    # Byte 2: invoke-id
     buf.append(pdu.invoke_id)
-    # Segmentation fields (if segmented)
     _encode_segmentation_fields(buf, pdu.segmented, pdu.sequence_number, pdu.proposed_window_size)
-    # Service choice + data
     buf.append(pdu.service_choice)
     buf.extend(pdu.service_request)
     return bytes(buf)
 
 
 def _encode_unconfirmed_request(pdu: UnconfirmedRequestPDU) -> bytes:
+    """Encode an :class:`UnconfirmedRequestPDU` to bytes per Clause 20.1.3.
+
+    :param pdu: Unconfirmed request to encode.
+    :returns: Encoded PDU bytes.
+    """
     buf = bytearray()
     buf.append(PduType.UNCONFIRMED_REQUEST << 4)
     buf.append(pdu.service_choice)
@@ -281,10 +380,20 @@ def _encode_unconfirmed_request(pdu: UnconfirmedRequestPDU) -> bytes:
 
 
 def _encode_simple_ack(pdu: SimpleAckPDU) -> bytes:
+    """Encode a :class:`SimpleAckPDU` to bytes per Clause 20.1.4.
+
+    :param pdu: Simple ACK to encode.
+    :returns: Encoded PDU bytes (3 bytes).
+    """
     return bytes([PduType.SIMPLE_ACK << 4, pdu.invoke_id, pdu.service_choice])
 
 
 def _encode_complex_ack(pdu: ComplexAckPDU) -> bytes:
+    """Encode a :class:`ComplexAckPDU` to bytes per Clause 20.1.5.
+
+    :param pdu: Complex ACK to encode.
+    :returns: Encoded PDU bytes.
+    """
     buf = bytearray()
     byte0 = PduType.COMPLEX_ACK << 4
     if pdu.segmented:
@@ -300,6 +409,11 @@ def _encode_complex_ack(pdu: ComplexAckPDU) -> bytes:
 
 
 def _encode_segment_ack(pdu: SegmentAckPDU) -> bytes:
+    """Encode a :class:`SegmentAckPDU` to bytes per Clause 20.1.6.
+
+    :param pdu: Segment ACK to encode.
+    :returns: Encoded PDU bytes (4 bytes).
+    """
     byte0 = PduType.SEGMENT_ACK << 4
     if pdu.negative_ack:
         byte0 |= 0x02
@@ -316,6 +430,11 @@ def _encode_segment_ack(pdu: SegmentAckPDU) -> bytes:
 
 
 def _encode_error(pdu: ErrorPDU) -> bytes:
+    """Encode an :class:`ErrorPDU` to bytes per Clause 20.1.7.
+
+    :param pdu: Error PDU to encode.
+    :returns: Encoded PDU bytes including error class, code, and optional data.
+    """
     buf = bytearray()
     buf.append(PduType.ERROR << 4)
     buf.append(pdu.invoke_id)
@@ -328,10 +447,20 @@ def _encode_error(pdu: ErrorPDU) -> bytes:
 
 
 def _encode_reject(pdu: RejectPDU) -> bytes:
+    """Encode a :class:`RejectPDU` to bytes per Clause 20.1.8.
+
+    :param pdu: Reject PDU to encode.
+    :returns: Encoded PDU bytes (3 bytes).
+    """
     return bytes([PduType.REJECT << 4, pdu.invoke_id, pdu.reject_reason])
 
 
 def _encode_abort(pdu: AbortPDU) -> bytes:
+    """Encode an :class:`AbortPDU` to bytes per Clause 20.1.9.
+
+    :param pdu: Abort PDU to encode.
+    :returns: Encoded PDU bytes (3 bytes).
+    """
     byte0 = PduType.ABORT << 4
     if pdu.sent_by_server:
         byte0 |= 0x01
@@ -344,14 +473,13 @@ def _encode_abort(pdu: AbortPDU) -> bytes:
 def decode_apdu(data: memoryview | bytes) -> APDU:
     """Decode an APDU from raw bytes.
 
-    Args:
-        data: Raw APDU bytes.
+    Inspects the PDU type nibble in the first byte and dispatches
+    to the appropriate decoder.
 
-    Returns:
-        Decoded PDU dataclass.
-
-    Raises:
-        ValueError: If data is too short to decode.
+    :param data: Raw APDU bytes.
+    :returns: Decoded PDU dataclass instance.
+    :raises ValueError: If *data* is too short to decode.
+    :raises TypeError: If the PDU type is not recognised.
     """
     if len(data) < 1:
         msg = "APDU data too short: need at least 1 byte"
@@ -385,6 +513,12 @@ def decode_apdu(data: memoryview | bytes) -> APDU:
 
 
 def _decode_confirmed_request(data: memoryview) -> ConfirmedRequestPDU:
+    """Decode a :class:`ConfirmedRequestPDU` from raw bytes per Clause 20.1.2.
+
+    :param data: Raw PDU bytes (at least 4 bytes).
+    :returns: Decoded :class:`ConfirmedRequestPDU`.
+    :raises ValueError: If *data* is too short.
+    """
     if len(data) < 4:
         msg = f"ConfirmedRequest too short: need at least 4 bytes, got {len(data)}"
         raise ValueError(msg)
@@ -423,6 +557,12 @@ def _decode_confirmed_request(data: memoryview) -> ConfirmedRequestPDU:
 
 
 def _decode_unconfirmed_request(data: memoryview) -> UnconfirmedRequestPDU:
+    """Decode an :class:`UnconfirmedRequestPDU` from raw bytes per Clause 20.1.3.
+
+    :param data: Raw PDU bytes (at least 2 bytes).
+    :returns: Decoded :class:`UnconfirmedRequestPDU`.
+    :raises ValueError: If *data* is too short.
+    """
     if len(data) < 2:
         msg = f"UnconfirmedRequest too short: need at least 2 bytes, got {len(data)}"
         raise ValueError(msg)
@@ -435,6 +575,12 @@ def _decode_unconfirmed_request(data: memoryview) -> UnconfirmedRequestPDU:
 
 
 def _decode_simple_ack(data: memoryview) -> SimpleAckPDU:
+    """Decode a :class:`SimpleAckPDU` from raw bytes per Clause 20.1.4.
+
+    :param data: Raw PDU bytes (at least 3 bytes).
+    :returns: Decoded :class:`SimpleAckPDU`.
+    :raises ValueError: If *data* is too short.
+    """
     if len(data) < 3:
         msg = f"SimpleACK too short: need at least 3 bytes, got {len(data)}"
         raise ValueError(msg)
@@ -442,6 +588,12 @@ def _decode_simple_ack(data: memoryview) -> SimpleAckPDU:
 
 
 def _decode_complex_ack(data: memoryview) -> ComplexAckPDU:
+    """Decode a :class:`ComplexAckPDU` from raw bytes per Clause 20.1.5.
+
+    :param data: Raw PDU bytes (at least 3 bytes).
+    :returns: Decoded :class:`ComplexAckPDU`.
+    :raises ValueError: If *data* is too short.
+    """
     if len(data) < 3:
         msg = f"ComplexACK too short: need at least 3 bytes, got {len(data)}"
         raise ValueError(msg)
@@ -472,6 +624,12 @@ def _decode_complex_ack(data: memoryview) -> ComplexAckPDU:
 
 
 def _decode_segment_ack(data: memoryview) -> SegmentAckPDU:
+    """Decode a :class:`SegmentAckPDU` from raw bytes per Clause 20.1.6.
+
+    :param data: Raw PDU bytes (at least 4 bytes).
+    :returns: Decoded :class:`SegmentAckPDU`.
+    :raises ValueError: If *data* is too short.
+    """
     if len(data) < 4:
         msg = f"SegmentACK too short: need at least 4 bytes, got {len(data)}"
         raise ValueError(msg)
@@ -486,6 +644,15 @@ def _decode_segment_ack(data: memoryview) -> SegmentAckPDU:
 
 
 def _decode_error(data: memoryview) -> ErrorPDU:
+    """Decode an :class:`ErrorPDU` from raw bytes per Clause 20.1.7.
+
+    Decodes the error class and error code as application-tagged enumerated
+    values, and preserves any trailing bytes as extended error data.
+
+    :param data: Raw PDU bytes (at least 5 bytes).
+    :returns: Decoded :class:`ErrorPDU`.
+    :raises ValueError: If *data* is too short.
+    """
     if len(data) < 5:
         msg = f"ErrorPDU too short: need at least 5 bytes, got {len(data)}"
         raise ValueError(msg)
@@ -516,6 +683,12 @@ def _decode_error(data: memoryview) -> ErrorPDU:
 
 
 def _decode_reject(data: memoryview) -> RejectPDU:
+    """Decode a :class:`RejectPDU` from raw bytes per Clause 20.1.8.
+
+    :param data: Raw PDU bytes (at least 3 bytes).
+    :returns: Decoded :class:`RejectPDU`.
+    :raises ValueError: If *data* is too short.
+    """
     if len(data) < 3:
         msg = f"RejectPDU too short: need at least 3 bytes, got {len(data)}"
         raise ValueError(msg)
@@ -526,6 +699,12 @@ def _decode_reject(data: memoryview) -> RejectPDU:
 
 
 def _decode_abort(data: memoryview) -> AbortPDU:
+    """Decode an :class:`AbortPDU` from raw bytes per Clause 20.1.9.
+
+    :param data: Raw PDU bytes (at least 3 bytes).
+    :returns: Decoded :class:`AbortPDU`.
+    :raises ValueError: If *data* is too short.
+    """
     if len(data) < 3:
         msg = f"AbortPDU too short: need at least 3 bytes, got {len(data)}"
         raise ValueError(msg)

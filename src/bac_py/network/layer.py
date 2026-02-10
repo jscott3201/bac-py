@@ -1,4 +1,10 @@
-"""Network layer manager wiring transport to application per Clause 6."""
+"""Network layer manager wiring transport to application per Clause 6.
+
+Provides :class:`NetworkLayer`, the non-router network layer manager that
+bridges a single :class:`~bac_py.transport.bip.BIPTransport` with the
+application layer by handling NPDU wrapping/unwrapping, router cache
+management, and network-number learning.
+"""
 
 from __future__ import annotations
 
@@ -35,8 +41,13 @@ class RouterCacheEntry:
     """
 
     network: int
-    router_mac: bytes  # 6-byte MAC of local router serving this DNET
-    last_seen: float  # time.monotonic() timestamp
+    """The remote DNET this entry provides a route to."""
+
+    router_mac: bytes
+    """6-byte MAC of the local router serving this DNET."""
+
+    last_seen: float
+    """``time.monotonic()`` timestamp of last I-Am-Router-To-Network update."""
 
 
 # Default cache TTL: 5 minutes. Per Clause 6.6.3.3, stale routes
@@ -64,13 +75,12 @@ class NetworkLayer:
     ) -> None:
         """Initialise the network layer.
 
-        Args:
-            transport: The BIP transport used for sending and receiving.
-            network_number: Local network number, or ``None`` if unknown.
-            network_number_configured: ``True`` if the network number was
-                explicitly configured (prevents learning via
-                Network-Number-Is messages).
-            cache_ttl: Time-to-live in seconds for router cache entries.
+        :param transport: The BIP transport used for sending and receiving.
+        :param network_number: Local network number, or ``None`` if unknown.
+        :param network_number_configured: ``True`` if the network number was
+            explicitly configured (prevents learning via
+            Network-Number-Is messages).
+        :param cache_ttl: Time-to-live in seconds for router cache entries.
         """
         self._transport = transport
         self._network_number = network_number
@@ -87,11 +97,10 @@ class NetworkLayer:
         return self._network_number
 
     def on_receive(self, callback: Callable[[bytes, BACnetAddress], None]) -> None:
-        """Register callback for received APDU data.
+        """Register a callback for received application-layer APDUs.
 
-        Args:
-            callback: Called with (apdu_bytes, source_address) for each
-                received NPDU containing an application-layer APDU.
+        :param callback: Called with ``(apdu_bytes, source_address)`` for each
+            received NPDU containing an application-layer APDU.
         """
         self._receive_callback = callback
 
@@ -102,10 +111,12 @@ class NetworkLayer:
     ) -> None:
         """Register a handler for incoming network-layer messages.
 
-        Args:
-            message_type: Network message type code to listen for.
-            handler: Called with (decoded_message, source_mac) when
-                a matching network message is received.
+        Multiple handlers may be registered for the same message type;
+        they are invoked in registration order.
+
+        :param message_type: Network message type code to listen for.
+        :param handler: Called with ``(decoded_message, source_mac)`` when
+            a matching network message is received.
         """
         self._network_message_listeners.setdefault(message_type, []).append(handler)
 
@@ -114,11 +125,10 @@ class NetworkLayer:
         message_type: int,
         handler: Callable[..., None],
     ) -> None:
-        """Remove a network-layer message handler.
+        """Remove a previously registered network-layer message handler.
 
-        Args:
-            message_type: Network message type code.
-            handler: The handler to remove.
+        :param message_type: Network message type code.
+        :param handler: The handler to remove.
         """
         listeners = self._network_message_listeners.get(message_type, [])
         if handler in listeners:
@@ -132,11 +142,9 @@ class NetworkLayer:
     ) -> None:
         """Send a network-layer message (non-APDU).
 
-        Args:
-            message_type: Network message type code.
-            data: Encoded message payload.
-            destination: Target address. If ``None``, broadcasts
-                locally.
+        :param message_type: Network message type code.
+        :param data: Encoded message payload.
+        :param destination: Target address. If ``None``, broadcasts locally.
         """
         npdu = NPDU(
             is_network_message=True,
@@ -161,15 +169,15 @@ class NetworkLayer:
     ) -> None:
         """Send an APDU to a destination address.
 
-        Wraps the APDU in an NPDU and sends via the transport layer.
-        For remote destinations (DNET set), uses the router cache to
-        send via a known router, or broadcasts if no router is cached.
+        Wraps the APDU in an :class:`~bac_py.network.npdu.NPDU` and sends
+        via the transport layer.  For remote destinations (DNET set), uses
+        the router cache to send via a known router, or broadcasts if no
+        router is cached.
 
-        Args:
-            apdu: Application-layer PDU bytes.
-            destination: Target BACnet address.
-            expecting_reply: Whether a reply is expected (affects routing).
-            priority: Network priority level.
+        :param apdu: Application-layer PDU bytes.
+        :param destination: Target :class:`~bac_py.network.address.BACnetAddress`.
+        :param expecting_reply: Whether a reply is expected (affects routing).
+        :param priority: Network priority level.
         """
         npdu = NPDU(
             is_network_message=False,
@@ -187,7 +195,6 @@ class NetworkLayer:
             # Local broadcast (no network, no MAC)
             self._transport.send_broadcast(npdu_bytes)
         elif destination.is_local:
-            # Local unicast
             self._transport.send_unicast(npdu_bytes, destination.mac_address)
         else:
             # Remote destination (DNET is set, not global broadcast)
@@ -203,8 +210,8 @@ class NetworkLayer:
 
         Evicts the entry if it has exceeded the cache TTL.
 
-        Returns:
-            The 6-byte router MAC if cached and fresh, or ``None``
+        :param dnet: The destination network number to look up.
+        :returns: The 6-byte router MAC if cached and fresh, or ``None``
             if unknown or stale.
         """
         entry = self._router_cache.get(dnet)
@@ -227,6 +234,9 @@ class NetworkLayer:
         layer APDUs to the registered receive callback.  The source
         address is reconstructed from the NPDU source field (if
         present, for routed messages) or from the raw transport MAC.
+
+        :param data: Raw NPDU bytes received from the transport.
+        :param source_mac: MAC address of the sender on the local network.
         """
         try:
             npdu = decode_npdu(memoryview(data))
@@ -260,6 +270,9 @@ class NetworkLayer:
         Handles I-Am-Router-To-Network, What-Is-Network-Number, and
         Network-Number-Is internally, and dispatches all decoded
         messages to registered listeners.
+
+        :param npdu: The decoded :class:`NPDU` containing the network message.
+        :param source_mac: MAC address of the sender on the local network.
         """
         try:
             if npdu.message_type is None:
@@ -301,7 +314,14 @@ class NetworkLayer:
         msg: IAmRouterToNetwork,
         source_mac: bytes,
     ) -> None:
-        """Populate router cache from I-Am-Router-To-Network."""
+        """Populate the router cache from an I-Am-Router-To-Network message.
+
+        Creates or updates a :class:`RouterCacheEntry` for each advertised
+        DNET, recording the source MAC and current timestamp.
+
+        :param msg: The decoded :class:`IAmRouterToNetwork` message.
+        :param source_mac: MAC address of the advertising router.
+        """
         now = time.monotonic()
         for dnet in msg.networks:
             self._router_cache[dnet] = RouterCacheEntry(
@@ -320,6 +340,8 @@ class NetworkLayer:
 
         Per Clause 6.4.19, this message must not be routed
         (ignore if SNET/SADR or DNET/DADR present).
+
+        :param npdu: The decoded :class:`NPDU` used to check routing fields.
         """
         if npdu.source is not None or npdu.destination is not None:
             return
@@ -327,12 +349,15 @@ class NetworkLayer:
             self._send_network_number_is()
 
     def _handle_network_number_is(self, msg: NetworkNumberIs, npdu: NPDU) -> None:
-        """Learn network number from Network-Number-Is.
+        """Learn network number from a Network-Number-Is message.
 
         Per Clause 6.4.20, this message must not be routed
         (ignore if SNET/SADR or DNET/DADR present).
         Only learn if our number is not configured and the source
         is configured (authoritative).
+
+        :param msg: The decoded :class:`NetworkNumberIs` message.
+        :param npdu: The decoded :class:`NPDU` used to check routing fields.
         """
         if npdu.source is not None or npdu.destination is not None:
             return
@@ -348,17 +373,22 @@ class NetworkLayer:
     # ------------------------------------------------------------------
 
     def _send_remote(self, npdu_bytes: bytes, destination: BACnetAddress) -> None:
-        """Send NPDU to a remote destination using the router cache.
+        """Send an NPDU to a remote destination using the router cache.
 
-        If a router is cached for the destination network, unicast to it.
-        Otherwise broadcast the NPDU and issue a Who-Is-Router query.
+        If a router is cached for the destination network, unicasts to it.
+        Otherwise broadcasts the NPDU and issues a Who-Is-Router query to
+        populate the cache for future sends.
+
+        :param npdu_bytes: The encoded NPDU bytes to send.
+        :param destination: Remote :class:`~bac_py.network.address.BACnetAddress`
+            (must have a network number set).
+        :raises ValueError: If *destination* has no network number.
         """
         if destination.network is None:
             msg = "Cannot send to remote destination without network number"
             raise ValueError(msg)
         router_mac = self.get_router_for_network(destination.network)
         if router_mac is not None:
-            # Cache hit: send to known router via unicast
             self._transport.send_unicast(npdu_bytes, router_mac)
         else:
             # Cache miss: broadcast NPDU (a router will pick it up)
@@ -367,7 +397,10 @@ class NetworkLayer:
             self._send_who_is_router(destination.network)
 
     def _send_who_is_router(self, dnet: int) -> None:
-        """Broadcast a Who-Is-Router-To-Network query."""
+        """Broadcast a Who-Is-Router-To-Network query.
+
+        :param dnet: The remote network number to query for.
+        """
         msg = WhoIsRouterToNetwork(network=dnet)
         npdu = NPDU(
             is_network_message=True,

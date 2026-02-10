@@ -12,19 +12,24 @@ if TYPE_CHECKING:
 
 
 def _enum_name(member: IntEnum) -> str:
-    """Convert UPPER_SNAKE enum name to lower-hyphen form."""
+    """Convert UPPER_SNAKE enum name to lower-hyphen form.
+
+    :param member: An :class:`~enum.IntEnum` member.
+    :returns: Lowercased, hyphen-separated name string.
+    """
     return member.name.lower().replace("_", "-")
 
 
 def _enum_from_dict(enum_cls: type[IntEnum], data: int | str | dict[str, Any]) -> IntEnum:
-    """Reconstruct an enum from its JSON representation.
+    """Reconstruct an enum member from its JSON representation.
 
-    Accepts:
-        data: int (raw numeric value), str (hyphenated name), or
-            dict with ``{"value": int, "name": str}``.
+    Accepts an integer (raw numeric value), a string (hyphenated name),
+    or a dictionary with ``{"value": int, "name": str}``.
 
-    Returns:
-        The corresponding enum member.
+    :param enum_cls: The :class:`~enum.IntEnum` subclass to reconstruct.
+    :param data: Serialized enum value in any of the accepted formats.
+    :returns: The corresponding enum member.
+    :raises ValueError: If *data* cannot be converted to a member of *enum_cls*.
     """
     if isinstance(data, int):
         return enum_cls(data)
@@ -39,10 +44,17 @@ def _enum_from_dict(enum_cls: type[IntEnum], data: int | str | dict[str, Any]) -
 
 @dataclass(frozen=True, slots=True)
 class ObjectIdentifier:
-    """BACnet Object Identifier - 10-bit type, 22-bit instance."""
+    """BACnet Object Identifier -- 10-bit type, 22-bit instance (Clause 20.2.14).
+
+    Uniquely identifies a BACnet object within a device by combining
+    an :class:`~bac_py.types.enums.ObjectType` with an instance number.
+    """
 
     object_type: ObjectType
+    """The object type (10-bit, 0--1023)."""
+
     instance_number: int
+    """The instance number (22-bit, 0--4194303)."""
 
     def __post_init__(self) -> None:
         if not 0 <= int(self.object_type) <= 1023:
@@ -53,13 +65,23 @@ class ObjectIdentifier:
             raise ValueError(msg)
 
     def encode(self) -> bytes:
-        """Encode to 4-byte wire format."""
+        """Encode to the 4-byte BACnet wire format.
+
+        The 32-bit value is composed as ``(object_type << 22) | instance_number``,
+        encoded big-endian.
+
+        :returns: 4-byte encoded object identifier.
+        """
         value = (int(self.object_type) << 22) | (self.instance_number & 0x3FFFFF)
         return value.to_bytes(4, "big")
 
     @classmethod
     def decode(cls, data: bytes | memoryview) -> ObjectIdentifier:
-        """Decode from 4-byte wire format."""
+        """Decode from the 4-byte BACnet wire format.
+
+        :param data: At least 4 bytes of wire data.
+        :returns: Decoded :class:`ObjectIdentifier` instance.
+        """
         value = int.from_bytes(data[:4], "big")
         return cls(
             object_type=ObjectType(value >> 22),
@@ -67,7 +89,11 @@ class ObjectIdentifier:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to JSON-friendly dict."""
+        """Convert to a JSON-serializable dictionary.
+
+        :returns: Dictionary with ``"object_type"`` (hyphenated name) and
+            ``"instance"`` keys.
+        """
         return {
             "object_type": _enum_name(self.object_type),
             "instance": self.instance_number,
@@ -75,7 +101,13 @@ class ObjectIdentifier:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ObjectIdentifier:
-        """Reconstruct from a JSON-friendly dict."""
+        """Reconstruct from a JSON-friendly dictionary.
+
+        :param data: Dictionary with ``"object_type"`` and ``"instance"`` keys.
+        :returns: Decoded :class:`ObjectIdentifier` instance.
+        :raises TypeError: If the resolved type is not an
+            :class:`~bac_py.types.enums.ObjectType`.
+        """
         obj_type = _enum_from_dict(ObjectType, data["object_type"])
         if not isinstance(obj_type, ObjectType):
             msg = f"Expected ObjectType, got {type(obj_type).__name__}"
@@ -88,20 +120,31 @@ class ObjectIdentifier:
 
 @dataclass(frozen=True, slots=True)
 class BACnetDate:
-    """BACnet Date: year, month, day, day_of_week.
+    """BACnet Date -- year, month, day, day_of_week (Clause 20.2.12).
 
-    ``0xFF`` indicates an unspecified (wildcard) field.
-    Year is stored as the actual year (e.g. 2024), but encoded on the
-    wire as year - 1900.
+    ``0xFF`` indicates an unspecified (wildcard) field. Year is stored as
+    the actual year (e.g. 2024), but encoded on the wire as ``year - 1900``.
     """
 
     year: int
+    """Calendar year (e.g. 2024), or ``0xFF`` for unspecified."""
+
     month: int
+    """Month (1--12), or ``0xFF`` for unspecified."""
+
     day: int
+    """Day of month (1--31), or ``0xFF`` for unspecified."""
+
     day_of_week: int
+    """Day of week (1 = Monday ... 7 = Sunday), or ``0xFF`` for unspecified."""
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to JSON-friendly dict with wildcards as None."""
+        """Convert to a JSON-serializable dictionary.
+
+        Wildcard values (``0xFF``) are represented as ``None``.
+
+        :returns: Dictionary mapping field names to values or ``None``.
+        """
         return {
             "year": None if self.year == 0xFF else self.year,
             "month": None if self.month == 0xFF else self.month,
@@ -111,7 +154,14 @@ class BACnetDate:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BACnetDate:
-        """Reconstruct from a JSON-friendly dict."""
+        """Reconstruct from a JSON-friendly dictionary.
+
+        ``None`` values are converted back to ``0xFF`` wildcards.
+
+        :param data: Dictionary with ``"year"``, ``"month"``, ``"day"``, and
+            ``"day_of_week"`` keys.
+        :returns: Decoded :class:`BACnetDate` instance.
+        """
         return cls(
             year=0xFF if data["year"] is None else data["year"],
             month=0xFF if data["month"] is None else data["month"],
@@ -122,18 +172,30 @@ class BACnetDate:
 
 @dataclass(frozen=True, slots=True)
 class BACnetTime:
-    """BACnet Time: hour, minute, second, hundredth.
+    """BACnet Time -- hour, minute, second, hundredth (Clause 20.2.13).
 
     ``0xFF`` indicates an unspecified (wildcard) field.
     """
 
     hour: int
+    """Hour (0--23), or ``0xFF`` for unspecified."""
+
     minute: int
+    """Minute (0--59), or ``0xFF`` for unspecified."""
+
     second: int
+    """Second (0--59), or ``0xFF`` for unspecified."""
+
     hundredth: int
+    """Hundredths of a second (0--99), or ``0xFF`` for unspecified."""
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to JSON-friendly dict with wildcards as None."""
+        """Convert to a JSON-serializable dictionary.
+
+        Wildcard values (``0xFF``) are represented as ``None``.
+
+        :returns: Dictionary mapping field names to values or ``None``.
+        """
         return {
             "hour": None if self.hour == 0xFF else self.hour,
             "minute": None if self.minute == 0xFF else self.minute,
@@ -143,7 +205,14 @@ class BACnetTime:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BACnetTime:
-        """Reconstruct from a JSON-friendly dict."""
+        """Reconstruct from a JSON-friendly dictionary.
+
+        ``None`` values are converted back to ``0xFF`` wildcards.
+
+        :param data: Dictionary with ``"hour"``, ``"minute"``, ``"second"``, and
+            ``"hundredth"`` keys.
+        :returns: Decoded :class:`BACnetTime` instance.
+        """
         return cls(
             hour=0xFF if data["hour"] is None else data["hour"],
             minute=0xFF if data["minute"] is None else data["minute"],
@@ -156,16 +225,18 @@ class BACnetDouble(float):
     """Sentinel type to distinguish Double (64-bit) from Real (32-bit) encoding.
 
     BACnet properties like LargeAnalogValue Present_Value are specified as
-    Double (IEEE-754 64-bit, Application tag 5) per Clause 12.42.  Since
-    Python ``float`` is always 64-bit internally, we use this subclass as a
+    Double (IEEE-754 64-bit, Application tag 5) per Clause 12.42. Since
+    Python ``float`` is always 64-bit internally, this subclass serves as a
     marker so ``encode_property_value`` can emit the correct wire tag.
     """
 
 
 class BitString:
-    """BACnet Bit String with named-bit support.
+    """BACnet Bit String with named-bit support (Clause 20.2.10).
 
-    Stores raw bit data with an unused-bits count for the trailing byte.
+    Stores raw bit data as bytes with an unused-bits count for the
+    trailing byte. Provides indexed access to individual bits using
+    MSB-first ordering within each byte.
     """
 
     __slots__ = ("_data", "_unused_bits")
@@ -173,10 +244,11 @@ class BitString:
     def __init__(self, value: bytes, unused_bits: int = 0) -> None:
         """Initialise a BitString.
 
-        Args:
-            value: Raw bytes containing the bit data.
-            unused_bits: Number of unused trailing bits in the last byte
-                (0-7).  Must be 0 when *value* is empty.
+        :param value: Raw bytes containing the bit data.
+        :param unused_bits: Number of unused trailing bits in the last byte
+            (0--7). Must be 0 when *value* is empty.
+        :raises ValueError: If *unused_bits* is out of range or non-zero
+            with empty *value*.
         """
         if not 0 <= unused_bits <= 7:
             msg = f"unused_bits must be 0-7, got {unused_bits}"
@@ -189,20 +261,25 @@ class BitString:
 
     @property
     def data(self) -> bytes:
-        """Raw byte data."""
+        """Raw byte data backing this bit string."""
         return self._data
 
     @property
     def unused_bits(self) -> int:
-        """Number of unused bits in the last byte."""
+        """Number of unused trailing bits in the last byte (0--7)."""
         return self._unused_bits
 
     def __len__(self) -> int:
-        """Total number of significant bits."""
+        """Return the total number of significant bits."""
         return len(self._data) * 8 - self._unused_bits
 
     def __getitem__(self, index: int) -> bool:
-        """Get the bit at the given index (MSB-first within each byte)."""
+        """Get the bit value at *index* (MSB-first within each byte).
+
+        :param index: Zero-based bit index.
+        :returns: ``True`` if the bit is set, ``False`` otherwise.
+        :raises IndexError: If *index* is out of range.
+        """
         if index < 0 or index >= len(self):
             msg = f"Bit index {index} out of range for BitString of length {len(self)}"
             raise IndexError(msg)
@@ -223,7 +300,11 @@ class BitString:
         return f"BitString({bits!r})"
 
     def to_dict(self) -> dict[str, Any]:
-        """Convert to JSON-friendly dict."""
+        """Convert to a JSON-serializable dictionary.
+
+        :returns: Dictionary with ``"bits"`` (list of booleans) and
+            ``"unused_bits"`` keys.
+        """
         total_bits = len(self)
         return {
             "bits": [self[i] for i in range(total_bits)],
@@ -232,7 +313,12 @@ class BitString:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BitString:
-        """Reconstruct from a JSON-friendly dict."""
+        """Reconstruct from a JSON-friendly dictionary.
+
+        :param data: Dictionary with ``"bits"`` (list of booleans) and
+            optionally ``"unused_bits"`` keys.
+        :returns: Decoded :class:`BitString` instance.
+        """
         bits: list[bool] = data["bits"]
         unused = data.get("unused_bits", 0)
         byte_count = (len(bits) + 7) // 8

@@ -91,16 +91,15 @@ class ClientTSM:
     ) -> None:
         """Initialise the client TSM.
 
-        Args:
-            network: Network sender used for transmitting APDUs.
-            apdu_timeout: Seconds to wait for a response before retry.
-            apdu_retries: Maximum number of transmission retries.
-            max_apdu_length: Maximum APDU length accepted by this device
-                (bytes).
-            max_segments: Maximum segments this device can accept, or
-                ``None`` for unlimited.
-            segment_timeout: Seconds to wait between segments.
-            proposed_window_size: Proposed segmentation window size (1-127).
+        :param network: Network sender used for transmitting APDUs.
+        :param apdu_timeout: Seconds to wait for a response before retry.
+        :param apdu_retries: Maximum number of transmission retries.
+        :param max_apdu_length: Maximum APDU length accepted by this device
+            (bytes).
+        :param max_segments: Maximum segments this device can accept, or
+            ``None`` for unlimited.
+        :param segment_timeout: Seconds to wait between segments.
+        :param proposed_window_size: Proposed segmentation window size (1-127).
         """
         self._network = network
         self._timeout = apdu_timeout
@@ -133,14 +132,12 @@ class ClientTSM:
         If the request data exceeds the max segment payload, the request
         is automatically segmented per Clause 5.2.
 
-        Returns the service-ack data from ComplexACK,
-        or empty bytes for SimpleACK.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetRejectError: On Reject-PDU response.
-            BACnetAbortError: On Abort-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :returns: The service-ack data from ComplexACK, or empty bytes
+            for SimpleACK.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         loop = asyncio.get_running_loop()
         invoke_id = self._allocate_invoke_id(destination)
@@ -452,10 +449,10 @@ class ClientTSM:
     ) -> None:
         """Start a segment timeout timer.
 
-        Args:
-            txn: The transaction.
-            wait_for_seg: If True, use T_wait_for_seg (4 * T_seg) instead
-                of T_seg. Used when waiting for a SegmentACK after sending.
+        :param txn: The transaction.
+        :param wait_for_seg: If ``True``, use T_wait_for_seg (4 * T_seg)
+            instead of T_seg. Used when waiting for a SegmentACK after
+            sending.
         """
         if txn.timeout_handle:
             txn.timeout_handle.cancel()
@@ -573,16 +570,15 @@ class ServerTSM:
     ) -> None:
         """Initialise the server TSM.
 
-        Args:
-            network: Network sender used for transmitting responses.
-            request_timeout: Seconds before a server transaction expires.
-            apdu_retries: Maximum number of segment retries.
-            segment_timeout: Seconds to wait between segments.
-            max_apdu_length: Maximum APDU length this device can send
-                (bytes).
-            max_segments: Maximum segments this device can send, or
-                ``None`` for unlimited.
-            proposed_window_size: Proposed segmentation window size (1-127).
+        :param network: Network sender used for transmitting responses.
+        :param request_timeout: Seconds before a server transaction expires.
+        :param apdu_retries: Maximum number of segment retries.
+        :param segment_timeout: Seconds to wait between segments.
+        :param max_apdu_length: Maximum APDU length this device can send
+            (bytes).
+        :param max_segments: Maximum segments this device can send, or
+            ``None`` for unlimited.
+        :param proposed_window_size: Proposed segmentation window size (1-127).
         """
         self._network = network
         self._timeout = request_timeout
@@ -716,10 +712,9 @@ class ServerTSM:
     ) -> None:
         """Begin sending a segmented ComplexACK response.
 
-        Args:
-            txn: The server transaction.
-            service_choice: Service choice for the response.
-            response_data: The complete service-ack data to segment.
+        :param txn: The server transaction.
+        :param service_choice: Service choice for the response.
+        :param response_data: The complete service-ack data to segment.
         """
         if not txn.segmented_response_accepted:
             self._abort_server_transaction(txn, AbortReason.SEGMENTATION_NOT_SUPPORTED)

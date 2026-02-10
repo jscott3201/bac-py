@@ -11,7 +11,13 @@ if TYPE_CHECKING:
 
 
 class TagClass(IntEnum):
-    """Tag class: application or context-specific."""
+    """Tag class indicating application or context-specific encoding.
+
+    BACnet uses two tag classes per Clause 20.2.1.1:
+
+    - ``APPLICATION`` tags identify the datatype (Null, Boolean, etc.).
+    - ``CONTEXT`` tags identify a field within a constructed type.
+    """
 
     APPLICATION = 0
     CONTEXT = 1
@@ -19,13 +25,26 @@ class TagClass(IntEnum):
 
 @dataclass(frozen=True, slots=True)
 class Tag:
-    """Decoded BACnet tag."""
+    """A decoded BACnet tag header per Clause 20.2.1.
+
+    Represents the tag number, class, data length, and opening/closing
+    status extracted from the tag octets.
+    """
 
     number: int
+    """Tag number: datatype for application tags, field index for context tags."""
+
     cls: TagClass
+    """Tag class (application or context-specific)."""
+
     length: int
+    """Content length in bytes, or the raw L/V/T value for application booleans."""
+
     is_opening: bool = False
+    """Whether this is a context-specific opening tag (L/V/T = 6)."""
+
     is_closing: bool = False
+    """Whether this is a context-specific closing tag (L/V/T = 7)."""
 
     @property
     def is_boolean_true(self) -> bool:
@@ -40,22 +59,17 @@ class Tag:
 
 
 def encode_tag(tag_number: int, cls: TagClass, length: int) -> bytes:
-    """Encode a tag header.
+    """Encode a tag header per Clause 20.2.1.
 
     For APPLICATION class tags, the tag number identifies the datatype
     (0=Null, 1=Boolean, ..., 12=ObjectIdentifier).  For CONTEXT class
     tags, the tag number is a context-specific field identifier (0-254).
 
-    Args:
-        tag_number: Tag number (0-254).
-        cls: Tag class (APPLICATION or CONTEXT).
-        length: Data length in bytes.
-
-    Returns:
-        Encoded tag header bytes.
-
-    Raises:
-        ValueError: If tag_number or length is out of range.
+    :param tag_number: Tag number (0-254).
+    :param cls: Tag class (APPLICATION or CONTEXT).
+    :param length: Data length in bytes.
+    :returns: Encoded tag header bytes.
+    :raises ValueError: If *tag_number* or *length* is out of range.
     """
     if tag_number < 0 or tag_number > 254:
         msg = f"Tag number must be 0-254, got {tag_number}"
@@ -96,11 +110,8 @@ def encode_tag(tag_number: int, cls: TagClass, length: int) -> bytes:
 def encode_opening_tag(tag_number: int) -> bytes:
     """Encode a context-specific opening tag.
 
-    Args:
-        tag_number: Context tag number.
-
-    Returns:
-        Encoded opening tag bytes.
+    :param tag_number: Context tag number.
+    :returns: Encoded opening tag bytes.
     """
     if tag_number <= 14:
         return bytes([(tag_number << 4) | 0x0E])
@@ -110,11 +121,8 @@ def encode_opening_tag(tag_number: int) -> bytes:
 def encode_closing_tag(tag_number: int) -> bytes:
     """Encode a context-specific closing tag.
 
-    Args:
-        tag_number: Context tag number.
-
-    Returns:
-        Encoded closing tag bytes.
+    :param tag_number: Context tag number.
+    :returns: Encoded closing tag bytes.
     """
     if tag_number <= 14:
         return bytes([(tag_number << 4) | 0x0F])
@@ -122,22 +130,24 @@ def encode_closing_tag(tag_number: int) -> bytes:
 
 
 def as_memoryview(data: bytes | memoryview) -> memoryview:
-    """Ensure data is a memoryview for efficient slicing."""
+    """Ensure *data* is a :class:`memoryview` for efficient zero-copy slicing.
+
+    :param data: Input bytes or memoryview.
+    :returns: A :class:`memoryview` wrapping *data*.
+    """
     return memoryview(data) if isinstance(data, bytes) else data
 
 
 def decode_tag(buf: memoryview | bytes, offset: int) -> tuple[Tag, int]:
-    """Decode a tag from buffer, return (tag, new_offset).
+    """Decode a tag from *buf* starting at *offset*.
 
-    Args:
-        buf: Buffer to decode from.
-        offset: Starting offset in buffer.
+    Parses the initial tag octet, optional extended tag number, and
+    optional extended length fields per Clause 20.2.1.
 
-    Returns:
-        Tuple of (decoded Tag, new offset after tag header).
-
-    Raises:
-        ValueError: If the buffer is too short for the tag.
+    :param buf: Buffer to decode from.
+    :param offset: Starting byte offset in *buf*.
+    :returns: Tuple of (decoded :class:`Tag`, new offset past the tag header).
+    :raises ValueError: If *offset* is beyond the buffer length.
     """
     if isinstance(buf, bytes):
         buf = memoryview(buf)
@@ -191,16 +201,14 @@ def extract_context_value(
 ) -> tuple[bytes, int]:
     """Extract raw bytes enclosed by a context opening/closing tag pair.
 
-    Reads from ``offset`` (which should point just past the opening tag)
+    Reads from *offset* (which should point just past the opening tag)
     through the matching closing tag, handling nested opening/closing tags.
 
-    Args:
-        data: Buffer to read from.
-        offset: Position immediately after the opening tag.
-        tag_number: The context tag number of the enclosing pair.
-
-    Returns:
-        Tuple of (enclosed raw bytes, offset past the closing tag).
+    :param data: Buffer to read from.
+    :param offset: Position immediately after the opening tag.
+    :param tag_number: The context tag number of the enclosing pair.
+    :returns: Tuple of (enclosed raw bytes, offset past the closing tag).
+    :raises ValueError: If the matching closing tag is not found.
     """
     if isinstance(data, bytes):
         data = memoryview(data)
@@ -232,17 +240,14 @@ def decode_optional_context[T](
     """Try to decode an optional context-tagged field.
 
     Peeks at the next tag; if it matches the expected context tag number,
-    decodes the value using ``decode_fn`` and advances the offset.
+    decodes the value using *decode_fn* and advances the offset.
     Otherwise returns ``(None, offset)`` unchanged.
 
-    Args:
-        data: Buffer to decode from (must already be a memoryview).
-        offset: Current position in the buffer.
-        tag_number: Expected context tag number.
-        decode_fn: Callable to decode the tag's content bytes.
-
-    Returns:
-        Tuple of (decoded value or None, new offset).
+    :param data: Buffer to decode from (must already be a :class:`memoryview`).
+    :param offset: Current position in the buffer.
+    :param tag_number: Expected context tag number.
+    :param decode_fn: Callable to decode the tag's content bytes.
+    :returns: Tuple of (decoded value or ``None``, new offset).
     """
     if offset >= len(data):
         return None, offset

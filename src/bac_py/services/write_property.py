@@ -53,8 +53,7 @@ class WritePropertyRequest:
     def encode(self) -> bytes:
         """Encode WriteProperty-Request service parameters.
 
-        Returns:
-            Encoded service request bytes.
+        :returns: Encoded service request bytes.
         """
         buf = bytearray()
         # [0] object-identifier
@@ -77,11 +76,10 @@ class WritePropertyRequest:
     def decode(cls, data: memoryview | bytes) -> WritePropertyRequest:
         """Decode WriteProperty-Request from service request bytes.
 
-        Args:
-            data: Raw service request bytes.
-
-        Returns:
-            Decoded WritePropertyRequest.
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`WritePropertyRequest`.
+        :raises BACnetRejectError: If *priority* is outside the 1--16 range
+            (per Clause 15.9.1.1.5).
         """
         data = as_memoryview(data)
 

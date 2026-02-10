@@ -12,7 +12,12 @@ BACNET_PROTOCOL_VERSION = 1
 
 @dataclass(frozen=True, slots=True)
 class NPDU:
-    """Decoded Network Protocol Data Unit (Clause 6.2)."""
+    """Decoded Network Protocol Data Unit (Clause 6.2).
+
+    Represents the complete contents of a BACnet NPDU including the
+    control octet fields, optional source/destination addressing, and
+    either an application-layer APDU or a network-layer message payload.
+    """
 
     version: int = BACNET_PROTOCOL_VERSION
     """BACnet protocol version (always 1)."""
@@ -49,16 +54,16 @@ class NPDU:
 
 
 def encode_npdu(npdu: NPDU) -> bytes:
-    """Encode an NPDU to bytes.
+    """Encode an :class:`NPDU` dataclass into on-the-wire bytes.
 
-    Args:
-        npdu: The NPDU dataclass to encode.
+    Builds the version octet, control octet, optional destination/source
+    address fields, hop count, and either the network-message type + data
+    or the application-layer APDU payload.
 
-    Returns:
-        Encoded NPDU bytes.
-
-    Raises:
-        ValueError: If source address fields are invalid per spec.
+    :param npdu: The :class:`NPDU` dataclass to encode.
+    :returns: The fully encoded NPDU byte string.
+    :raises ValueError: If source address fields are invalid per the
+        BACnet specification (e.g. SNET is 0xFFFF or SLEN is 0).
     """
     buf = bytearray()
     buf.append(BACNET_PROTOCOL_VERSION)
@@ -130,16 +135,16 @@ def encode_npdu(npdu: NPDU) -> bytes:
 
 
 def decode_npdu(data: memoryview | bytes) -> NPDU:
-    """Decode an NPDU from bytes.
+    """Decode raw bytes into an :class:`NPDU` dataclass.
 
-    Args:
-        data: Raw NPDU bytes.
+    Parses the version octet, control octet, optional destination/source
+    address fields, hop count, and the remaining payload (network message
+    or application-layer APDU).
 
-    Returns:
-        Decoded NPDU dataclass.
-
-    Raises:
-        ValueError: If the data is too short or the protocol version is not 1.
+    :param data: Raw NPDU bytes (at least 2 bytes required).
+    :returns: The decoded :class:`NPDU`.
+    :raises ValueError: If the data is too short or the protocol version
+        is not 1.
     """
     if len(data) < 2:
         msg = f"NPDU data too short: need at least 2 bytes, got {len(data)}"

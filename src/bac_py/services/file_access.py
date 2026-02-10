@@ -68,7 +68,10 @@ class AtomicReadFileRequest:
     access_method: StreamReadAccess | RecordReadAccess
 
     def encode(self) -> bytes:
-        """Encode AtomicReadFileRequest to bytes."""
+        """Encode AtomicReadFile-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         # fileIdentifier (APPLICATION-tagged)
         buf.extend(
@@ -91,7 +94,12 @@ class AtomicReadFileRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AtomicReadFileRequest:
-        """Decode AtomicReadFileRequest from bytes."""
+        """Decode AtomicReadFile-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`AtomicReadFileRequest`.
+        :raises ValueError: If the access method CHOICE tag is unrecognized.
+        """
         data = as_memoryview(data)
 
         offset = 0
@@ -175,7 +183,10 @@ class AtomicReadFileACK:
     access_method: StreamReadACK | RecordReadACK
 
     def encode(self) -> bytes:
-        """Encode AtomicReadFileACK to bytes."""
+        """Encode AtomicReadFile-ACK service parameters.
+
+        :returns: Encoded service ACK bytes.
+        """
         buf = bytearray()
         # endOfFile (APPLICATION-tagged boolean)
         buf.extend(encode_application_boolean(self.end_of_file))
@@ -195,7 +206,12 @@ class AtomicReadFileACK:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AtomicReadFileACK:
-        """Decode AtomicReadFileACK from bytes."""
+        """Decode AtomicReadFile-ACK from service ACK bytes.
+
+        :param data: Raw service ACK bytes.
+        :returns: Decoded :class:`AtomicReadFileACK`.
+        :raises ValueError: If the access method CHOICE tag is unrecognized.
+        """
         data = as_memoryview(data)
 
         offset = 0
@@ -288,7 +304,10 @@ class AtomicWriteFileRequest:
     access_method: StreamWriteAccess | RecordWriteAccess
 
     def encode(self) -> bytes:
-        """Encode AtomicWriteFileRequest to bytes."""
+        """Encode AtomicWriteFile-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         buf.extend(
             encode_application_object_id(
@@ -312,7 +331,12 @@ class AtomicWriteFileRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AtomicWriteFileRequest:
-        """Decode AtomicWriteFileRequest from bytes."""
+        """Decode AtomicWriteFile-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`AtomicWriteFileRequest`.
+        :raises ValueError: If the access method CHOICE tag is unrecognized.
+        """
         data = as_memoryview(data)
 
         offset = 0
@@ -374,13 +398,20 @@ class AtomicWriteFileACK:
     file_start: int
 
     def encode(self) -> bytes:
-        """Encode AtomicWriteFileACK to bytes."""
+        """Encode AtomicWriteFile-ACK service parameters.
+
+        :returns: Encoded service ACK bytes.
+        """
         tag_number = 0 if self.is_stream else 1
         return encode_context_tagged(tag_number, encode_signed(self.file_start))
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> AtomicWriteFileACK:
-        """Decode AtomicWriteFileACK from bytes."""
+        """Decode AtomicWriteFile-ACK from service ACK bytes.
+
+        :param data: Raw service ACK bytes.
+        :returns: Decoded :class:`AtomicWriteFileACK`.
+        """
         data = as_memoryview(data)
 
         offset = 0

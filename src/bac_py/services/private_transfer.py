@@ -40,7 +40,10 @@ class ConfirmedPrivateTransferRequest:
     service_parameters: bytes | None = None
 
     def encode(self) -> bytes:
-        """Encode ConfirmedPrivateTransferRequest to bytes."""
+        """Encode ConfirmedPrivateTransfer-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         buf.extend(encode_context_tagged(0, encode_unsigned(self.vendor_id)))
         buf.extend(encode_context_tagged(1, encode_unsigned(self.service_number)))
@@ -52,7 +55,11 @@ class ConfirmedPrivateTransferRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> Self:
-        """Decode ConfirmedPrivateTransferRequest from bytes."""
+        """Decode ConfirmedPrivateTransfer-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded request instance.
+        """
         data = as_memoryview(data)
 
         offset = 0
@@ -95,7 +102,10 @@ class ConfirmedPrivateTransferACK:
     result_block: bytes | None = None
 
     def encode(self) -> bytes:
-        """Encode ConfirmedPrivateTransferACK to bytes."""
+        """Encode ConfirmedPrivateTransfer-ACK service parameters.
+
+        :returns: Encoded service ACK bytes.
+        """
         buf = bytearray()
         buf.extend(encode_context_tagged(0, encode_unsigned(self.vendor_id)))
         buf.extend(encode_context_tagged(1, encode_unsigned(self.service_number)))
@@ -107,7 +117,11 @@ class ConfirmedPrivateTransferACK:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ConfirmedPrivateTransferACK:
-        """Decode ConfirmedPrivateTransferACK from bytes."""
+        """Decode ConfirmedPrivateTransfer-ACK from service ACK bytes.
+
+        :param data: Raw service ACK bytes.
+        :returns: Decoded :class:`ConfirmedPrivateTransferACK`.
+        """
         data = as_memoryview(data)
 
         offset = 0

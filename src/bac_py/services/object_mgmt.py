@@ -47,7 +47,10 @@ class CreateObjectRequest:
     list_of_initial_values: list[BACnetPropertyValue] | None = None
 
     def encode(self) -> bytes:
-        """Encode CreateObjectRequest to bytes."""
+        """Encode CreateObject-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         # [0] objectSpecifier
         buf.extend(encode_opening_tag(0))
@@ -66,7 +69,12 @@ class CreateObjectRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> CreateObjectRequest:
-        """Decode CreateObjectRequest from bytes."""
+        """Decode CreateObject-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`CreateObjectRequest`.
+        :raises ValueError: If the objectSpecifier CHOICE tag is unrecognized.
+        """
         data = as_memoryview(data)
 
         offset = 0
@@ -137,7 +145,10 @@ class DeleteObjectRequest:
     object_identifier: ObjectIdentifier
 
     def encode(self) -> bytes:
-        """Encode DeleteObjectRequest to bytes."""
+        """Encode DeleteObject-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         return encode_application_object_id(
             self.object_identifier.object_type,
             self.object_identifier.instance_number,
@@ -145,7 +156,11 @@ class DeleteObjectRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> DeleteObjectRequest:
-        """Decode DeleteObjectRequest from bytes."""
+        """Decode DeleteObject-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`DeleteObjectRequest`.
+        """
         data = as_memoryview(data)
 
         offset = 0

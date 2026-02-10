@@ -131,15 +131,12 @@ class DiscoveredDevice:
 def decode_cov_values(notification: COVNotificationRequest) -> dict[str, object]:
     """Decode COV notification property values to a Python dict.
 
-    Extracts and decodes the ``list_of_values`` from a COV notification
-    into a human-readable dictionary mapping property names to decoded
-    Python values.
+    Extracts and decodes the ``list_of_values`` from a
+    :class:`COVNotificationRequest` into a human-readable dictionary
+    mapping property names to decoded Python values.
 
-    Args:
-        notification: A decoded COV notification request.
-
-    Returns:
-        Dict mapping property name strings (hyphenated, lowercase) to
+    :param notification: A decoded COV notification request.
+    :returns: Dict mapping property name strings (hyphenated, lowercase) to
         decoded Python values.
 
     Example::
@@ -213,6 +210,11 @@ class BACnetClient:
     """
 
     def __init__(self, app: BACnetApplication) -> None:
+        """Initialize the client.
+
+        :param app: The :class:`BACnetApplication` instance to use for
+            sending and receiving BACnet requests.
+        """
         self._app = app
 
     async def read_property(
@@ -225,21 +227,16 @@ class BACnetClient:
     ) -> ReadPropertyACK:
         """Read a single property from a remote device.
 
-        Args:
-            address: Target device address.
-            object_identifier: Object to read from.
-            property_identifier: Property to read.
-            array_index: Optional array index for array properties.
-            timeout: Optional caller-level timeout in seconds.
-
-        Returns:
-            Decoded ReadPropertyACK containing the property value.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetRejectError: On Reject-PDU response.
-            BACnetAbortError: On Abort-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param object_identifier: Object to read from.
+        :param property_identifier: Property to read.
+        :param array_index: Optional array index for array properties.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`ReadPropertyACK` containing the property value.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = ReadPropertyRequest(
             object_identifier=object_identifier,
@@ -266,20 +263,17 @@ class BACnetClient:
     ) -> None:
         """Write a property value to a remote device.
 
-        Args:
-            address: Target device address.
-            object_identifier: Object to write to.
-            property_identifier: Property to write.
-            value: Application-tagged encoded property value bytes.
-            priority: Optional write priority (1-16).
-            array_index: Optional array index for array properties.
-            timeout: Optional caller-level timeout in seconds.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetRejectError: On Reject-PDU response.
-            BACnetAbortError: On Abort-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param object_identifier: Object to write to.
+        :param property_identifier: Property to write.
+        :param value: Application-tagged encoded property value bytes.
+        :param priority: Optional write priority (1--16).
+        :param array_index: Optional array index for array properties.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = WritePropertyRequest(
             object_identifier=object_identifier,
@@ -303,21 +297,16 @@ class BACnetClient:
     ) -> ReadPropertyMultipleACK:
         """Read multiple properties from one or more objects.
 
-        Args:
-            address: Target device address.
-            read_access_specs: List of read access specifications, each
-                containing an object identifier and list of property
-                references to read.
-            timeout: Optional caller-level timeout in seconds.
-
-        Returns:
-            Decoded ReadPropertyMultiple-ACK with per-property results.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetRejectError: On Reject-PDU response.
-            BACnetAbortError: On Abort-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param read_access_specs: List of read access specifications, each
+            containing an object identifier and list of property
+            references to read.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`ReadPropertyMultipleACK` with per-property results.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = ReadPropertyMultipleRequest(
             list_of_read_access_specs=read_access_specs,
@@ -338,18 +327,15 @@ class BACnetClient:
     ) -> None:
         """Write multiple properties to one or more objects.
 
-        Args:
-            address: Target device address.
-            write_access_specs: List of write access specifications, each
-                containing an object identifier and list of property
-                values to write.
-            timeout: Optional caller-level timeout in seconds.
-
-        Raises:
-            BACnetError: On Error-PDU response (first failing property).
-            BACnetRejectError: On Reject-PDU response.
-            BACnetAbortError: On Abort-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param write_access_specs: List of write access specifications, each
+            containing an object identifier and list of property
+            values to write.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response (first failing property).
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = WritePropertyMultipleRequest(
             list_of_write_access_specs=write_access_specs,
@@ -448,21 +434,18 @@ class BACnetClient:
     ) -> object:
         """Read a property and return a decoded Python value.
 
-        Convenience wrapper around ``read_property()`` that parses
+        Convenience wrapper around :meth:`read_property` that parses
         addresses and identifiers from strings and decodes the
         returned application-tagged bytes into native Python types.
 
-        Args:
-            address: Target device (e.g. ``"192.168.1.100"``).
-            object_identifier: Object to read (e.g. ``"analog-input,1"``
-                or ``"ai,1"``).
-            property_identifier: Property to read (e.g. ``"present-value"``
-                or ``"pv"``).
-            array_index: Optional array index.
-            timeout: Optional caller-level timeout in seconds.
-
-        Returns:
-            Decoded Python value (``float``, ``int``, ``str``, ``bool``,
+        :param address: Target device (e.g. ``"192.168.1.100"``).
+        :param object_identifier: Object to read (e.g. ``"analog-input,1"``
+            or ``"ai,1"``).
+        :param property_identifier: Property to read (e.g. ``"present-value"``
+            or ``"pv"``).
+        :param array_index: Optional array index.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded Python value (``float``, ``int``, ``str``, ``bool``,
             etc.). Returns a ``list`` if the property contains multiple
             application-tagged values.
 
@@ -494,7 +477,7 @@ class BACnetClient:
     ) -> None:
         """Write a Python value to a property.
 
-        Convenience wrapper around ``write_property()`` that parses
+        Convenience wrapper around :meth:`write_property` that parses
         addresses and identifiers from strings and automatically
         encodes the value to the appropriate BACnet application-tagged
         format based on the Python type and target property.
@@ -510,16 +493,15 @@ class BACnetClient:
         - ``IntEnum`` -> Enumerated
         - ``bytes`` -> pass-through (already-encoded)
 
-        Args:
-            address: Target device (e.g. ``"192.168.1.100"``).
-            object_identifier: Object to write (e.g. ``"analog-value,1"``
-                or ``"av,1"``).
-            property_identifier: Property to write (e.g. ``"present-value"``
-                or ``"pv"``).
-            value: Python value to write (auto-encoded).
-            priority: Optional write priority (1-16).
-            array_index: Optional array index.
-            timeout: Optional caller-level timeout in seconds.
+        :param address: Target device (e.g. ``"192.168.1.100"``).
+        :param object_identifier: Object to write (e.g. ``"analog-value,1"``
+            or ``"av,1"``).
+        :param property_identifier: Property to write (e.g. ``"present-value"``
+            or ``"pv"``).
+        :param value: Python value to write (auto-encoded).
+        :param priority: Optional write priority (1--16).
+        :param array_index: Optional array index.
+        :param timeout: Optional caller-level timeout in seconds.
 
         Example::
 
@@ -547,21 +529,19 @@ class BACnetClient:
     ) -> dict[str, dict[str, object]]:
         """Read multiple properties from multiple objects.
 
-        Convenience wrapper around ``read_property_multiple()`` that
+        Convenience wrapper around :meth:`read_property_multiple` that
         accepts a simplified dict format and returns decoded Python values.
 
-        Args:
-            address: Target device (e.g. ``"192.168.1.100"``).
-            specs: Mapping of object identifiers to lists of property
-                identifiers. Example::
+        :param address: Target device (e.g. ``"192.168.1.100"``).
+        :param specs: Mapping of object identifiers to lists of property
+            identifiers. Example::
 
-                    {
-                        "ai,1": ["pv", "name", "units"],
-                        "ai,2": ["pv", "status"],
-                    }
+                {
+                    "ai,1": ["pv", "name", "units"],
+                    "ai,2": ["pv", "status"],
+                }
 
-        Returns:
-            Nested dict mapping object ID strings to property name/value
+        :returns: Nested dict mapping object ID strings to property name/value
             dicts. Property values are decoded to native Python types.
             Properties that returned errors have ``None`` as their value.
 
@@ -626,26 +606,23 @@ class BACnetClient:
     ) -> None:
         """Write multiple properties to multiple objects.
 
-        Convenience wrapper around ``write_property_multiple()`` that
+        Convenience wrapper around :meth:`write_property_multiple` that
         accepts a simplified dict format and automatically encodes
         Python values.
 
-        Args:
-            address: Target device (e.g. ``"192.168.1.100"``).
-            specs: Mapping of object identifiers to property/value dicts.
-                Example::
+        :param address: Target device (e.g. ``"192.168.1.100"``).
+        :param specs: Mapping of object identifiers to property/value dicts.
+            Example::
 
-                    {
-                        "av,1": {"pv": 72.5, "object-name": "Zone Temp"},
-                        "bo,1": {"pv": 1},
-                    }
-            timeout: Optional caller-level timeout in seconds.
-
-        Raises:
-            BACnetError: On Error-PDU response (first failing property).
-            BACnetRejectError: On Reject-PDU response.
-            BACnetAbortError: On Abort-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+                {
+                    "av,1": {"pv": 72.5, "object-name": "Zone Temp"},
+                    "bo,1": {"pv": 1},
+                }
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response (first failing property).
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
 
         Example::
 
@@ -692,17 +669,14 @@ class BACnetClient:
         """Read the complete object list from a device.
 
         Attempts to read the full ``object-list`` property first. If
-        the response is too large (``BACnetAbortError`` with
+        the response is too large (:class:`BACnetAbortError` with
         segmentation-not-supported), falls back to reading the array
         length then each element individually.
 
-        Args:
-            address: Target device (e.g. ``"192.168.1.100"``).
-            device_instance: Device instance number of the target.
-            timeout: Optional caller-level timeout in seconds.
-
-        Returns:
-            List of ObjectIdentifier for all objects in the device.
+        :param address: Target device (e.g. ``"192.168.1.100"``).
+        :param device_instance: Device instance number of the target.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: List of :class:`ObjectIdentifier` for all objects in the device.
 
         Example::
 
@@ -775,17 +749,18 @@ class BACnetClient:
         flexible address and object identifier formats and optionally
         registers a notification callback.
 
-        Args:
-            address: Target device (e.g. ``"192.168.1.100"``).
-            object_identifier: Object to monitor (e.g. ``"ai,1"``).
-            process_id: Subscriber process identifier (caller-managed).
-            confirmed: True for confirmed notifications, False for unconfirmed.
-            lifetime: Subscription lifetime in seconds, or None for indefinite.
-            callback: Optional callback for COV notifications. Receives
-                ``(COVNotificationRequest, source_address)``. If provided,
-                automatically registered via
-                :meth:`~bac_py.app.application.BACnetApplication.register_cov_callback`.
-            timeout: Optional caller-level timeout in seconds.
+        :param address: Target device (e.g. ``"192.168.1.100"``).
+        :param object_identifier: Object to monitor (e.g. ``"ai,1"``).
+        :param process_id: Subscriber process identifier (caller-managed).
+        :param confirmed: ``True`` for confirmed notifications, ``False`` for
+            unconfirmed.
+        :param lifetime: Subscription lifetime in seconds, or ``None`` for
+            indefinite.
+        :param callback: Optional callback for COV notifications. Receives
+            ``(COVNotificationRequest, source_address)``. If provided,
+            automatically registered via
+            :meth:`~bac_py.app.application.BACnetApplication.register_cov_callback`.
+        :param timeout: Optional caller-level timeout in seconds.
 
         Example::
 
@@ -832,12 +807,11 @@ class BACnetClient:
         flexible address and object identifier formats and optionally
         unregisters the notification callback.
 
-        Args:
-            address: Target device (e.g. ``"192.168.1.100"``).
-            object_identifier: Object being monitored (e.g. ``"ai,1"``).
-            process_id: Subscriber process identifier used during subscription.
-            unregister_callback: If True, also unregister the COV callback.
-            timeout: Optional caller-level timeout in seconds.
+        :param address: Target device (e.g. ``"192.168.1.100"``).
+        :param object_identifier: Object being monitored (e.g. ``"ai,1"``).
+        :param process_id: Subscriber process identifier used during subscription.
+        :param unregister_callback: If ``True``, also unregister the COV callback.
+        :param timeout: Optional caller-level timeout in seconds.
         """
         addr = parse_address(address)
         obj_id = parse_object_identifier(object_identifier)
@@ -858,23 +832,18 @@ class BACnetClient:
     ) -> ReadRangeACK:
         """Read a range of items from a list or array property.
 
-        Args:
-            address: Target device address.
-            object_identifier: Object containing the list property.
-            property_identifier: List or array property to read.
-            array_index: Optional array index.
-            range_qualifier: Optional range qualifier (by position,
-                sequence number, or time). If None, returns all items.
-            timeout: Optional caller-level timeout in seconds.
-
-        Returns:
-            Decoded ReadRange-ACK with the requested items.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetRejectError: On Reject-PDU response.
-            BACnetAbortError: On Abort-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param object_identifier: Object containing the list property.
+        :param property_identifier: List or array property to read.
+        :param array_index: Optional array index.
+        :param range_qualifier: Optional range qualifier (by position,
+            sequence number, or time). If ``None``, returns all items.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`ReadRangeACK` with the requested items.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = ReadRangeRequest(
             object_identifier=object_identifier,
@@ -908,20 +877,17 @@ class BACnetClient:
         and :meth:`who_has` which all follow the same broadcast-and-
         collect pattern.
 
-        Args:
-            send_service: Service choice for the outgoing request.
-            send_data: Encoded service data to send.
-            listen_service: Service choice to listen for responses.
-            decoder: Callable that decodes ``(service_data, source)``
-                into a result object.  Return ``None`` to skip a
-                malformed response.
-            destination: Broadcast address for the request.
-            timeout: Seconds to wait for responses.
-            expected_count: When set, return early once this many
-                responses have been collected.
-
-        Returns:
-            List of decoded response objects.
+        :param send_service: Service choice for the outgoing request.
+        :param send_data: Encoded service data to send.
+        :param listen_service: Service choice to listen for responses.
+        :param decoder: Callable that decodes ``(service_data, source)``
+            into a result object.  Return ``None`` to skip a
+            malformed response.
+        :param destination: Broadcast address for the request.
+        :param timeout: Seconds to wait for responses.
+        :param expected_count: When set, return early once this many
+            responses have been collected.
+        :returns: List of decoded response objects.
         """
         results: list[_T] = []
         done_event: asyncio.Event | None = asyncio.Event() if expected_count is not None else None
@@ -971,17 +937,14 @@ class BACnetClient:
         Sends a Who-Is request and collects I-Am responses for the
         specified timeout duration.
 
-        Args:
-            low_limit: Optional lower bound of device instance range.
-            high_limit: Optional upper bound of device instance range.
-            destination: Broadcast address (default: global broadcast).
-            timeout: Seconds to wait for responses.
-            expected_count: When set, return early once this many
-                responses have been collected instead of waiting for the
-                full timeout.
-
-        Returns:
-            List of I-Am responses received within the timeout.
+        :param low_limit: Optional lower bound of device instance range.
+        :param high_limit: Optional upper bound of device instance range.
+        :param destination: Broadcast address (default: global broadcast).
+        :param timeout: Seconds to wait for responses.
+        :param expected_count: When set, return early once this many
+            responses have been collected instead of waiting for the
+            full timeout.
+        :returns: List of :class:`IAmRequest` responses received within the timeout.
         """
         request = WhoIsRequest(low_limit=low_limit, high_limit=high_limit)
         return await self._collect_unconfirmed_responses(
@@ -1009,7 +972,7 @@ class BACnetClient:
         :class:`DiscoveredDevice` objects with parsed fields.
 
         To discover devices on a remote network reachable through a
-        router, pass a remote broadcast ``BACnetAddress``::
+        router, pass a remote broadcast :class:`BACnetAddress`::
 
             from bac_py.network.address import BACnetAddress
 
@@ -1020,17 +983,14 @@ class BACnetClient:
         pass a string like ``"192.168.1.255"`` for directed local
         broadcast.
 
-        Args:
-            low_limit: Optional lower bound of device instance range.
-            high_limit: Optional upper bound of device instance range.
-            destination: Broadcast address (default: global broadcast).
-            timeout: Seconds to wait for responses.
-            expected_count: When set, return early once this many
-                devices have been discovered instead of waiting for the
-                full timeout.
-
-        Returns:
-            List of discovered devices with address and device info.
+        :param low_limit: Optional lower bound of device instance range.
+        :param high_limit: Optional upper bound of device instance range.
+        :param destination: Broadcast address (default: global broadcast).
+        :param timeout: Seconds to wait for responses.
+        :param expected_count: When set, return early once this many
+            devices have been discovered instead of waiting for the
+            full timeout.
+        :returns: List of :class:`DiscoveredDevice` with address and device info.
 
         Example::
 
@@ -1075,19 +1035,18 @@ class BACnetClient:
         device will send confirmed or unconfirmed COV notifications
         when the monitored object's value changes.
 
-        Args:
-            address: Target device address.
-            object_identifier: Object to monitor.
-            process_id: Subscriber process identifier (caller-managed).
-            confirmed: True for confirmed notifications, False for unconfirmed.
-            lifetime: Subscription lifetime in seconds, or None for indefinite.
-            timeout: Optional caller-level timeout in seconds.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetRejectError: On Reject-PDU response.
-            BACnetAbortError: On Abort-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param object_identifier: Object to monitor.
+        :param process_id: Subscriber process identifier (caller-managed).
+        :param confirmed: ``True`` for confirmed notifications, ``False`` for
+            unconfirmed.
+        :param lifetime: Subscription lifetime in seconds, or ``None`` for
+            indefinite.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = SubscribeCOVRequest(
             subscriber_process_identifier=process_id,
@@ -1114,17 +1073,14 @@ class BACnetClient:
         Per Clause 13.14, omits ``issueConfirmedNotifications`` and
         ``lifetime`` to indicate cancellation.
 
-        Args:
-            address: Target device address.
-            object_identifier: Object being monitored.
-            process_id: Subscriber process identifier used during subscription.
-            timeout: Optional caller-level timeout in seconds.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetRejectError: On Reject-PDU response.
-            BACnetAbortError: On Abort-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param object_identifier: Object being monitored.
+        :param process_id: Subscriber process identifier used during subscription.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = SubscribeCOVRequest(
             subscriber_process_identifier=process_id,
@@ -1149,16 +1105,13 @@ class BACnetClient:
     ) -> None:
         """Send DeviceCommunicationControl-Request per Clause 16.1.
 
-        Args:
-            address: Target device address.
-            enable_disable: Enable/disable communication state.
-            time_duration: Optional duration in minutes.
-            password: Optional password string (1-20 chars).
-            timeout: Optional caller-level timeout in seconds.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param enable_disable: Enable/disable communication state.
+        :param time_duration: Optional duration in minutes.
+        :param password: Optional password string (1--20 chars).
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = DeviceCommunicationControlRequest(
             enable_disable=enable_disable,
@@ -1181,15 +1134,12 @@ class BACnetClient:
     ) -> None:
         """Send ReinitializeDevice-Request per Clause 16.4.
 
-        Args:
-            address: Target device address.
-            reinitialized_state: Desired reinitialization state.
-            password: Optional password string (1-20 chars).
-            timeout: Optional caller-level timeout in seconds.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param reinitialized_state: Desired reinitialization state.
+        :param password: Optional password string (1--20 chars).
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = ReinitializeDeviceRequest(
             reinitialized_state=reinitialized_state,
@@ -1212,10 +1162,9 @@ class BACnetClient:
 
         This is an unconfirmed service (fire-and-forget).
 
-        Args:
-            destination: Target device or broadcast address.
-            date: BACnet date to synchronize.
-            time: BACnet time to synchronize.
+        :param destination: Target device or broadcast address.
+        :param date: BACnet date to synchronize.
+        :param time: BACnet time to synchronize.
         """
         request = TimeSynchronizationRequest(date=date, time=time)
         self._app.unconfirmed_request(
@@ -1234,10 +1183,9 @@ class BACnetClient:
 
         This is an unconfirmed service (fire-and-forget).
 
-        Args:
-            destination: Target device or broadcast address.
-            date: BACnet UTC date to synchronize.
-            time: BACnet UTC time to synchronize.
+        :param destination: Target device or broadcast address.
+        :param date: BACnet UTC date to synchronize.
+        :param time: BACnet UTC time to synchronize.
         """
         request = UTCTimeSynchronizationRequest(date=date, time=time)
         self._app.unconfirmed_request(
@@ -1257,18 +1205,13 @@ class BACnetClient:
     ) -> AtomicReadFileACK:
         """Send AtomicReadFile-Request per Clause 14.1.
 
-        Args:
-            address: Target device address.
-            file_identifier: ObjectIdentifier of the File object.
-            access_method: Stream or record read parameters.
-            timeout: Optional caller-level timeout in seconds.
-
-        Returns:
-            Decoded AtomicReadFile-ACK with file data.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param file_identifier: :class:`ObjectIdentifier` of the File object.
+        :param access_method: Stream or record read parameters.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`AtomicReadFileACK` with file data.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = AtomicReadFileRequest(
             file_identifier=file_identifier,
@@ -1291,18 +1234,13 @@ class BACnetClient:
     ) -> AtomicWriteFileACK:
         """Send AtomicWriteFile-Request per Clause 14.2.
 
-        Args:
-            address: Target device address.
-            file_identifier: ObjectIdentifier of the File object.
-            access_method: Stream or record write parameters.
-            timeout: Optional caller-level timeout in seconds.
-
-        Returns:
-            Decoded AtomicWriteFile-ACK with actual start position.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param file_identifier: :class:`ObjectIdentifier` of the File object.
+        :param access_method: Stream or record write parameters.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`AtomicWriteFileACK` with actual start position.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = AtomicWriteFileRequest(
             file_identifier=file_identifier,
@@ -1327,21 +1265,16 @@ class BACnetClient:
     ) -> ObjectIdentifier:
         """Send CreateObject-Request per Clause 15.3.
 
-        Supply either ``object_type`` (server auto-assigns instance)
-        or ``object_identifier`` (explicit type and instance).
+        Supply either *object_type* (server auto-assigns instance)
+        or *object_identifier* (explicit type and instance).
 
-        Args:
-            address: Target device address.
-            object_type: Object type for auto-assigned instance.
-            object_identifier: Explicit object identifier.
-            timeout: Optional caller-level timeout in seconds.
-
-        Returns:
-            ObjectIdentifier of the created object.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param object_type: Object type for auto-assigned instance.
+        :param object_identifier: Explicit object identifier.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: :class:`ObjectIdentifier` of the created object.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = CreateObjectRequest(
             object_type=object_type,
@@ -1367,14 +1300,11 @@ class BACnetClient:
     ) -> None:
         """Send DeleteObject-Request per Clause 15.4.
 
-        Args:
-            address: Target device address.
-            object_identifier: Object to delete.
-            timeout: Optional caller-level timeout in seconds.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param object_identifier: Object to delete.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = DeleteObjectRequest(object_identifier=object_identifier)
         await self._app.confirmed_request(
@@ -1397,17 +1327,14 @@ class BACnetClient:
     ) -> None:
         """Send AddListElement-Request per Clause 15.1.
 
-        Args:
-            address: Target device address.
-            object_identifier: Object containing the list property.
-            property_identifier: List property to modify.
-            list_of_elements: Application-tagged encoded elements to add.
-            array_index: Optional array index.
-            timeout: Optional caller-level timeout in seconds.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param object_identifier: Object containing the list property.
+        :param property_identifier: List property to modify.
+        :param list_of_elements: Application-tagged encoded elements to add.
+        :param array_index: Optional array index.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = AddListElementRequest(
             object_identifier=object_identifier,
@@ -1433,17 +1360,14 @@ class BACnetClient:
     ) -> None:
         """Send RemoveListElement-Request per Clause 15.2.
 
-        Args:
-            address: Target device address.
-            object_identifier: Object containing the list property.
-            property_identifier: List property to modify.
-            list_of_elements: Application-tagged encoded elements to remove.
-            array_index: Optional array index.
-            timeout: Optional caller-level timeout in seconds.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param object_identifier: Object containing the list property.
+        :param property_identifier: List property to modify.
+        :param list_of_elements: Application-tagged encoded elements to remove.
+        :param array_index: Optional array index.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = RemoveListElementRequest(
             object_identifier=object_identifier,
@@ -1473,22 +1397,20 @@ class BACnetClient:
         """Discover objects via Who-Has broadcast per Clause 16.9.
 
         Sends a Who-Has request and collects I-Have responses for the
-        specified timeout duration. Supply either ``object_identifier``
-        or ``object_name``.
+        specified timeout duration. Supply either *object_identifier*
+        or *object_name*.
 
-        Args:
-            object_identifier: Object to search for by identifier.
-            object_name: Object to search for by name.
-            low_limit: Optional lower bound of device instance range.
-            high_limit: Optional upper bound of device instance range.
-            destination: Broadcast address (default: global broadcast).
-            timeout: Seconds to wait for responses.
-            expected_count: When set, return early once this many
-                responses have been collected instead of waiting for the
-                full timeout.
-
-        Returns:
-            List of I-Have responses received within the timeout.
+        :param object_identifier: Object to search for by identifier.
+        :param object_name: Object to search for by name.
+        :param low_limit: Optional lower bound of device instance range.
+        :param high_limit: Optional upper bound of device instance range.
+        :param destination: Broadcast address (default: global broadcast).
+        :param timeout: Seconds to wait for responses.
+        :param expected_count: When set, return early once this many
+            responses have been collected instead of waiting for the
+            full timeout.
+        :returns: List of :class:`IHaveRequest` responses received within the
+            timeout.
         """
         request = WhoHasRequest(
             object_identifier=object_identifier,
@@ -1519,16 +1441,13 @@ class BACnetClient:
         Sends a Who-Is-Router-To-Network message and collects
         I-Am-Router-To-Network responses.
 
-        Args:
-            network: Optional specific network to query. If ``None``,
-                discovers all reachable networks.
-            destination: Target for the query. Accepts an IP string,
-                a :class:`BACnetAddress`, or ``None`` for local
-                broadcast.
-            timeout: Seconds to wait for responses.
-
-        Returns:
-            List of router information with address and accessible
+        :param network: Optional specific network to query. If ``None``,
+            discovers all reachable networks.
+        :param destination: Target for the query. Accepts an IP string,
+            a :class:`BACnetAddress`, or ``None`` for local
+            broadcast.
+        :param timeout: Seconds to wait for responses.
+        :returns: List of router information with address and accessible
             networks. Multiple responses from the same router are
             merged.
 
@@ -1598,19 +1517,14 @@ class BACnetClient:
     ) -> ConfirmedPrivateTransferACK:
         """Send ConfirmedPrivateTransfer-Request per Clause 16.2.
 
-        Args:
-            address: Target device address.
-            vendor_id: Vendor identifier.
-            service_number: Vendor-specific service number.
-            service_parameters: Optional vendor-specific data.
-            timeout: Optional caller-level timeout in seconds.
-
-        Returns:
-            Decoded ConfirmedPrivateTransfer-ACK.
-
-        Raises:
-            BACnetError: On Error-PDU response.
-            BACnetTimeoutError: On timeout after all retries.
+        :param address: Target device address.
+        :param vendor_id: Vendor identifier.
+        :param service_number: Vendor-specific service number.
+        :param service_parameters: Optional vendor-specific data.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded ConfirmedPrivateTransfer-ACK.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
         """
         request = ConfirmedPrivateTransferRequest(
             vendor_id=vendor_id,
@@ -1636,11 +1550,10 @@ class BACnetClient:
 
         This is an unconfirmed service (fire-and-forget).
 
-        Args:
-            destination: Target device or broadcast address.
-            vendor_id: Vendor identifier.
-            service_number: Vendor-specific service number.
-            service_parameters: Optional vendor-specific data.
+        :param destination: Target device or broadcast address.
+        :param vendor_id: Vendor identifier.
+        :param service_number: Vendor-specific service number.
+        :param service_parameters: Optional vendor-specific data.
         """
         request = UnconfirmedPrivateTransferRequest(
             vendor_id=vendor_id,
@@ -1670,17 +1583,12 @@ class BACnetClient:
     ) -> list[BDTEntryInfo]:
         """Read the Broadcast Distribution Table from a remote BBMD.
 
-        Args:
-            bbmd_address: Address of the BBMD to query (e.g.
-                ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
-            timeout: Seconds to wait for a response.
-
-        Returns:
-            List of BDT entries with address and mask information.
-
-        Raises:
-            RuntimeError: If transport is not available.
-            TimeoutError: If no response within *timeout*.
+        :param bbmd_address: Address of the BBMD to query (e.g.
+            ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
+        :param timeout: Seconds to wait for a response.
+        :returns: List of BDT entries with address and mask information.
+        :raises RuntimeError: If transport is not available.
+        :raises TimeoutError: If no response within *timeout*.
         """
         transport = self._require_transport()
         bip_addr = self._app._parse_bip_address(
@@ -1702,17 +1610,12 @@ class BACnetClient:
     ) -> list[FDTEntryInfo]:
         """Read the Foreign Device Table from a remote BBMD.
 
-        Args:
-            bbmd_address: Address of the BBMD to query (e.g.
-                ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
-            timeout: Seconds to wait for a response.
-
-        Returns:
-            List of FDT entries with address, TTL, and remaining time.
-
-        Raises:
-            RuntimeError: If transport is not available.
-            TimeoutError: If no response within *timeout*.
+        :param bbmd_address: Address of the BBMD to query (e.g.
+            ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
+        :param timeout: Seconds to wait for a response.
+        :returns: List of FDT entries with address, TTL, and remaining time.
+        :raises RuntimeError: If transport is not available.
+        :raises TimeoutError: If no response within *timeout*.
         """
         transport = self._require_transport()
         bip_addr = self._app._parse_bip_address(
@@ -1736,16 +1639,13 @@ class BACnetClient:
     ) -> None:
         """Write a Broadcast Distribution Table to a remote BBMD.
 
-        Args:
-            bbmd_address: Address of the BBMD to configure (e.g.
-                ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
-            entries: BDT entries to write.
-            timeout: Seconds to wait for a response.
-
-        Raises:
-            RuntimeError: If transport is not available or BBMD
-                rejects the write (NAK).
-            TimeoutError: If no response within *timeout*.
+        :param bbmd_address: Address of the BBMD to configure (e.g.
+            ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
+        :param entries: BDT entries to write.
+        :param timeout: Seconds to wait for a response.
+        :raises RuntimeError: If transport is not available or BBMD
+            rejects the write (NAK).
+        :raises TimeoutError: If no response within *timeout*.
         """
         from bac_py.transport.bbmd import BDTEntry
         from bac_py.types.enums import BvlcResultCode
@@ -1772,17 +1672,14 @@ class BACnetClient:
     ) -> None:
         """Delete a Foreign Device Table entry on a remote BBMD.
 
-        Args:
-            bbmd_address: Address of the BBMD (e.g.
-                ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
-            entry_address: Address of the FDT entry to delete
-                (e.g. ``"10.0.0.50:47808"``).
-            timeout: Seconds to wait for a response.
-
-        Raises:
-            RuntimeError: If transport is not available or BBMD
-                rejects the delete (NAK).
-            TimeoutError: If no response within *timeout*.
+        :param bbmd_address: Address of the BBMD (e.g.
+            ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
+        :param entry_address: Address of the FDT entry to delete
+            (e.g. ``"10.0.0.50:47808"``).
+        :param timeout: Seconds to wait for a response.
+        :raises RuntimeError: If transport is not available or BBMD
+            rejects the delete (NAK).
+        :raises TimeoutError: If no response within *timeout*.
         """
         from bac_py.types.enums import BvlcResultCode
 

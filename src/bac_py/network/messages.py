@@ -175,14 +175,9 @@ def encode_network_message(msg: NetworkMessage) -> bytes:
 
     See :func:`decode_network_message` for the inverse operation.
 
-    Args:
-        msg: A network message dataclass instance.
-
-    Returns:
-        Encoded data bytes (may be empty for some message types).
-
-    Raises:
-        TypeError: If the message type is not recognized.
+    :param msg: A network message dataclass instance.
+    :returns: Encoded data bytes (may be empty for some message types).
+    :raises TypeError: If the message type is not recognized.
     """
     if isinstance(msg, WhoIsRouterToNetwork):
         return _encode_who_is_router(msg)
@@ -213,12 +208,14 @@ def encode_network_message(msg: NetworkMessage) -> bytes:
 
 
 def _encode_who_is_router(msg: WhoIsRouterToNetwork) -> bytes:
+    """Encode Who-Is-Router payload: 2-byte DNET or empty if querying all."""
     if msg.network is None:
         return b""
     return msg.network.to_bytes(2, "big")
 
 
 def _encode_network_list(networks: tuple[int, ...]) -> bytes:
+    """Encode a sequence of 2-byte big-endian network numbers."""
     buf = bytearray()
     for net in networks:
         buf.extend(net.to_bytes(2, "big"))
@@ -226,6 +223,7 @@ def _encode_network_list(networks: tuple[int, ...]) -> bytes:
 
 
 def _encode_i_could_be_router(msg: ICouldBeRouterToNetwork) -> bytes:
+    """Encode I-Could-Be-Router payload: 2-byte DNET + 1-byte performance index."""
     buf = bytearray()
     buf.extend(msg.network.to_bytes(2, "big"))
     buf.append(msg.performance_index & 0xFF)
@@ -233,6 +231,7 @@ def _encode_i_could_be_router(msg: ICouldBeRouterToNetwork) -> bytes:
 
 
 def _encode_reject_message(msg: RejectMessageToNetwork) -> bytes:
+    """Encode Reject-Message payload: 1-byte reason + 2-byte DNET."""
     buf = bytearray()
     buf.append(int(msg.reason) & 0xFF)
     buf.extend(msg.network.to_bytes(2, "big"))
@@ -240,6 +239,7 @@ def _encode_reject_message(msg: RejectMessageToNetwork) -> bytes:
 
 
 def _encode_routing_table(ports: tuple[RoutingTablePort, ...]) -> bytes:
+    """Encode a routing table per Figure 6-11: count + repeated port entries."""
     buf = bytearray()
     buf.append(len(ports))
     for port in ports:
@@ -251,6 +251,7 @@ def _encode_routing_table(ports: tuple[RoutingTablePort, ...]) -> bytes:
 
 
 def _encode_establish_connection(msg: EstablishConnectionToNetwork) -> bytes:
+    """Encode Establish-Connection payload: 2-byte DNET + 1-byte termination time."""
     buf = bytearray()
     buf.extend(msg.network.to_bytes(2, "big"))
     buf.append(msg.termination_time & 0xFF)
@@ -258,6 +259,7 @@ def _encode_establish_connection(msg: EstablishConnectionToNetwork) -> bytes:
 
 
 def _encode_network_number_is(msg: NetworkNumberIs) -> bytes:
+    """Encode Network-Number-Is payload: 2-byte network + 1-byte configured flag."""
     buf = bytearray()
     buf.extend(msg.network.to_bytes(2, "big"))
     buf.append(1 if msg.configured else 0)
@@ -274,16 +276,13 @@ def decode_network_message(message_type: int, data: bytes | memoryview) -> Netwo
 
     See :func:`encode_network_message` for the inverse operation.
 
-    Args:
-        message_type: The NetworkMessageType value from the NPDU.
-        data: The raw data bytes following the message type byte
-            (may be empty for message types with no payload).
-
-    Returns:
-        A decoded network message dataclass instance.
-
-    Raises:
-        ValueError: If the message type is not supported or data is malformed.
+    :param message_type: The :class:`~bac_py.types.enums.NetworkMessageType`
+        value from the NPDU.
+    :param data: The raw data bytes following the message type byte
+        (may be empty for message types with no payload).
+    :returns: A decoded network message dataclass instance.
+    :raises ValueError: If the message type is not supported or data is
+        malformed.
     """
     if isinstance(data, memoryview):
         data = bytes(data)
@@ -320,6 +319,7 @@ def decode_network_message(message_type: int, data: bytes | memoryview) -> Netwo
 
 
 def _decode_who_is_router(data: bytes) -> WhoIsRouterToNetwork:
+    """Decode Who-Is-Router payload: empty means all networks, otherwise 2-byte DNET."""
     if len(data) == 0:
         return WhoIsRouterToNetwork(network=None)
     if len(data) < 2:
@@ -330,6 +330,7 @@ def _decode_who_is_router(data: bytes) -> WhoIsRouterToNetwork:
 
 
 def _decode_network_list(data: bytes) -> tuple[int, ...]:
+    """Decode a sequence of 2-byte big-endian network numbers."""
     if len(data) % 2 != 0:
         msg = "Network list data length must be a multiple of 2"
         raise ValueError(msg)
@@ -340,6 +341,7 @@ def _decode_network_list(data: bytes) -> tuple[int, ...]:
 
 
 def _decode_i_could_be_router(data: bytes) -> ICouldBeRouterToNetwork:
+    """Decode I-Could-Be-Router payload: 2-byte DNET + 1-byte performance index."""
     if len(data) < 3:
         msg = "I-Could-Be-Router-To-Network data too short"
         raise ValueError(msg)
@@ -349,6 +351,7 @@ def _decode_i_could_be_router(data: bytes) -> ICouldBeRouterToNetwork:
 
 
 def _decode_reject_message(data: bytes) -> RejectMessageToNetwork:
+    """Decode Reject-Message payload: 1-byte reason + 2-byte DNET."""
     if len(data) < 3:
         msg = "Reject-Message-To-Network data too short"
         raise ValueError(msg)
@@ -358,6 +361,7 @@ def _decode_reject_message(data: bytes) -> RejectMessageToNetwork:
 
 
 def _decode_routing_table(data: bytes) -> tuple[RoutingTablePort, ...]:
+    """Decode a routing table per Figure 6-11: count + repeated port entries."""
     if len(data) < 1:
         msg = "Routing table data too short"
         raise ValueError(msg)
@@ -384,6 +388,7 @@ def _decode_routing_table(data: bytes) -> tuple[RoutingTablePort, ...]:
 
 
 def _decode_establish_connection(data: bytes) -> EstablishConnectionToNetwork:
+    """Decode Establish-Connection payload: 2-byte DNET + 1-byte termination time."""
     if len(data) < 3:
         msg = "Establish-Connection-To-Network data too short"
         raise ValueError(msg)
@@ -393,6 +398,7 @@ def _decode_establish_connection(data: bytes) -> EstablishConnectionToNetwork:
 
 
 def _decode_disconnect_connection(data: bytes) -> DisconnectConnectionToNetwork:
+    """Decode Disconnect-Connection payload: 2-byte DNET."""
     if len(data) < 2:
         msg = "Disconnect-Connection-To-Network data too short"
         raise ValueError(msg)
@@ -401,6 +407,7 @@ def _decode_disconnect_connection(data: bytes) -> DisconnectConnectionToNetwork:
 
 
 def _decode_network_number_is(data: bytes) -> NetworkNumberIs:
+    """Decode Network-Number-Is payload: 2-byte network + 1-byte configured flag."""
     if len(data) < 3:
         msg = "Network-Number-Is data too short"
         raise ValueError(msg)

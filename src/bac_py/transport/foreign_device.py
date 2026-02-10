@@ -55,15 +55,14 @@ class ForeignDeviceManager:
     ) -> None:
         """Initialize foreign device manager.
 
-        Args:
-            bbmd_address: B/IP address of the BBMD to register with.
-            ttl: Time-to-Live in seconds for registration. The device
-                will re-register at TTL/2 intervals.
-            send_callback: Called with (raw_bytes, destination) to send
-                a UDP datagram.
-            local_address: This device's B/IP address. Required for
-                sending deregistration on stop. If ``None``, no
-                deregistration message is sent on stop.
+        :param bbmd_address: B/IP address of the BBMD to register with.
+        :param ttl: Time-to-Live in seconds for registration. The device
+            will re-register at TTL/2 intervals.
+        :param send_callback: Called with ``(raw_bytes, destination)`` to send
+            a UDP datagram.
+        :param local_address: This device's B/IP address. Required for
+            sending deregistration on stop. If ``None``, no
+            deregistration message is sent on stop.
         """
         self._bbmd_address = bbmd_address
         if ttl < 1:
@@ -129,8 +128,7 @@ class ForeignDeviceManager:
         Should be called when a BVLC-Result is received from the
         BBMD address after a registration attempt.
 
-        Args:
-            data: 2-octet result code payload.
+        :param data: 2-octet result code payload.
         """
         if len(data) < 2:
             return
@@ -163,11 +161,8 @@ class ForeignDeviceManager:
         The BBMD will distribute the NPDU to all BDT peers and other
         registered foreign devices.
 
-        Args:
-            npdu: NPDU bytes to broadcast.
-
-        Raises:
-            RuntimeError: If not registered with a BBMD.
+        :param npdu: NPDU bytes to broadcast.
+        :raises RuntimeError: If not registered with a BBMD.
         """
         if not self._registered.is_set():
             msg = "Not registered as a foreign device"

@@ -39,27 +39,24 @@ class TransportPort(Protocol):
     def on_receive(self, callback: Callable[[bytes, bytes], None]) -> None:
         """Register a callback for incoming NPDUs.
 
-        Args:
-            callback: Called with ``(npdu_bytes, source_mac)`` for each
-                received datagram.  *source_mac* is the raw MAC address
-                of the sender in the encoding native to this data-link.
+        :param callback: Called with ``(npdu_bytes, source_mac)`` for each
+            received datagram.  *source_mac* is the raw MAC address
+            of the sender in the encoding native to this data-link.
         """
         ...
 
     def send_unicast(self, npdu: bytes, mac_address: bytes) -> None:
         """Send an NPDU to a specific station.
 
-        Args:
-            npdu: Encoded NPDU bytes.
-            mac_address: Destination MAC in this port's native encoding.
+        :param npdu: Encoded NPDU bytes.
+        :param mac_address: Destination MAC in this port's native encoding.
         """
         ...
 
     def send_broadcast(self, npdu: bytes) -> None:
         """Send an NPDU as a local broadcast.
 
-        Args:
-            npdu: Encoded NPDU bytes.
+        :param npdu: Encoded NPDU bytes.
         """
         ...
 

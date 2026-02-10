@@ -95,20 +95,19 @@ class Client:
     ) -> None:
         """Create a BACnet client.
 
-        Args:
-            config: Full device configuration. If provided, other
-                keyword arguments are ignored.
-            instance_number: Device instance number (used if *config*
-                is not provided).
-            interface: IP address to bind to (used if *config*
-                is not provided).
-            port: UDP port (used if *config* is not provided).
-            bbmd_address: Optional BBMD address for foreign device
-                registration (e.g. ``"192.168.1.1"`` or
-                ``"192.168.1.1:47808"``). When set, the client
-                registers as a foreign device on startup.
-            bbmd_ttl: Registration time-to-live in seconds
-                (default 60). Only used when *bbmd_address* is set.
+        :param config: Full device configuration. If provided, other
+            keyword arguments are ignored.
+        :param instance_number: Device instance number (used if *config*
+            is not provided).
+        :param interface: IP address to bind to (used if *config*
+            is not provided).
+        :param port: UDP port (used if *config* is not provided).
+        :param bbmd_address: Optional BBMD address for foreign device
+            registration (e.g. ``"192.168.1.1"`` or
+            ``"192.168.1.1:47808"``). When set, the client
+            registers as a foreign device on startup.
+        :param bbmd_ttl: Registration time-to-live in seconds
+            (default 60). Only used when *bbmd_address* is set.
         """
         if config is None:
             config = DeviceConfig(
@@ -126,8 +125,7 @@ class Client:
     def app(self) -> BACnetApplication:
         """The underlying BACnetApplication.
 
-        Raises:
-            RuntimeError: If the client has not been started.
+        :raises RuntimeError: If the client has not been started.
         """
         if self._app is None:
             msg = "Client not started; use 'async with Client(...) as c:'"
@@ -382,15 +380,14 @@ class Client:
 
         See :meth:`~bac_py.app.client.BACnetClient.who_is`.
 
-        Args:
-            low_limit: Optional lower bound of device instance range.
-            high_limit: Optional upper bound of device instance range.
-            destination: Broadcast address. Accepts an IP string
-                (e.g. ``"192.168.1.255"``), a :class:`BACnetAddress`,
-                or ``None`` for global broadcast.
-            timeout: Seconds to wait for responses.
-            expected_count: When set, return early once this many
-                responses have been collected.
+        :param low_limit: Optional lower bound of device instance range.
+        :param high_limit: Optional upper bound of device instance range.
+        :param destination: Broadcast address. Accepts an IP string
+            (e.g. ``"192.168.1.255"``), a :class:`BACnetAddress`,
+            or ``None`` for global broadcast.
+        :param timeout: Seconds to wait for responses.
+        :param expected_count: When set, return early once this many
+            responses have been collected.
         """
         from bac_py.network.address import GLOBAL_BROADCAST, parse_address
 
@@ -420,15 +417,14 @@ class Client:
 
         See :meth:`~bac_py.app.client.BACnetClient.discover`.
 
-        Args:
-            low_limit: Optional lower bound of device instance range.
-            high_limit: Optional upper bound of device instance range.
-            destination: Broadcast address. Accepts an IP string
-                (e.g. ``"192.168.1.255"``), a :class:`BACnetAddress`,
-                or ``None`` for global broadcast.
-            timeout: Seconds to wait for responses.
-            expected_count: When set, return early once this many
-                devices have been discovered.
+        :param low_limit: Optional lower bound of device instance range.
+        :param high_limit: Optional upper bound of device instance range.
+        :param destination: Broadcast address. Accepts an IP string
+            (e.g. ``"192.168.1.255"``), a :class:`BACnetAddress`,
+            or ``None`` for global broadcast.
+        :param timeout: Seconds to wait for responses.
+        :param expected_count: When set, return early once this many
+            devices have been discovered.
         """
         from bac_py.network.address import GLOBAL_BROADCAST, parse_address
 
@@ -648,16 +644,15 @@ class Client:
 
         See :meth:`~bac_py.app.client.BACnetClient.who_has`.
 
-        Args:
-            object_identifier: Object to search for by identifier.
-            object_name: Object to search for by name.
-            low_limit: Optional lower bound of device instance range.
-            high_limit: Optional upper bound of device instance range.
-            destination: Broadcast address. Accepts an IP string,
-                a :class:`BACnetAddress`, or ``None`` for global broadcast.
-            timeout: Seconds to wait for responses.
-            expected_count: When set, return early once this many
-                responses have been collected.
+        :param object_identifier: Object to search for by identifier.
+        :param object_name: Object to search for by name.
+        :param low_limit: Optional lower bound of device instance range.
+        :param high_limit: Optional upper bound of device instance range.
+        :param destination: Broadcast address. Accepts an IP string,
+            a :class:`BACnetAddress`, or ``None`` for global broadcast.
+        :param timeout: Seconds to wait for responses.
+        :param expected_count: When set, return early once this many
+            responses have been collected.
         """
         from bac_py.network.address import GLOBAL_BROADCAST, parse_address
 
@@ -743,11 +738,8 @@ class Client:
 
         See :meth:`~bac_py.app.application.BACnetApplication.wait_for_registration`.
 
-        Args:
-            timeout: Maximum seconds to wait.
-
-        Returns:
-            ``True`` if registered, ``False`` if timeout expired.
+        :param timeout: Maximum seconds to wait.
+        :returns: ``True`` if registered, ``False`` if timeout expired.
         """
         return await self.app.wait_for_registration(timeout)
 
@@ -811,13 +803,12 @@ class Client:
 
         See :meth:`~bac_py.app.client.BACnetClient.who_is_router_to_network`.
 
-        Args:
-            network: Optional specific network to query. If ``None``,
-                discovers all reachable networks.
-            destination: Target for the query. Accepts an IP string,
-                a :class:`BACnetAddress`, or ``None`` for local
-                broadcast.
-            timeout: Seconds to wait for responses.
+        :param network: Optional specific network to query. If ``None``,
+            discovers all reachable networks.
+        :param destination: Target for the query. Accepts an IP string,
+            a :class:`BACnetAddress`, or ``None`` for local
+            broadcast.
+        :param timeout: Seconds to wait for responses.
         """
         return await self._require_client().who_is_router_to_network(
             network=network, destination=destination, timeout=timeout

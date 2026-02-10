@@ -22,7 +22,6 @@ release = version
 
 extensions = [
     "sphinx.ext.autodoc",
-    "sphinx.ext.napoleon",
     "sphinx.ext.intersphinx",
     "sphinx.ext.viewcode",
     "sphinx_autodoc_typehints",
@@ -31,15 +30,6 @@ extensions = [
 master_doc = "index"
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 language = "en"
-
-# -- Napoleon (Google-style docstrings) --------------------------------------
-
-napoleon_google_docstring = True
-napoleon_numpy_docstring = False
-napoleon_include_init_with_doc = False
-napoleon_use_param = True
-napoleon_use_rtype = True
-napoleon_preprocess_types = True
 
 # -- Autodoc -----------------------------------------------------------------
 
@@ -69,3 +59,11 @@ intersphinx_mapping = {
 html_theme = "furo"
 html_static_path = ["_static"]
 html_title = f"bac-py {version}"
+
+# -- Warnings ----------------------------------------------------------------
+# BACnetAddress exists in both bac_py.network.address and
+# bac_py.types.constructed (different domain types with the same name).
+# Suppress ambiguous cross-reference warnings from autodoc resolving the
+# unqualified name.
+
+suppress_warnings = ["ref.python"]

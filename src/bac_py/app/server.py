@@ -78,13 +78,10 @@ logger = logging.getLogger(__name__)
 
 
 def _bitstring_from_bits(bit_positions: set[int]) -> BitString:
-    """Build a BitString with specified bit positions set to 1.
+    """Build a :class:`BitString` with specified bit positions set to ``1``.
 
-    Args:
-        bit_positions: Set of bit indices (0-based, MSB-first) to set.
-
-    Returns:
-        BitString with the specified bits set.
+    :param bit_positions: Set of bit indices (0-based, MSB-first) to set.
+    :returns: :class:`BitString` with the specified bits set.
     """
     if not bit_positions:
         return BitString(b"\x00", 0)
@@ -103,12 +100,11 @@ def _encode_property_value(value: Any, obj_type: ObjectType | None = None) -> by
     """Encode a property value to application-tagged bytes.
 
     Thin wrapper around ``encode_property_value`` that converts
-    TypeError to BACnetError for the server error response path.
+    ``TypeError`` to :class:`BACnetError` for the server error response path.
 
-    Args:
-        value: The value to encode.
-        obj_type: Optional object type. When the object is an analog type,
-            integers are encoded as Real instead of Unsigned.
+    :param value: The value to encode.
+    :param obj_type: Optional object type. When the object is an analog type,
+        integers are encoded as Real instead of Unsigned.
     """
     try:
         return encode_property_value(
@@ -134,12 +130,11 @@ class DefaultServerHandlers:
     ) -> None:
         """Initialise default server handlers.
 
-        Args:
-            app: The parent application (used for service registration
-                and sending unconfirmed responses).
-            object_db: Object database to serve property reads/writes from.
-            device: The local device object (used for Who-Is matching
-                and wildcard resolution).
+        :param app: The parent application (used for service registration
+            and sending unconfirmed responses).
+        :param object_db: Object database to serve property reads/writes from.
+        :param device: The local device object (used for Who-Is matching
+            and wildcard resolution).
         """
         self._app = app
         self._db = object_db
@@ -252,34 +247,28 @@ class DefaultServerHandlers:
         """Handle ReadProperty-Request per Clause 15.5.
 
         Decodes the request, looks up the object and property in the
-        database, and returns the encoded ReadPropertyACK.
+        database, and returns the encoded :class:`ReadPropertyACK`.
 
-        Returns:
-            Encoded ReadProperty-ACK service data.
-
-        Raises:
-            BACnetError: If the object or property is not found.
+        :returns: Encoded ReadProperty-ACK service data.
+        :raises BACnetError: If the object or property is not found.
         """
         request = ReadPropertyRequest.decode(data)
 
         obj_id = self._resolve_object_id(request.object_identifier)
 
-        # Look up the object
         obj = self._db.get(obj_id)
         if obj is None:
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
 
-        # Read the property value (may raise BACnetError)
+        # May raise BACnetError for unknown/unsupported properties
         value = self._read_object_property(
             obj,
             request.property_identifier,
             request.property_array_index,
         )
 
-        # Encode the value to application-tagged bytes
         encoded_value = _encode_property_value(value, obj_id.object_type)
 
-        # Build and encode the ACK
         ack = ReadPropertyACK(
             object_identifier=obj_id,
             property_identifier=request.property_identifier,
@@ -297,33 +286,28 @@ class DefaultServerHandlers:
         """Handle WriteProperty-Request per Clause 15.9.
 
         Decodes the request, looks up the object in the database,
-        and writes the property value. Returns None for SimpleACK.
+        and writes the property value. Returns ``None`` for SimpleACK.
 
-        Returns:
-            None (SimpleACK response).
-
-        Raises:
-            BACnetError: If the object or property is not found,
-                or the write is not permitted.
+        :returns: ``None`` (SimpleACK response).
+        :raises BACnetError: If the object or property is not found,
+            or the write is not permitted.
         """
         request = WritePropertyRequest.decode(data)
 
         obj_id = self._resolve_object_id(request.object_identifier)
 
-        # Look up the object
         obj = self._db.get(obj_id)
         if obj is None:
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
 
-        # Decode the raw application-tagged bytes to native Python types
-        # before storing.  This mirrors the C reference library behavior
+        # Decode raw application-tagged bytes to native Python types
+        # before storing -- mirrors the C reference library behavior
         # where incoming values are decoded before being applied.
         try:
             write_value = decode_and_unwrap(request.property_value)
         except (ValueError, IndexError):
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.INVALID_DATA_TYPE) from None
 
-        # Write the property value (may raise BACnetError)
         await obj.async_write_property(
             request.property_identifier,
             write_value,
@@ -331,7 +315,6 @@ class DefaultServerHandlers:
             request.property_array_index,
         )
 
-        # Trigger COV notification checks after successful write
         cov_manager = self._app.cov_manager
         if cov_manager is not None:
             cov_manager.check_and_notify(obj, request.property_identifier)
@@ -346,11 +329,10 @@ class DefaultServerHandlers:
     ) -> bytes | None:
         """Handle SubscribeCOV-Request per Clause 13.14.
 
-        Returns None (SimpleACK) on success.
+        Returns ``None`` (SimpleACK) on success.
 
-        Raises:
-            BACnetError: If the monitored object does not exist or
-                COV is not supported.
+        :raises BACnetError: If the monitored object does not exist or
+            COV is not supported.
         """
         request = SubscribeCOVRequest.decode(data)
         obj_id = self._resolve_object_id(request.monitored_object_identifier)
@@ -423,6 +405,13 @@ class DefaultServerHandlers:
         Intercepts OBJECT_LIST reads on the device to return the live
         database object list, and ACTIVE_COV_SUBSCRIPTIONS to return
         the current COV subscriptions from the COV manager.
+
+        :param obj: The BACnet object to read from.
+        :param prop_id: Property identifier to read.
+        :param array_index: Optional array index for array properties.
+        :returns: The property value (type varies by property).
+        :raises BACnetError: If the property is not found or the array
+            index is out of range.
         """
         if obj.object_identifier == self._device.object_identifier:
             if prop_id == PropertyIdentifier.OBJECT_LIST:
@@ -442,7 +431,12 @@ class DefaultServerHandlers:
         return obj.read_property(prop_id, array_index)
 
     def _resolve_object_id(self, obj_id: ObjectIdentifier) -> ObjectIdentifier:
-        """Resolve wildcard device instance 4194303 to local device."""
+        """Resolve wildcard device instance ``4194303`` to the local device.
+
+        :param obj_id: Object identifier to resolve.
+        :returns: The resolved :class:`ObjectIdentifier`, substituting the
+            local device identifier when a wildcard is used.
+        """
         if obj_id.object_type == ObjectType.DEVICE and obj_id.instance_number == 0x3FFFFF:
             return self._device.object_identifier
         return obj_id
@@ -457,6 +451,11 @@ class DefaultServerHandlers:
         Per Clause 15.7.3.2, the special property identifiers ALL, REQUIRED,
         and OPTIONAL cause the server to expand the request to include
         all/required/optional properties of the object.
+
+        :param obj: The BACnet object whose property definitions are used.
+        :param refs: List of property references, possibly containing
+            special identifiers.
+        :returns: Expanded list of concrete :class:`PropertyReference` instances.
         """
         result: list[PropertyReference] = []
         for ref in refs:
@@ -493,8 +492,7 @@ class DefaultServerHandlers:
         Supports ALL, REQUIRED, and OPTIONAL special property identifiers
         per Clause 15.7.3.2.
 
-        Returns:
-            Encoded ReadPropertyMultiple-ACK service data.
+        :returns: Encoded ReadPropertyMultiple-ACK service data.
         """
         request = ReadPropertyMultipleRequest.decode(data)
 
@@ -569,11 +567,8 @@ class DefaultServerHandlers:
         first, then applies them. Either all writes succeed or none
         are applied.
 
-        Returns:
-            None (SimpleACK response) on full success.
-
-        Raises:
-            BACnetError: On first validation or write failure.
+        :returns: ``None`` (SimpleACK response) on full success.
+        :raises BACnetError: On first validation or write failure.
         """
         from bac_py.objects.base import PropertyAccess
 
@@ -624,11 +619,8 @@ class DefaultServerHandlers:
         Decodes the request, reads the list/array property, applies
         the range qualifier, and returns the encoded ReadRange-ACK.
 
-        Returns:
-            Encoded ReadRange-ACK service data.
-
-        Raises:
-            BACnetError: If the object or property is not found.
+        :returns: Encoded ReadRange-ACK service data.
+        :raises BACnetError: If the object or property is not found.
         """
         request = ReadRangeRequest.decode(data)
 
@@ -637,7 +629,6 @@ class DefaultServerHandlers:
         if obj is None:
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
 
-        # Read the full property value
         value = self._read_object_property(
             obj,
             request.property_identifier,
@@ -668,7 +659,6 @@ class DefaultServerHandlers:
             is_first = True
             is_last = True
 
-        # Encode items
         buf = bytearray()
         for item in items:
             buf.extend(_encode_property_value(item, obj_id.object_type))
@@ -695,8 +685,7 @@ class DefaultServerHandlers:
     def _validate_password(self, request_password: str | None) -> None:
         """Validate a request password against the configured device password.
 
-        Raises:
-            BACnetError: If the password does not match or is unexpected.
+        :raises BACnetError: If the password does not match or is unexpected.
         """
         config_password = self._app.config.password
         if config_password is not None:
@@ -717,11 +706,8 @@ class DefaultServerHandlers:
         Sets the application DCC state and optionally starts a timer
         to auto-re-enable after the specified duration.
 
-        Returns:
-            None (SimpleACK response).
-
-        Raises:
-            BACnetError: If the password does not match (Clause 16.1.3.1).
+        :returns: ``None`` (SimpleACK response).
+        :raises BACnetError: If the password does not match (Clause 16.1.3.1).
         """
         request = DeviceCommunicationControlRequest.decode(data)
 
@@ -747,11 +733,8 @@ class DefaultServerHandlers:
         Logs the reinitialize request. Does not actually restart
         the device in this implementation.
 
-        Returns:
-            None (SimpleACK response).
-
-        Raises:
-            BACnetError: If the password does not match (Clause 16.4.3.4).
+        :returns: ``None`` (SimpleACK response).
+        :raises BACnetError: If the password does not match (Clause 16.4.3.4).
         """
         request = ReinitializeDeviceRequest.decode(data)
 
@@ -810,11 +793,9 @@ class DefaultServerHandlers:
     ) -> bytes:
         """Handle AtomicReadFile-Request per Clause 14.1.
 
-        Returns:
-            Encoded AtomicReadFile-ACK service data.
-
-        Raises:
-            BACnetError: If the object is not found or is not a File object.
+        :returns: Encoded AtomicReadFile-ACK service data.
+        :raises BACnetError: If the object is not found or is not a
+            :class:`FileObject`.
         """
         request = AtomicReadFileRequest.decode(data)
         obj_id = self._resolve_object_id(request.file_identifier)
@@ -860,11 +841,9 @@ class DefaultServerHandlers:
     ) -> bytes:
         """Handle AtomicWriteFile-Request per Clause 14.2.
 
-        Returns:
-            Encoded AtomicWriteFile-ACK service data.
-
-        Raises:
-            BACnetError: If the object is not found or is not a File object.
+        :returns: Encoded AtomicWriteFile-ACK service data.
+        :raises BACnetError: If the object is not found or is not a
+            :class:`FileObject`.
         """
         request = AtomicWriteFileRequest.decode(data)
         obj_id = self._resolve_object_id(request.file_identifier)
@@ -902,12 +881,9 @@ class DefaultServerHandlers:
         Creates a new object in the database and returns the
         encoded object identifier.
 
-        Returns:
-            Encoded APPLICATION-tagged ObjectIdentifier.
-
-        Raises:
-            BACnetError: If the object type is unsupported or the
-                object identifier already exists.
+        :returns: Encoded APPLICATION-tagged :class:`ObjectIdentifier`.
+        :raises BACnetError: If the object type is unsupported or the
+            object identifier already exists.
         """
         request = CreateObjectRequest.decode(data)
 
@@ -925,7 +901,6 @@ class DefaultServerHandlers:
         else:
             raise BACnetError(ErrorClass.SERVICES, ErrorCode.MISSING_REQUIRED_PARAMETER)
 
-        # Build initial properties from the request
         kwargs: dict[str, Any] = {}
         if request.list_of_initial_values:
             for pv in request.list_of_initial_values:
@@ -947,17 +922,13 @@ class DefaultServerHandlers:
 
         Removes the object from the database.
 
-        Returns:
-            None (SimpleACK response).
-
-        Raises:
-            BACnetError: If the object doesn't exist or is a Device object.
+        :returns: ``None`` (SimpleACK response).
+        :raises BACnetError: If the object does not exist or is a Device object.
         """
         request = DeleteObjectRequest.decode(data)
         obj_id = self._resolve_object_id(request.object_identifier)
         self._db.remove(obj_id)
 
-        # Clean up any COV subscriptions for the deleted object
         cov_manager = self._app.cov_manager
         if cov_manager is not None:
             cov_manager.remove_object_subscriptions(obj_id)
@@ -972,9 +943,8 @@ class DefaultServerHandlers:
     ) -> bytes | None:
         """Handle AddListElement-Request per Clause 15.1.
 
-        Raises:
-            BACnetError: If the object or property is not found,
-                or list manipulation is not supported.
+        :raises BACnetError: If the object or property is not found,
+            or list manipulation is not supported.
         """
         request = AddListElementRequest.decode(data)
         obj_id = self._resolve_object_id(request.object_identifier)
@@ -997,9 +967,8 @@ class DefaultServerHandlers:
     ) -> bytes | None:
         """Handle RemoveListElement-Request per Clause 15.2.
 
-        Raises:
-            BACnetError: If the object or property is not found,
-                or list manipulation is not supported.
+        :raises BACnetError: If the object or property is not found,
+            or list manipulation is not supported.
         """
         request = RemoveListElementRequest.decode(data)
         obj_id = self._resolve_object_id(request.object_identifier)
@@ -1038,7 +1007,6 @@ class DefaultServerHandlers:
         ):
             return
 
-        # Search for the object
         found_obj = None
         if request.object_identifier is not None:
             found_obj = self._db.get(request.object_identifier)

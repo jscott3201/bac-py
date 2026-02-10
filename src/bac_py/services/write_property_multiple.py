@@ -30,7 +30,10 @@ class WriteAccessSpecification:
     list_of_properties: list[BACnetPropertyValue]
 
     def encode(self) -> bytes:
-        """Encode write access specification."""
+        """Encode this write access specification as context-tagged bytes.
+
+        :returns: Encoded write access specification bytes.
+        """
         buf = bytearray()
         # [0] object-identifier
         buf.extend(encode_context_object_id(0, self.object_identifier))
@@ -43,10 +46,11 @@ class WriteAccessSpecification:
 
     @classmethod
     def decode(cls, data: memoryview | bytes, offset: int) -> tuple[WriteAccessSpecification, int]:
-        """Decode write access specification from buffer at offset.
+        """Decode a write access specification from a buffer at the given offset.
 
-        Returns:
-            Tuple of (WriteAccessSpecification, new offset).
+        :param data: Raw bytes containing encoded write access specification data.
+        :param offset: Byte offset to start decoding from.
+        :returns: Tuple of (:class:`WriteAccessSpecification`, new offset).
         """
         data = as_memoryview(data)
 
@@ -89,7 +93,10 @@ class WritePropertyMultipleRequest:
     list_of_write_access_specs: list[WriteAccessSpecification]
 
     def encode(self) -> bytes:
-        """Encode WritePropertyMultiple-Request service parameters."""
+        """Encode WritePropertyMultiple-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         for spec in self.list_of_write_access_specs:
             buf.extend(spec.encode())
@@ -97,7 +104,11 @@ class WritePropertyMultipleRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> WritePropertyMultipleRequest:
-        """Decode WritePropertyMultiple-Request from service request bytes."""
+        """Decode WritePropertyMultiple-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`WritePropertyMultipleRequest`.
+        """
         data = as_memoryview(data)
 
         offset = 0

@@ -44,6 +44,10 @@ class WhoHasRequest:
     high_limit: int | None = None
 
     def __post_init__(self) -> None:
+        """Validate that exactly one of object_identifier or object_name is set.
+
+        :raises ValueError: If both or neither are provided.
+        """
         both_set = self.object_identifier is not None and self.object_name is not None
         neither_set = self.object_identifier is None and self.object_name is None
         if both_set or neither_set:
@@ -51,7 +55,10 @@ class WhoHasRequest:
             raise ValueError(msg)
 
     def encode(self) -> bytes:
-        """Encode WhoHasRequest to bytes."""
+        """Encode Who-Has-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         # Optional limits
         if self.low_limit is not None and self.high_limit is not None:
@@ -66,7 +73,11 @@ class WhoHasRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> WhoHasRequest:
-        """Decode WhoHasRequest from bytes."""
+        """Decode Who-Has-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`WhoHasRequest`.
+        """
         data = as_memoryview(data)
 
         offset = 0
@@ -123,7 +134,10 @@ class IHaveRequest:
     object_name: str
 
     def encode(self) -> bytes:
-        """Encode IHaveRequest to bytes."""
+        """Encode I-Have-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         buf.extend(
             encode_application_object_id(
@@ -142,7 +156,11 @@ class IHaveRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> IHaveRequest:
-        """Decode IHaveRequest from bytes."""
+        """Decode I-Have-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`IHaveRequest`.
+        """
         data = as_memoryview(data)
 
         offset = 0

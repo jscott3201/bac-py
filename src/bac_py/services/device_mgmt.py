@@ -47,7 +47,10 @@ class DeviceCommunicationControlRequest:
     password: str | None = None
 
     def encode(self) -> bytes:
-        """Encode DeviceCommunicationControl-Request to bytes."""
+        """Encode DeviceCommunicationControl-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         # [0] timeDuration (optional)
         if self.time_duration is not None:
@@ -61,7 +64,12 @@ class DeviceCommunicationControlRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> DeviceCommunicationControlRequest:
-        """Decode DeviceCommunicationControl-Request from bytes."""
+        """Decode DeviceCommunicationControl-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`DeviceCommunicationControlRequest`.
+        :raises BACnetRejectError: If a parameter is out of range.
+        """
         data = as_memoryview(data)
 
         offset = 0
@@ -109,7 +117,10 @@ class ReinitializeDeviceRequest:
     password: str | None = None
 
     def encode(self) -> bytes:
-        """Encode ReinitializeDevice-Request to bytes."""
+        """Encode ReinitializeDevice-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         # [0] reinitializedStateOfDevice
         buf.extend(encode_context_tagged(0, encode_enumerated(self.reinitialized_state)))
@@ -120,7 +131,12 @@ class ReinitializeDeviceRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> ReinitializeDeviceRequest:
-        """Decode ReinitializeDevice-Request from bytes."""
+        """Decode ReinitializeDevice-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded :class:`ReinitializeDeviceRequest`.
+        :raises BACnetRejectError: If the password is out of range.
+        """
         data = as_memoryview(data)
 
         offset = 0
@@ -161,7 +177,10 @@ class TimeSynchronizationRequest:
     time: BACnetTime
 
     def encode(self) -> bytes:
-        """Encode TimeSynchronization-Request to bytes."""
+        """Encode TimeSynchronization-Request service parameters.
+
+        :returns: Encoded service request bytes.
+        """
         buf = bytearray()
         buf.extend(encode_application_date(self.date))
         buf.extend(encode_application_time(self.time))
@@ -169,7 +188,11 @@ class TimeSynchronizationRequest:
 
     @classmethod
     def decode(cls, data: memoryview | bytes) -> Self:
-        """Decode TimeSynchronization-Request from bytes."""
+        """Decode TimeSynchronization-Request from service request bytes.
+
+        :param data: Raw service request bytes.
+        :returns: Decoded request instance.
+        """
         data = as_memoryview(data)
 
         offset = 0
