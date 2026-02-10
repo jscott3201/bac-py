@@ -1,4 +1,4 @@
-.PHONY: lint typecheck test docs check fix format
+.PHONY: lint typecheck test docs check fix format coverage coverage-html
 
 lint:
 	uv run ruff check src/ tests/
@@ -21,3 +21,9 @@ fix:
 
 format:
 	uv run ruff format src/ tests/
+
+coverage:
+	uv run pytest --cov --cov-report=term-missing
+
+coverage-html:
+	uv run pytest --cov --cov-report=html

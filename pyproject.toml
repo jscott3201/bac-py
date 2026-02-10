@@ -41,7 +41,7 @@ Documentation = "https://jscott3201.github.io/bac-py"
 Issues = "https://github.com/jscott3201/bac-py/issues"
 
 [dependency-groups]
-test = ["pytest>=8.0", "pytest-asyncio>=0.24", "coverage>=7.0"]
+test = ["pytest>=8.0", "pytest-asyncio>=0.24", "pytest-cov>=6.0", "coverage>=7.0"]
 lint = ["ruff>=0.8"]
 type-check = ["mypy>=1.13"]
 docs = ["sphinx>=8.0", "furo>=2024.8", "sphinx-autodoc-typehints>=2.0"]
@@ -65,6 +65,7 @@ packages = ["src/bac_py"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = ["integration: marks tests requiring network or external resources"]
 
 [tool.mypy]
 python_version = "3.13"
@@ -100,3 +101,11 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["D"] # don't require docstrings in tests
+
+[tool.coverage.run]
+source = ["src/bac_py"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+exclude_lines = ["pragma: no cover", "if TYPE_CHECKING:", "if __name__"]

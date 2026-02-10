@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import enum
 import logging
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeVar
 
@@ -76,12 +75,15 @@ from bac_py.types.enums import (
     Segmentation,
     UnconfirmedServiceChoice,
 )
-from bac_py.types.primitives import BACnetDate, BACnetTime, ObjectIdentifier
 from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
+from bac_py.types.primitives import BACnetDate, BACnetTime, ObjectIdentifier
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from bac_py.app.application import BACnetApplication
     from bac_py.network.address import BACnetAddress
+    from bac_py.transport.bip import BIPTransport
 
 logger = logging.getLogger(__name__)
 
@@ -647,10 +649,13 @@ class BACnetClient:
 
         Example::
 
-            await client.write_multiple("192.168.1.100", {
-                "av,1": {"pv": 72.5},
-                "bo,1": {"pv": 1},
-            })
+            await client.write_multiple(
+                "192.168.1.100",
+                {
+                    "av,1": {"pv": 72.5},
+                    "bo,1": {"pv": 1},
+                },
+            )
         """
         from bac_py.services.common import BACnetPropertyValue
 
@@ -788,9 +793,13 @@ class BACnetClient:
                 values = decode_cov_values(notification)
                 print(f"COV from {source}: {values}")
 
+
             await client.subscribe_cov_ex(
-                "192.168.1.100", "ai,1",
-                process_id=1, callback=on_change, lifetime=3600,
+                "192.168.1.100",
+                "ai,1",
+                process_id=1,
+                callback=on_change,
+                lifetime=3600,
             )
         """
         addr = parse_address(address)
@@ -915,9 +924,7 @@ class BACnetClient:
             List of decoded response objects.
         """
         results: list[_T] = []
-        done_event: asyncio.Event | None = (
-            asyncio.Event() if expected_count is not None else None
-        )
+        done_event: asyncio.Event | None = asyncio.Event() if expected_count is not None else None
 
         def _on_response(service_data: bytes, source: BACnetAddress) -> None:
             try:
@@ -995,7 +1002,7 @@ class BACnetClient:
         timeout: float = 3.0,
         expected_count: int | None = None,
     ) -> list[DiscoveredDevice]:
-        """Discover devices via Who-Is and return enriched results.
+        r"""Discover devices via Who-Is and return enriched results.
 
         Convenience wrapper around :meth:`who_is` that captures the
         source address of each I-Am response and returns
@@ -1005,7 +1012,8 @@ class BACnetClient:
         router, pass a remote broadcast ``BACnetAddress``::
 
             from bac_py.network.address import BACnetAddress
-            remote = BACnetAddress(network=2, mac_address=b'\\xff\\xff\\xff\\xff')
+
+            remote = BACnetAddress(network=2, mac_address=b"\\xff\\xff\\xff\\xff")
             devices = await client.discover(destination=remote, timeout=5.0)
 
         When using the :class:`~bac_py.client.Client` wrapper, you can
@@ -1576,10 +1584,7 @@ class BACnetClient:
                 NetworkMessageType.I_AM_ROUTER_TO_NETWORK, on_i_am_router
             )
 
-        return [
-            RouterInfo(address=addr, networks=nets)
-            for addr, nets in router_map.items()
-        ]
+        return [RouterInfo(address=addr, networks=nets) for addr, nets in router_map.items()]
 
     # --- Private transfer ---
 
@@ -1650,9 +1655,9 @@ class BACnetClient:
 
     # --- BBMD table management ---
 
-    def _require_transport(self):  # noqa: ANN202
+    def _require_transport(self) -> BIPTransport:
         """Return the primary BIPTransport or raise if unavailable."""
-        transport = self._app._transport  # noqa: SLF001
+        transport = self._app._transport
         if transport is None:
             msg = "Transport not available (application not started or in router mode)"
             raise RuntimeError(msg)
@@ -1678,7 +1683,7 @@ class BACnetClient:
             TimeoutError: If no response within *timeout*.
         """
         transport = self._require_transport()
-        bip_addr = self._app._parse_bip_address(  # noqa: SLF001
+        bip_addr = self._app._parse_bip_address(
             bbmd_address if isinstance(bbmd_address, str) else str(bbmd_address)
         )
         entries = await transport.read_bdt(bip_addr, timeout=timeout)
@@ -1710,7 +1715,7 @@ class BACnetClient:
             TimeoutError: If no response within *timeout*.
         """
         transport = self._require_transport()
-        bip_addr = self._app._parse_bip_address(  # noqa: SLF001
+        bip_addr = self._app._parse_bip_address(
             bbmd_address if isinstance(bbmd_address, str) else str(bbmd_address)
         )
         entries = await transport.read_fdt(bip_addr, timeout=timeout)
@@ -1746,16 +1751,14 @@ class BACnetClient:
         from bac_py.types.enums import BvlcResultCode
 
         transport = self._require_transport()
-        bip_addr = self._app._parse_bip_address(  # noqa: SLF001
+        bip_addr = self._app._parse_bip_address(
             bbmd_address if isinstance(bbmd_address, str) else str(bbmd_address)
         )
         bdt_entries = []
         for info in entries:
-            entry_addr = self._app._parse_bip_address(info.address)  # noqa: SLF001
+            entry_addr = self._app._parse_bip_address(info.address)
             mask_parts = [int(x) for x in info.mask.split(".")]
-            bdt_entries.append(
-                BDTEntry(address=entry_addr, broadcast_mask=bytes(mask_parts))
-            )
+            bdt_entries.append(BDTEntry(address=entry_addr, broadcast_mask=bytes(mask_parts)))
         result = await transport.write_bdt(bip_addr, bdt_entries, timeout=timeout)
         if result != BvlcResultCode.SUCCESSFUL_COMPLETION:
             msg = f"BBMD rejected Write-BDT: {result.name}"
@@ -1784,13 +1787,11 @@ class BACnetClient:
         from bac_py.types.enums import BvlcResultCode
 
         transport = self._require_transport()
-        bip_bbmd = self._app._parse_bip_address(  # noqa: SLF001
+        bip_bbmd = self._app._parse_bip_address(
             bbmd_address if isinstance(bbmd_address, str) else str(bbmd_address)
         )
-        bip_entry = self._app._parse_bip_address(entry_address)  # noqa: SLF001
-        result = await transport.delete_fdt_entry(
-            bip_bbmd, bip_entry, timeout=timeout
-        )
+        bip_entry = self._app._parse_bip_address(entry_address)
+        result = await transport.delete_fdt_entry(bip_bbmd, bip_entry, timeout=timeout)
         if result != BvlcResultCode.SUCCESSFUL_COMPLETION:
             msg = f"BBMD rejected Delete-FDT-Entry: {result.name}"
             raise RuntimeError(msg)

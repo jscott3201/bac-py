@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
 import pytest
 
@@ -11,31 +12,13 @@ from bac_py.transport.bvll import decode_bvll
 from bac_py.transport.foreign_device import ForeignDeviceManager
 from bac_py.types.enums import BvlcFunction, BvlcResultCode
 
+if TYPE_CHECKING:
+    from tests.transport.conftest import SentCollector
+
 # --- Fixtures ---
 
 BBMD_ADDR = BIPAddress(host="192.168.1.1", port=47808)
 LOCAL_ADDR = BIPAddress(host="10.0.0.50", port=47808)
-
-
-class SentCollector:
-    """Collects sent messages for test assertions."""
-
-    def __init__(self) -> None:
-        self.sent: list[tuple[bytes, BIPAddress]] = []
-
-    def send(self, data: bytes, dest: BIPAddress) -> None:
-        self.sent.append((data, dest))
-
-    def clear(self) -> None:
-        self.sent.clear()
-
-    def find_sent_to(self, dest: BIPAddress) -> list[bytes]:
-        return [data for data, d in self.sent if d == dest]
-
-
-@pytest.fixture
-def collector() -> SentCollector:
-    return SentCollector()
 
 
 @pytest.fixture
@@ -258,9 +241,7 @@ class TestDeregistrationOnStop:
         assert len(deregistrations) == 0
 
     @pytest.mark.asyncio
-    async def test_stop_no_deregistration_without_local_address(
-        self, collector: SentCollector
-    ):
+    async def test_stop_no_deregistration_without_local_address(self, collector: SentCollector):
         """F2: stop() skips deregistration when no local_address is set."""
         fd_mgr = ForeignDeviceManager(
             bbmd_address=BBMD_ADDR,

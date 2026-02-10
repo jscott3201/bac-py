@@ -499,8 +499,9 @@ class TestNoBBMDFallback:
 
 
 class TestSelfMessageDrop:
-    """F6: Datagrams whose UDP source matches the local address should
-    be silently dropped.  This prevents processing our own broadcasts
+    """F6: Datagrams whose UDP source matches the local address should be dropped.
+
+    This prevents processing our own broadcasts
     echoed back by the OS or wire re-broadcasts from the BBMD.
     """
 
@@ -581,8 +582,9 @@ class TestUDPSourceForwarding:
 
     @pytest.mark.asyncio
     async def test_forwarded_npdu_passes_udp_source(self):
-        """When receiving a Forwarded-NPDU, the UDP peer address is
-        passed to the BBMD so it can check the BDT mask.
+        """When receiving a Forwarded-NPDU, the UDP peer address is passed to the BBMD.
+
+        This allows it to check the BDT mask.
         """
         transport, mock_udp = _make_transport_with_mock_udp()
         received: list[tuple[bytes, bytes]] = []

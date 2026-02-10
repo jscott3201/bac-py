@@ -45,7 +45,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from bac_py.app.tsm import ServerTransaction
-    from bac_py.network.address import BACnetAddress
+    from bac_py.network.address import BACnetAddress, BIPAddress
     from bac_py.transport.bbmd import BDTEntry
 
 logger = logging.getLogger(__name__)
@@ -440,12 +440,12 @@ class BACnetApplication:
 
         Accepts ``"host:port"`` or ``"host"`` (default port 47808).
         """
-        from bac_py.network.address import BIPAddress as BIP
+        from bac_py.network.address import BIPAddress as _BIPAddress
 
         if ":" in address:
             host, port_str = address.rsplit(":", 1)
-            return BIP(host=host, port=int(port_str))
-        return BIP(host=address, port=0xBAC0)
+            return _BIPAddress(host=host, port=int(port_str))
+        return _BIPAddress(host=address, port=0xBAC0)
 
     async def register_as_foreign_device(
         self,
@@ -493,7 +493,7 @@ class BACnetApplication:
             msg = "Not registered as a foreign device"
             raise RuntimeError(msg)
         await self._transport.foreign_device.stop()
-        self._transport._foreign_device = None  # noqa: SLF001
+        self._transport._foreign_device = None
 
     @property
     def is_foreign_device(self) -> bool:
@@ -538,7 +538,7 @@ class BACnetApplication:
             return False
         fd = self._transport.foreign_device
         try:
-            await asyncio.wait_for(fd._registered.wait(), timeout)  # noqa: SLF001
+            await asyncio.wait_for(fd._registered.wait(), timeout)
         except TimeoutError:
             return False
         return fd.is_registered
@@ -570,7 +570,7 @@ class BACnetApplication:
     def register_network_message_handler(
         self,
         message_type: int,
-        handler: object,
+        handler: Callable[..., None],
     ) -> None:
         """Register a handler for incoming network-layer messages.
 
@@ -590,7 +590,7 @@ class BACnetApplication:
     def unregister_network_message_handler(
         self,
         message_type: int,
-        handler: object,
+        handler: Callable[..., None],
     ) -> None:
         """Remove a network-layer message handler.
 

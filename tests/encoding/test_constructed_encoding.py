@@ -68,7 +68,7 @@ class TestDateTimeEncoding:
         tag1, off1 = decode_tag(result, 0)
         assert tag1.cls == TagClass.APPLICATION
         assert tag1.number == 10  # Date
-        tag2, off2 = decode_tag(result, off1 + tag1.length)
+        tag2, _off2 = decode_tag(result, off1 + tag1.length)
         assert tag2.cls == TagClass.APPLICATION
         assert tag2.number == 11  # Time
 
@@ -95,7 +95,7 @@ class TestDateRangeEncoding:
         # Two application-tagged dates
         tag1, off1 = decode_tag(result, 0)
         assert tag1.number == 10
-        tag2, off2 = decode_tag(result, off1 + tag1.length)
+        tag2, _off2 = decode_tag(result, off1 + tag1.length)
         assert tag2.number == 10
 
 
@@ -108,7 +108,7 @@ class TestWeekNDayEncoding:
         result = encode_property_value(wnd)
         assert isinstance(result, bytes)
         # Should be an octet string (tag 6) with 3 bytes
-        tag, off = decode_tag(result, 0)
+        tag, _off = decode_tag(result, 0)
         assert tag.number == 6  # Octet String
         assert tag.length == 3
 
@@ -173,7 +173,7 @@ class TestTimeValueEncoding:
         result = encode_property_value(tv)
         assert isinstance(result, bytes)
         # First should be Time tag (11)
-        tag, off = decode_tag(result, 0)
+        tag, _off = decode_tag(result, 0)
         assert tag.number == 11
 
     def test_with_null_value(self):
@@ -298,7 +298,7 @@ class TestBACnetAddressEncoding:
         )
         result = encode_property_value(addr)
         assert isinstance(result, bytes)
-        tag0, off0 = decode_tag(result, 0)
+        tag0, _off0 = decode_tag(result, 0)
         assert tag0.cls == TagClass.CONTEXT
         assert tag0.number == 0
 
@@ -520,7 +520,7 @@ class TestPriorityArrayEncoding:
         # Parse through, find the non-null values
         offset = 0
         values_found = []
-        for i in range(16):
+        for _i in range(16):
             tag, off = decode_tag(result, offset)
             if tag.number == 0:  # Null
                 values_found.append(None)

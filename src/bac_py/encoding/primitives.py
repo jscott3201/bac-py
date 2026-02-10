@@ -721,13 +721,13 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
         return encode_property_value(value.value, int_as_real=int_as_real)
 
     if isinstance(value, BACnetPriorityArray):
-        buf = bytearray()
+        parts: list[bytes] = []
         for slot in value.slots:
             if slot.value is None:
-                buf.extend(encode_application_null())
+                parts.append(encode_application_null())
             else:
-                buf.extend(encode_property_value(slot.value, int_as_real=int_as_real))
-        return bytes(buf)
+                parts.append(encode_property_value(slot.value, int_as_real=int_as_real))
+        return b"".join(parts)
 
     # --- Primitive types ---
 
@@ -758,10 +758,10 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
         # Already-encoded application-tagged bytes (pass-through)
         return value
     if isinstance(value, list):
-        buf = bytearray()
+        list_parts: list[bytes] = []
         for item in value:
-            buf.extend(encode_property_value(item, int_as_real=int_as_real))
-        return bytes(buf)
+            list_parts.append(encode_property_value(item, int_as_real=int_as_real))
+        return b"".join(list_parts)
 
     msg = f"Cannot encode value of type {type(value).__name__}"
     raise TypeError(msg)
@@ -769,23 +769,25 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
 
 def _encode_calendar_entry(entry: object) -> bytes:
     """Encode a BACnetCalendarEntry CHOICE with context tags."""
-    from bac_py.types.constructed import BACnetCalendarEntry
+    from bac_py.types.constructed import BACnetCalendarEntry, BACnetDateRange, BACnetWeekNDay
 
     assert isinstance(entry, BACnetCalendarEntry)
-    if entry.choice == 0:
+    val = entry.value
+    if isinstance(val, BACnetDate):
         # date [0]
-        return encode_context_date(0, entry.value)
-    if entry.choice == 1:
+        return encode_context_date(0, val)
+    if isinstance(val, BACnetDateRange):
         # dateRange [1] - constructed
         buf = encode_opening_tag(1)
-        buf += encode_application_date(entry.value.start_date)
-        buf += encode_application_date(entry.value.end_date)
+        buf += encode_application_date(val.start_date)
+        buf += encode_application_date(val.end_date)
         buf += encode_closing_tag(1)
         return buf
     # weekNDay [2]
+    assert isinstance(val, BACnetWeekNDay)
     return encode_context_octet_string(
         2,
-        bytes([entry.value.month, entry.value.week_of_month, entry.value.day_of_week]),
+        bytes([val.month, val.week_of_month, val.day_of_week]),
     )
 
 

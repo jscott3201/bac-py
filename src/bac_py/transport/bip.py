@@ -529,7 +529,8 @@ class BIPTransport:
         self._pending_bvlc[key] = future
 
         try:
-            self._transport.sendto(bvll_data, (destination.host, destination.port))
+            if self._transport is not None:
+                self._transport.sendto(bvll_data, (destination.host, destination.port))
             return await asyncio.wait_for(future, timeout=timeout)
         finally:
             self._pending_bvlc.pop(key, None)

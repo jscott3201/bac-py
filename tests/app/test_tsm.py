@@ -12,19 +12,7 @@ from bac_py.services.errors import (
     BACnetTimeoutError,
 )
 from bac_py.types.enums import AbortReason, ErrorClass, ErrorCode, RejectReason
-
-
-class FakeNetworkLayer:
-    """Minimal fake for TSM tests."""
-
-    def __init__(self):
-        self.sent: list[tuple[bytes, BACnetAddress, bool]] = []
-
-    def send(self, apdu: bytes, destination: BACnetAddress, *, expecting_reply: bool = True):
-        self.sent.append((apdu, destination, expecting_reply))
-
-
-PEER = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+from tests.helpers import PEER, FakeNetworkLayer
 
 
 def _make_non_segmented_pdu(

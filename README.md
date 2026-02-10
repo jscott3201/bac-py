@@ -146,21 +146,20 @@ Use `low_limit` and `high_limit` to filter by instance range.
 ### Subscribe to COV Notifications
 
 ```python
-from bac_py import Client
-from bac_py.network.address import parse_address
-from bac_py.types.enums import ObjectType
-from bac_py.types.primitives import ObjectIdentifier
+from bac_py import Client, decode_cov_values
 
 async with Client(instance_number=999) as client:
-    address = parse_address("192.168.1.100")
-    obj_id = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
-
     def on_notification(notification, source):
-        for pv in notification.list_of_values:
-            print(f"  {pv.property_identifier}: {pv.value.hex()}")
+        values = decode_cov_values(notification)
+        for name, value in values.items():
+            print(f"  {name}: {value}")
 
-    client.app.register_cov_callback(1, on_notification)
-    await client.subscribe_cov(address, obj_id, process_id=1, lifetime=3600)
+    await client.subscribe_cov_ex(
+        "192.168.1.100", "ai,1",
+        process_id=1,
+        callback=on_notification,
+        lifetime=3600,
+    )
 ```
 
 ### Serve Objects on the Network
@@ -299,10 +298,11 @@ src/bac_py/
 ### Supported Object Types
 
 Device, Analog Input/Output/Value, Binary Input/Output/Value, Multi-State
-Input/Output/Value, Accumulator, Calendar, Event Enrollment, File, Loop,
-Notification Class, Program, Schedule, Trend Log, and generic value types
-(BitString, CharacterString, Date, DateTime, Integer, LargeAnalog,
-OctetString, PositiveInteger, Time, and pattern variants).
+Input/Output/Value, Accumulator, Calendar, Channel, Event Enrollment, File,
+Life Safety Point/Zone, Loop, Network Port, Notification Class, Program,
+Schedule, Trend Log, and generic value types (BitString, CharacterString,
+Date, DateTime, Integer, LargeAnalog, OctetString, PositiveInteger, Time,
+and pattern variants).
 
 ### Supported Services
 
@@ -334,13 +334,15 @@ from bac_py.services.errors import (
 
 The [`examples/`](examples/) directory contains runnable scripts:
 
-| File                  | Description                                    |
-| --------------------- | ---------------------------------------------- |
-| `read_value.py`       | Read properties with short aliases             |
-| `write_value.py`      | Write values with auto-encoding and priority   |
-| `read_multiple.py`    | Read multiple properties from multiple objects |
-| `discover_devices.py` | Discover devices with Who-Is broadcast         |
-| `monitor_cov.py`      | Subscribe to COV and decode notifications      |
+| File                    | Description                                    |
+| ----------------------- | ---------------------------------------------- |
+| `read_value.py`         | Read properties with short aliases             |
+| `write_value.py`        | Write values with auto-encoding and priority   |
+| `read_multiple.py`      | Read multiple properties from multiple objects |
+| `discover_devices.py`   | Discover devices with Who-Is broadcast         |
+| `monitor_cov.py`        | Subscribe to COV and decode notifications      |
+| `router_discovery.py`   | Discover routers and remote networks           |
+| `foreign_device.py`     | Register as foreign device via BBMD            |
 
 ## Protocol-Level API
 
@@ -399,21 +401,25 @@ from bac_py.encoding.primitives import (
 
 ```bash
 # Run the test suite
-uv run pytest
+make test
 
 # With coverage
-uv run coverage run -m pytest
-uv run coverage report
+make coverage
 
 # Linting and formatting
-uv run ruff check src/ tests/
-uv run ruff format --check src/ tests/
+make lint
+
+# Auto-fix lint issues
+make fix
 
 # Type checking
-uv run mypy
+make typecheck
 
 # Documentation build
-uv run sphinx-build -W -b html docs docs/_build/html
+make docs
+
+# Run all checks (lint + typecheck + test + docs)
+make check
 ```
 
 ## Requirements

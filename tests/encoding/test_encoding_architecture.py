@@ -94,14 +94,14 @@ class TestE6BACnetDouble:
     def test_encode_bacnet_double_uses_tag_5(self):
         d = BACnetDouble(3.14159)
         encoded = encode_property_value(d)
-        tag, offset = decode_tag(encoded, 0)
+        tag, _offset = decode_tag(encoded, 0)
         assert tag.cls == TagClass.APPLICATION
         assert tag.number == 5  # Double tag
         assert tag.length == 8  # 8 bytes for double
 
     def test_encode_plain_float_uses_tag_4(self):
         encoded = encode_property_value(3.14159)
-        tag, offset = decode_tag(encoded, 0)
+        tag, _offset = decode_tag(encoded, 0)
         assert tag.cls == TagClass.APPLICATION
         assert tag.number == 4  # Real tag
         assert tag.length == 4  # 4 bytes for real
@@ -111,7 +111,7 @@ class TestE6BACnetDouble:
         precise_value = 1.23456789012345
         d = BACnetDouble(precise_value)
         encoded = encode_property_value(d)
-        tag, offset = decode_tag(encoded, 0)
+        _tag, offset = decode_tag(encoded, 0)
         content = encoded[offset:]
         decoded = struct.unpack(">d", content)[0]
         assert decoded == precise_value
@@ -120,7 +120,7 @@ class TestE6BACnetDouble:
         # Same value encoded as Real loses precision
         precise_value = 1.23456789012345
         encoded = encode_property_value(precise_value)  # plain float -> Real
-        tag, offset = decode_tag(encoded, 0)
+        _tag, offset = decode_tag(encoded, 0)
         content = encoded[offset:]
         decoded = struct.unpack(">f", content)[0]
         assert decoded != precise_value  # precision lost

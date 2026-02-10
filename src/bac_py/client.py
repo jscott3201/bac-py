@@ -17,7 +17,6 @@ Typical usage::
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from bac_py.app.application import BACnetApplication, DeviceConfig, ForeignDeviceStatus
@@ -27,10 +26,11 @@ from bac_py.app.client import (
     DiscoveredDevice,
     FDTEntryInfo,
     RouterInfo,
-    decode_cov_values,
 )
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from bac_py.network.address import BACnetAddress
     from bac_py.services.cov import COVNotificationRequest
     from bac_py.services.file_access import (
@@ -139,9 +139,7 @@ class Client:
         self._app = BACnetApplication(self._config)
         await self._app.start()
         if self._bbmd_address is not None:
-            await self._app.register_as_foreign_device(
-                self._bbmd_address, self._bbmd_ttl
-            )
+            await self._app.register_as_foreign_device(self._bbmd_address, self._bbmd_ttl)
             await self._app.wait_for_registration(timeout=10.0)
         self._client = BACnetClient(self._app)
         return self
@@ -251,8 +249,13 @@ class Client:
         See :meth:`~bac_py.app.client.BACnetClient.subscribe_cov_ex` for details.
         """
         await self._require_client().subscribe_cov_ex(
-            address, object_identifier, process_id, confirmed, lifetime,
-            callback=callback, timeout=timeout,
+            address,
+            object_identifier,
+            process_id,
+            confirmed,
+            lifetime,
+            callback=callback,
+            timeout=timeout,
         )
 
     async def unsubscribe_cov_ex(
@@ -268,8 +271,11 @@ class Client:
         See :meth:`~bac_py.app.client.BACnetClient.unsubscribe_cov_ex` for details.
         """
         await self._require_client().unsubscribe_cov_ex(
-            address, object_identifier, process_id,
-            unregister_callback=unregister_callback, timeout=timeout,
+            address,
+            object_identifier,
+            process_id,
+            unregister_callback=unregister_callback,
+            timeout=timeout,
         )
 
     # --- Protocol-level API ---
@@ -791,9 +797,7 @@ class Client:
 
         See :meth:`~bac_py.app.client.BACnetClient.delete_fdt_entry`.
         """
-        await self._require_client().delete_fdt_entry(
-            bbmd_address, entry_address, timeout=timeout
-        )
+        await self._require_client().delete_fdt_entry(bbmd_address, entry_address, timeout=timeout)
 
     # --- Router discovery ---
 

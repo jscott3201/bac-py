@@ -143,7 +143,7 @@ class NetworkLayer:
             message_type=message_type,
             network_message_data=data,
             destination=destination,
-            hop_count=255 if destination is not None else None,
+            hop_count=255 if destination is not None else 0,
         )
         npdu_bytes = encode_npdu(npdu)
         if destination is None or destination.is_broadcast or destination.is_global_broadcast:

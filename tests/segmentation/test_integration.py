@@ -21,29 +21,13 @@ from bac_py.encoding.apdu import (
     SegmentAckPDU,
     decode_apdu,
 )
-from bac_py.network.address import BACnetAddress
 from bac_py.segmentation.manager import (
     compute_max_segment_payload,
     split_payload,
 )
 from bac_py.services.errors import BACnetAbortError
 from bac_py.types.enums import AbortReason
-
-
-class FakeNetworkLayer:
-    """Minimal fake for integration tests."""
-
-    def __init__(self):
-        self.sent: list[tuple[bytes, BACnetAddress, bool]] = []
-
-    def send(self, apdu: bytes, destination: BACnetAddress, *, expecting_reply: bool = True):
-        self.sent.append((apdu, destination, expecting_reply))
-
-    def clear(self):
-        self.sent.clear()
-
-
-PEER = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+from tests.helpers import PEER, FakeNetworkLayer
 
 
 class TestClientSegmentedRequestSending:

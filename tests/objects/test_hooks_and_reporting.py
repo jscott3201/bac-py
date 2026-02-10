@@ -172,7 +172,7 @@ class TestAnalogIntrinsicReporting:
         ids=["AI", "AO", "AV"],
     )
     def test_has_common_reporting_properties(self, cls):
-        obj = cls(1) if cls != AnalogValueObject else cls(1)
+        obj = cls(1)
         defs = obj.PROPERTY_DEFINITIONS
         assert PropertyIdentifier.TIME_DELAY in defs
         assert PropertyIdentifier.NOTIFICATION_CLASS in defs
@@ -191,7 +191,7 @@ class TestAnalogIntrinsicReporting:
     )
     def test_has_limit_properties(self, cls):
         """Analog objects include limit detection properties."""
-        obj = cls(1) if cls != AnalogValueObject else cls(1)
+        obj = cls(1)
         defs = obj.PROPERTY_DEFINITIONS
         assert PropertyIdentifier.HIGH_LIMIT in defs
         assert PropertyIdentifier.LOW_LIMIT in defs
@@ -273,7 +273,7 @@ class TestBinaryIntrinsicReporting:
         ids=["BI", "BO", "BV"],
     )
     def test_has_common_reporting_properties(self, cls):
-        obj = cls(1) if cls != BinaryValueObject else cls(1)
+        obj = cls(1)
         defs = obj.PROPERTY_DEFINITIONS
         assert PropertyIdentifier.TIME_DELAY in defs
         assert PropertyIdentifier.NOTIFICATION_CLASS in defs
@@ -288,7 +288,7 @@ class TestBinaryIntrinsicReporting:
     )
     def test_no_limit_properties(self, cls):
         """Binary objects do not include limit detection properties."""
-        obj = cls(1) if cls != BinaryValueObject else cls(1)
+        obj = cls(1)
         defs = obj.PROPERTY_DEFINITIONS
         assert PropertyIdentifier.HIGH_LIMIT not in defs
         assert PropertyIdentifier.LOW_LIMIT not in defs
@@ -323,7 +323,7 @@ class TestMultiStateIntrinsicReporting:
         ids=["MSI", "MSO", "MSV"],
     )
     def test_has_common_reporting_properties(self, cls):
-        obj = cls(1) if cls != MultiStateValueObject else cls(1)
+        obj = cls(1)
         defs = obj.PROPERTY_DEFINITIONS
         assert PropertyIdentifier.TIME_DELAY in defs
         assert PropertyIdentifier.NOTIFICATION_CLASS in defs
@@ -338,7 +338,7 @@ class TestMultiStateIntrinsicReporting:
     )
     def test_no_limit_properties(self, cls):
         """Multi-state objects do not include limit detection properties."""
-        obj = cls(1) if cls != MultiStateValueObject else cls(1)
+        obj = cls(1)
         defs = obj.PROPERTY_DEFINITIONS
         assert PropertyIdentifier.HIGH_LIMIT not in defs
         assert PropertyIdentifier.LOW_LIMIT not in defs

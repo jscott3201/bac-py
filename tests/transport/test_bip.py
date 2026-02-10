@@ -679,8 +679,9 @@ class TestHandleBvlcResult:
 
 
 class TestBvlcResultSenderValidation:
-    """S3: BVLC-Result should only be routed to ForeignDeviceManager
-    when it comes from the expected BBMD address.
+    """S3: BVLC-Result should only be routed to ForeignDeviceManager.
+
+    When it comes from the expected BBMD address.
     """
 
     def test_result_from_correct_bbmd_updates_fd_state(self):
@@ -755,7 +756,9 @@ class TestNonBBMDNakResponses:
         transport._transport = mock_udp
         return transport, mock_udp
 
-    def _find_bvlc_result_code(self, mock_udp: MagicMock, dest_addr: tuple[str, int]) -> int | None:
+    def _find_bvlc_result_code(
+        self, mock_udp: MagicMock, dest_addr: tuple[str, int]
+    ) -> int | None:
         """Extract the BVLC-Result code from sendto calls to a specific destination."""
         from bac_py.transport.bvll import decode_bvll as _decode
 
@@ -1012,12 +1015,13 @@ class TestBBMDClientFunctions:
 
     @pytest.mark.asyncio
     async def test_read_bdt_sends_request(self):
-        transport, mock_udp = self._make_transport_with_mock()
+        transport, _mock_udp = self._make_transport_with_mock()
 
         async def respond():
             await asyncio.sleep(0.01)
             # Simulate Read-BDT-Ack response
             from bac_py.transport.bbmd import BDTEntry
+
             entry = BDTEntry(
                 address=self.BBMD_ADDR,
                 broadcast_mask=b"\xff\xff\xff\xff",
@@ -1028,8 +1032,9 @@ class TestBBMDClientFunctions:
             )
             transport._on_datagram_received(ack, (self.BBMD_ADDR.host, self.BBMD_ADDR.port))
 
-        asyncio.create_task(respond())
+        task = asyncio.create_task(respond())
         result = await transport.read_bdt(self.BBMD_ADDR, timeout=1.0)
+        await task
 
         assert len(result) == 1
         assert result[0].address == self.BBMD_ADDR
@@ -1041,18 +1046,18 @@ class TestBBMDClientFunctions:
 
         async def respond():
             await asyncio.sleep(0.01)
-            ack = encode_bvll(
-                BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK, b""
-            )
+            ack = encode_bvll(BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK, b"")
             transport._on_datagram_received(ack, (self.BBMD_ADDR.host, self.BBMD_ADDR.port))
 
-        asyncio.create_task(respond())
+        task = asyncio.create_task(respond())
         await transport.read_bdt(self.BBMD_ADDR, timeout=1.0)
+        await task
 
         # Verify what was sent
         mock_udp.sendto.assert_called_once()
         sent_data = mock_udp.sendto.call_args[0][0]
         from bac_py.transport.bvll import decode_bvll
+
         msg = decode_bvll(sent_data)
         assert msg.function == BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE
 
@@ -1075,13 +1080,12 @@ class TestBBMDClientFunctions:
 
         async def respond():
             await asyncio.sleep(0.01)
-            ack = encode_bvll(
-                BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK, b""
-            )
+            ack = encode_bvll(BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK, b"")
             transport._on_datagram_received(ack, (self.BBMD_ADDR.host, self.BBMD_ADDR.port))
 
-        asyncio.create_task(respond())
+        task = asyncio.create_task(respond())
         result = await transport.read_bdt(self.BBMD_ADDR, timeout=1.0)
+        await task
         assert result == []
 
     @pytest.mark.asyncio
@@ -1095,11 +1099,13 @@ class TestBBMDClientFunctions:
             transport._on_datagram_received(bvll, (self.BBMD_ADDR.host, self.BBMD_ADDR.port))
 
         from bac_py.transport.bbmd import BDTEntry
+
         entries = [
             BDTEntry(address=self.BBMD_ADDR, broadcast_mask=b"\xff\xff\xff\xff"),
         ]
-        asyncio.create_task(respond())
+        task = asyncio.create_task(respond())
         result = await transport.write_bdt(self.BBMD_ADDR, entries, timeout=1.0)
+        await task
         assert result == BvlcResultCode.SUCCESSFUL_COMPLETION
 
     @pytest.mark.asyncio
@@ -1113,11 +1119,13 @@ class TestBBMDClientFunctions:
             transport._on_datagram_received(bvll, (self.BBMD_ADDR.host, self.BBMD_ADDR.port))
 
         from bac_py.transport.bbmd import BDTEntry
+
         entries = [
             BDTEntry(address=self.BBMD_ADDR, broadcast_mask=b"\xff\xff\xff\xff"),
         ]
-        asyncio.create_task(respond())
+        task = asyncio.create_task(respond())
         result = await transport.write_bdt(self.BBMD_ADDR, entries, timeout=1.0)
+        await task
         assert result == BvlcResultCode.WRITE_BROADCAST_DISTRIBUTION_TABLE_NAK
 
     @pytest.mark.asyncio
@@ -1137,8 +1145,9 @@ class TestBBMDClientFunctions:
             ack = encode_bvll(BvlcFunction.READ_FOREIGN_DEVICE_TABLE_ACK, payload)
             transport._on_datagram_received(ack, (self.BBMD_ADDR.host, self.BBMD_ADDR.port))
 
-        asyncio.create_task(respond())
+        task = asyncio.create_task(respond())
         result = await transport.read_fdt(self.BBMD_ADDR, timeout=1.0)
+        await task
 
         assert len(result) == 1
         assert result[0].address == BIPAddress(host="10.0.0.50", port=47808)
@@ -1153,8 +1162,9 @@ class TestBBMDClientFunctions:
             ack = encode_bvll(BvlcFunction.READ_FOREIGN_DEVICE_TABLE_ACK, b"")
             transport._on_datagram_received(ack, (self.BBMD_ADDR.host, self.BBMD_ADDR.port))
 
-        asyncio.create_task(respond())
+        task = asyncio.create_task(respond())
         result = await transport.read_fdt(self.BBMD_ADDR, timeout=1.0)
+        await task
         assert result == []
 
     @pytest.mark.asyncio
@@ -1174,8 +1184,9 @@ class TestBBMDClientFunctions:
             bvll = encode_bvll(BvlcFunction.BVLC_RESULT, result_data)
             transport._on_datagram_received(bvll, (self.BBMD_ADDR.host, self.BBMD_ADDR.port))
 
-        asyncio.create_task(respond())
+        task = asyncio.create_task(respond())
         result = await transport.delete_fdt_entry(self.BBMD_ADDR, fd_addr, timeout=1.0)
+        await task
         assert result == BvlcResultCode.SUCCESSFUL_COMPLETION
 
     @pytest.mark.asyncio
@@ -1189,8 +1200,9 @@ class TestBBMDClientFunctions:
             bvll = encode_bvll(BvlcFunction.BVLC_RESULT, result_data)
             transport._on_datagram_received(bvll, (self.BBMD_ADDR.host, self.BBMD_ADDR.port))
 
-        asyncio.create_task(respond())
+        task = asyncio.create_task(respond())
         result = await transport.delete_fdt_entry(self.BBMD_ADDR, fd_addr, timeout=1.0)
+        await task
         assert result == BvlcResultCode.DELETE_FOREIGN_DEVICE_TABLE_ENTRY_NAK
 
     @pytest.mark.asyncio
@@ -1220,12 +1232,11 @@ class TestBBMDClientFunctions:
         async def respond():
             await asyncio.sleep(0.01)
             # Response from wrong address
-            ack = encode_bvll(
-                BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK, b""
-            )
+            ack = encode_bvll(BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK, b"")
             transport._on_datagram_received(ack, (wrong_addr.host, wrong_addr.port))
 
-        asyncio.create_task(respond())
+        task = asyncio.create_task(respond())
 
         with pytest.raises(TimeoutError):
             await transport.read_bdt(self.BBMD_ADDR, timeout=0.1)
+        await task

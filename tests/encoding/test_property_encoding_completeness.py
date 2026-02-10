@@ -25,8 +25,9 @@ def _object_type_ids() -> list[tuple[ObjectType, str]]:
     ids=[name for _, name in _object_type_ids()],
 )
 class TestPropertyEncodingCompleteness:
-    """Every property with a non-None value on a freshly created object
-    must be encodable via encode_property_value.
+    """Every property with a non-None value on a freshly created object.
+
+    Must be encodable via encode_property_value.
     """
 
     def test_all_default_properties_encodable(self, obj_type: ObjectType):
