@@ -1,8 +1,13 @@
+.. _examples:
+
 Examples
 ========
 
-All examples below use the convenience ``Client`` API. For protocol-level
-examples, see :ref:`protocol-level-api`.
+All examples below use the convenience :class:`~bac_py.client.Client` API. For
+protocol-level examples, see :ref:`protocol-level-api`.
+
+
+.. _reading-properties:
 
 Reading Properties
 ------------------
@@ -31,12 +36,14 @@ Read a single property
 
    asyncio.run(main())
 
+See :ref:`string-aliases` for the full list of supported short names.
+
 
 Read multiple properties
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-``read_multiple()`` uses ``ReadPropertyMultiple`` under the hood, sending a
-single request for multiple objects and properties:
+:meth:`~bac_py.client.Client.read_multiple` uses ``ReadPropertyMultiple``
+under the hood, sending a single request for multiple objects and properties:
 
 .. code-block:: python
 
@@ -56,15 +63,17 @@ The result is a nested dictionary keyed by canonical object identifier strings
 (e.g. ``"analog-input,1"``) and property names (e.g. ``"present-value"``).
 
 
+.. _writing-properties:
+
 Writing Properties
 ------------------
 
 Write with auto-encoding
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The ``write()`` method automatically encodes Python values to the correct
-BACnet application tag based on the value type, the target object type, and the
-property:
+The :meth:`~bac_py.client.Client.write` method automatically encodes Python
+values to the correct BACnet application tag based on the value type, the
+target object type, and the property:
 
 .. code-block:: python
 
@@ -83,6 +92,8 @@ property:
 
        # Relinquish (release) a command priority by writing None
        await client.write("192.168.1.100", "av,1", "pv", None, priority=8)
+
+.. _encoding-rules:
 
 The encoding rules:
 
@@ -119,8 +130,8 @@ properties like ``units``, ``cov-increment``, ``high-limit``, and
 Write multiple properties
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``write_multiple()`` writes several properties across multiple objects in a
-single request:
+:meth:`~bac_py.client.Client.write_multiple` writes several properties across
+multiple objects in a single request:
 
 .. code-block:: python
 
@@ -131,15 +142,18 @@ single request:
        })
 
 
+.. _device-discovery:
+
 Device Discovery
 ----------------
 
 Discover all devices
 ^^^^^^^^^^^^^^^^^^^^
 
-``discover()`` sends a Who-Is broadcast and returns ``DiscoveredDevice``
-objects with the responding device's address, instance number, vendor ID, max
-APDU length, and segmentation support:
+:meth:`~bac_py.client.Client.discover` sends a Who-Is broadcast and returns
+:class:`~bac_py.app.client.DiscoveredDevice` objects with the responding
+device's address, instance number, vendor ID, max APDU length, and
+segmentation support:
 
 .. code-block:: python
 
@@ -169,16 +183,17 @@ instance range:
 Get a device's object list
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``get_object_list()`` reads the complete list of objects from a remote device:
+:meth:`~bac_py.client.Client.get_object_list` reads the complete list of
+objects from a remote device:
 
 .. code-block:: python
-
-   from bac_py.types.primitives import ObjectIdentifier
 
    objects = await client.get_object_list("192.168.1.100", device_instance=100)
    for obj_id in objects:
        print(f"  {obj_id.object_type.name},{obj_id.instance_number}")
 
+
+.. _cov-subscriptions:
 
 COV Subscriptions
 -----------------
@@ -188,6 +203,7 @@ property changes on a remote device:
 
 .. code-block:: python
 
+   import asyncio
    from bac_py import Client, decode_cov_values
 
    async with Client(instance_number=999) as client:
@@ -213,15 +229,18 @@ property changes on a remote device:
        # Clean up
        await client.unsubscribe_cov_ex("192.168.1.100", "ai,1", process_id=1)
 
-``decode_cov_values()`` converts the raw notification into a dictionary of
-property names to decoded Python values.
+:func:`~bac_py.app.client.decode_cov_values` converts the raw notification
+into a dictionary of property names to decoded Python values.
 
+
+.. _foreign-device-registration:
 
 Foreign Device Registration
 ----------------------------
 
 To communicate across subnets, register as a foreign device with a BBMD
-(BACnet Broadcast Management Device):
+(BACnet Broadcast Management Device). See :ref:`bbmd-support` for background
+on BBMD capabilities.
 
 .. code-block:: python
 
@@ -248,13 +267,15 @@ To communicate across subnets, register as a foreign device with a BBMD
            print(f"  FDT: {entry.address} ttl={entry.ttl}s remaining={entry.remaining}s")
 
 When ``bbmd_address`` is set, the client automatically registers on startup
-and re-registers before the TTL expires.. You can also register manually at any
+and re-registers before the TTL expires. You can also register manually at any
 time:
 
 .. code-block:: python
 
    await client.register_as_foreign_device("192.168.1.1", ttl=60)
 
+
+.. _router-discovery:
 
 Router Discovery
 ----------------
@@ -277,11 +298,17 @@ Discover routers and the remote networks they can reach:
            for dev in devices:
                print(f"  Device {dev.instance} at {dev.address_str}")
 
+See :ref:`addressing` for the routed address format.
+
+
+.. _serving-objects:
 
 Serving Objects
 ---------------
 
-Host a BACnet server that exposes local objects to the network:
+Host a BACnet server that exposes local objects to the network. Server mode
+uses :class:`~bac_py.app.application.BACnetApplication` and
+:class:`~bac_py.app.server.DefaultServerHandlers` directly:
 
 .. code-block:: python
 
@@ -329,13 +356,17 @@ Host a BACnet server that exposes local objects to the network:
 ``DefaultServerHandlers.register()`` installs handlers for all standard
 BACnet server services. The server will respond to Who-Is with I-Am,
 ReadProperty and ReadPropertyMultiple with values from the object database,
-and WriteProperty/WritePropertyMultiple to update writable objects.
+and WriteProperty/WritePropertyMultiple to update writable objects. See
+:ref:`object-model` for the full list of supported object types.
 
+
+.. _multi-network-routing:
 
 Multi-Network Routing
 ---------------------
 
-Configure bac-py as a BACnet router between multiple IP networks:
+Configure bac-py as a BACnet router between multiple IP networks. See
+:ref:`network-routing` for more on routing capabilities.
 
 .. code-block:: python
 
@@ -361,9 +392,12 @@ Protocol-Level API
 ------------------
 
 For cases where the convenience API isn't sufficient, you can use the
-protocol-level methods directly. These accept explicit ``BACnetAddress``,
-``ObjectIdentifier``, and ``PropertyIdentifier`` types, and work with raw
-application-tagged bytes:
+protocol-level methods directly. These accept explicit
+:class:`~bac_py.network.address.BACnetAddress`,
+:class:`~bac_py.types.primitives.ObjectIdentifier`, and
+:class:`~bac_py.types.enums.PropertyIdentifier` types, and work with raw
+application-tagged bytes. See :ref:`two-api-levels` for guidance on when to
+use each level.
 
 .. code-block:: python
 
@@ -393,7 +427,7 @@ application-tagged bytes:
        print(ack.property_value.hex())
 
 Encoding helpers for all BACnet application types are available in
-``bac_py.encoding.primitives``:
+:mod:`bac_py.encoding.primitives`:
 
 .. code-block:: python
 

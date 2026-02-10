@@ -1,5 +1,9 @@
+.. _features:
+
 Features
 ========
+
+.. _core-protocol:
 
 Core Protocol
 -------------
@@ -12,33 +16,41 @@ Core Protocol
 - **Python 3.13+** with comprehensive type hints throughout
 
 
+.. _convenience-api:
+
 Convenience API
 ---------------
 
-The ``Client`` class provides a simplified interface for common operations:
+The :class:`~bac_py.client.Client` class provides a simplified interface for
+common operations. See :doc:`getting-started` for a walkthrough.
 
 - **String-based addressing** -- pass IP addresses as strings instead of
-  constructing ``BACnetAddress`` objects
+  constructing :class:`~bac_py.network.address.BACnetAddress` objects
+  (see :ref:`addressing`)
 - **String object/property identifiers** -- use ``"ai,1"`` and ``"pv"``
   instead of ``ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)`` and
   ``PropertyIdentifier.PRESENT_VALUE``
 - **Short aliases** -- ``ai``, ``ao``, ``av``, ``bi``, ``bo``, ``bv``,
   ``msi``, ``mso``, ``msv``, ``dev`` for object types; ``pv``, ``name``,
   ``desc``, ``units``, ``status``, ``oos``, ``cov-inc``, ``reliability``
-  for properties
+  for properties (see :ref:`string-aliases` for the full table)
 - **Auto-decoding on read** -- raw BACnet tags are decoded to Python values
   automatically
 - **Auto-encoding on write** -- Python types are encoded to the correct BACnet
   application tag based on the value type, target object type, and property
+  (see :ref:`smart-encoding`)
 - **Async context manager** -- ``async with Client(...) as client:`` handles
   startup and shutdown
 
+
+.. _smart-encoding:
 
 Smart Encoding
 --------------
 
 When writing values, bac-py automatically selects the correct BACnet
-application tag:
+application tag. See the :ref:`encoding rules table <encoding-rules>` in
+the examples.
 
 - ``float`` is encoded as Real
 - ``int`` on an analog present-value is encoded as Real
@@ -54,6 +66,8 @@ For non-present-value properties, a built-in type hint map ensures common
 properties like ``units``, ``cov-increment``, ``high-limit``, and
 ``out-of-service`` are encoded with the correct application tag.
 
+
+.. _supported-services:
 
 Supported Services
 ------------------
@@ -81,6 +95,11 @@ Unconfirmed services (broadcast, fire-and-forget):
 - UnconfirmedCOVNotification
 - UnconfirmedPrivateTransfer
 
+See :ref:`reading-properties`, :ref:`writing-properties`,
+:ref:`device-discovery`, and :ref:`cov-subscriptions` for usage examples.
+
+
+.. _object-model:
 
 Object Model
 -------------
@@ -102,8 +121,11 @@ property validation and read/write access control:
   TimeValue, BitStringValue, and pattern variants
 
 Each object type defines its standard properties, default values, and which
-properties are writable.
+properties are writable. See :ref:`serving-objects` for an example of
+creating and hosting objects.
 
+
+.. _segmentation:
 
 Segmentation
 ------------
@@ -114,11 +136,15 @@ reassembled transparently. This works in both directions -- sending segmented
 requests and receiving segmented responses.
 
 
+.. _network-routing:
+
 Network Routing
 ---------------
 
 Multi-port BACnet router support per Clause 6. Configure bac-py to route
-between multiple BACnet/IP networks with dynamic routing tables:
+between multiple BACnet/IP networks with dynamic routing tables. See
+:ref:`multi-network-routing` for configuration and :ref:`router-discovery`
+for discovering existing routers on the network.
 
 .. code-block:: python
 
@@ -138,10 +164,13 @@ between multiple BACnet/IP networks with dynamic routing tables:
    )
 
 
+.. _bbmd-support:
+
 BBMD Support
 ------------
 
-Broadcast Management Device (BBMD) support for cross-subnet communication:
+Broadcast Management Device (BBMD) support for cross-subnet communication.
+See :ref:`foreign-device-registration` for a full example.
 
 - Register as a foreign device with a remote BBMD
 - Automatic re-registration before TTL expiry
@@ -149,6 +178,8 @@ Broadcast Management Device (BBMD) support for cross-subnet communication:
 - Read Foreign Device Tables (FDT)
 - Delete FDT entries
 
+
+.. _priority-arrays:
 
 Priority Arrays
 ---------------
@@ -168,13 +199,18 @@ priority levels and relinquish priorities by writing ``None``:
    pa = await client.read("192.168.1.100", "av,1", "priority-array")
 
 
+.. _cov-feature:
+
 COV (Change of Value)
 ---------------------
 
 Subscribe to real-time property change notifications from remote devices.
 Supports both confirmed and unconfirmed notifications with configurable
-lifetimes and per-subscription callbacks.
+lifetimes and per-subscription callbacks. See :ref:`cov-subscriptions` for
+a full example.
 
+
+.. _type-safety:
 
 Type Safety
 -----------
@@ -188,11 +224,13 @@ bac-py uses enums, frozen dataclasses, and type hints throughout:
 - ``mypy`` strict mode is used in CI
 
 
+.. _json-serialization:
+
 JSON Serialization
 ------------------
 
 Optional JSON serialization for BACnet values (install with
-``pip install bac-py[serialization]``):
+``pip install bac-py[serialization]``, see :ref:`installation`):
 
 .. code-block:: python
 
@@ -203,6 +241,8 @@ Optional JSON serialization for BACnet values (install with
 
 Uses ``orjson`` for performance when available.
 
+
+.. _architecture:
 
 Architecture
 ------------
@@ -219,3 +259,5 @@ Architecture
      services/       Service request/response types and registry
      transport/      BACnet/IP (Annex J) UDP transport, BVLL, BBMD
      types/          Primitive types, enumerations, and string parsing
+
+See the :doc:`api/index` for full API documentation of each module.

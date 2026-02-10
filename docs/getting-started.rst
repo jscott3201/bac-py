@@ -1,5 +1,9 @@
+.. _getting-started:
+
 Getting Started
 ===============
+
+.. _installation:
 
 Installation
 ------------
@@ -50,9 +54,12 @@ The simplest way to read a value from a BACnet device:
 
    asyncio.run(main())
 
-The ``Client`` class is an async context manager that handles starting and
-stopping the underlying BACnet application. It binds a UDP socket, assigns your
-device a BACnet instance number, and is ready to communicate.
+The :class:`~bac_py.client.Client` class is an async context manager that
+handles starting and stopping the underlying BACnet application. It binds a
+UDP socket, assigns your device a BACnet instance number, and is ready to
+communicate.
+
+See :ref:`reading-properties` for more read examples.
 
 
 Your First Write
@@ -76,6 +83,11 @@ values to the correct BACnet application tag:
 The ``priority`` parameter sets the BACnet command priority (1--16). Priority 8
 is commonly used for manual operator commands.
 
+See :ref:`writing-properties` for more write examples including the full
+:ref:`encoding rules table <encoding-rules>`.
+
+
+.. _string-aliases:
 
 String Aliases
 --------------
@@ -142,6 +154,8 @@ values (``ObjectType.ANALOG_INPUT``, ``PropertyIdentifier.PRESENT_VALUE``)
 are always accepted as well.
 
 
+.. _addressing:
+
 Addressing
 ----------
 
@@ -159,10 +173,13 @@ The convenience API accepts device addresses as plain strings:
    await client.read("5:192.168.1.100:47808", "ai,1", "pv")
 
 
+.. _configuration:
+
 Configuration
 -------------
 
-``DeviceConfig`` controls device identity and network parameters:
+:class:`~bac_py.app.application.DeviceConfig` controls device identity and
+network parameters:
 
 .. code-block:: python
 
@@ -193,6 +210,8 @@ options directly:
        ...
 
 
+.. _error-handling:
+
 Error Handling
 --------------
 
@@ -222,18 +241,22 @@ Example:
        print(f"BACnet error: class={e.error_class}, code={e.error_code}")
 
 
+.. _two-api-levels:
+
 Two API Levels
 --------------
 
 bac-py exposes two API levels. Use whichever fits your needs:
 
-**Client** -- simplified wrapper for common client tasks. Accepts string
-addresses, string object/property identifiers, and Python values. Ideal for
-scripts, integrations, and most client-side work.
+:class:`~bac_py.client.Client` -- simplified wrapper for common client tasks.
+Accepts string addresses, string object/property identifiers, and Python
+values. Ideal for scripts, integrations, and most client-side work.
 
-**BACnetApplication + BACnetClient** -- full protocol-level access. Use this
-when you need server handlers, router mode, custom service registration, raw
-encoded bytes, or direct access to the transport and network layers.
+:class:`~bac_py.app.application.BACnetApplication` +
+:class:`~bac_py.app.client.BACnetClient` -- full protocol-level access. Use
+this when you need server handlers, router mode, custom service registration,
+raw encoded bytes, or direct access to the transport and network layers. See
+:ref:`protocol-level-api` for examples.
 
 The ``Client`` wrapper exposes both levels. All ``BACnetClient`` protocol-level
 methods are available alongside the convenience methods, and the underlying

@@ -20,6 +20,9 @@ dependencies.
 
    asyncio.run(main())
 
+Head to :doc:`getting-started` for installation and first steps, or browse
+the :doc:`examples` to see what bac-py can do. For a high-level overview of
+capabilities, see :doc:`features`.
 
 .. toctree::
    :maxdepth: 2
