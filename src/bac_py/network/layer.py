@@ -78,6 +78,7 @@ class NetworkLayer:
         self._router_cache: dict[int, RouterCacheEntry] = {}
         self._cache_ttl = cache_ttl
         self._receive_callback: Callable[[bytes, BACnetAddress], None] | None = None
+        self._network_message_listeners: dict[int, list[Callable[..., None]]] = {}
         transport.on_receive(self._on_npdu_received)
 
     @property
@@ -93,6 +94,62 @@ class NetworkLayer:
                 received NPDU containing an application-layer APDU.
         """
         self._receive_callback = callback
+
+    def register_network_message_handler(
+        self,
+        message_type: int,
+        handler: Callable[..., None],
+    ) -> None:
+        """Register a handler for incoming network-layer messages.
+
+        Args:
+            message_type: Network message type code to listen for.
+            handler: Called with (decoded_message, source_mac) when
+                a matching network message is received.
+        """
+        self._network_message_listeners.setdefault(message_type, []).append(handler)
+
+    def unregister_network_message_handler(
+        self,
+        message_type: int,
+        handler: Callable[..., None],
+    ) -> None:
+        """Remove a network-layer message handler.
+
+        Args:
+            message_type: Network message type code.
+            handler: The handler to remove.
+        """
+        listeners = self._network_message_listeners.get(message_type, [])
+        if handler in listeners:
+            listeners.remove(handler)
+
+    def send_network_message(
+        self,
+        message_type: int,
+        data: bytes,
+        destination: BACnetAddress | None = None,
+    ) -> None:
+        """Send a network-layer message (non-APDU).
+
+        Args:
+            message_type: Network message type code.
+            data: Encoded message payload.
+            destination: Target address. If ``None``, broadcasts
+                locally.
+        """
+        npdu = NPDU(
+            is_network_message=True,
+            message_type=message_type,
+            network_message_data=data,
+            destination=destination,
+            hop_count=255 if destination is not None else None,
+        )
+        npdu_bytes = encode_npdu(npdu)
+        if destination is None or destination.is_broadcast or destination.is_global_broadcast:
+            self._transport.send_broadcast(npdu_bytes)
+        else:
+            self._transport.send_unicast(npdu_bytes, destination.mac_address)
 
     def send(
         self,
@@ -200,10 +257,9 @@ class NetworkLayer:
     def _handle_network_message(self, npdu: NPDU, source_mac: bytes) -> None:
         """Process network layer messages relevant to non-router devices.
 
-        Only three message types are handled:
-        - I-Am-Router-To-Network: populate router cache
-        - What-Is-Network-Number: respond if configured
-        - Network-Number-Is: learn network number if not configured
+        Handles I-Am-Router-To-Network, What-Is-Network-Number, and
+        Network-Number-Is internally, and dispatches all decoded
+        messages to registered listeners.
         """
         try:
             if npdu.message_type is None:
@@ -231,6 +287,14 @@ class NetworkLayer:
                 "Ignoring network message type %s (non-router)",
                 npdu.message_type,
             )
+
+        # Dispatch to registered listeners
+        listeners = self._network_message_listeners.get(npdu.message_type, [])
+        for listener in listeners:
+            try:
+                listener(msg, source_mac)
+            except Exception:
+                logger.debug("Error in network message listener", exc_info=True)
 
     def _handle_i_am_router(
         self,

@@ -4,16 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import enum
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar
 
 from bac_py.encoding.primitives import (
+    decode_all_application_values,
+    decode_and_unwrap,
     decode_object_identifier,
+    encode_application_boolean,
+    encode_application_enumerated,
+    encode_application_null,
+    encode_application_real,
+    encode_application_unsigned,
+    encode_property_value,
 )
 from bac_py.encoding.tags import decode_tag
-from bac_py.network.address import GLOBAL_BROADCAST
-from bac_py.services.cov import SubscribeCOVRequest
+from bac_py.network.address import GLOBAL_BROADCAST, parse_address
+from bac_py.services.cov import COVNotificationRequest, SubscribeCOVRequest
 from bac_py.services.device_mgmt import (
     DeviceCommunicationControlRequest,
     ReinitializeDeviceRequest,
@@ -67,12 +77,15 @@ from bac_py.types.enums import (
     UnconfirmedServiceChoice,
 )
 from bac_py.types.primitives import BACnetDate, BACnetTime, ObjectIdentifier
+from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
 
 if TYPE_CHECKING:
     from bac_py.app.application import BACnetApplication
     from bac_py.network.address import BACnetAddress
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +124,82 @@ class DiscoveredDevice:
 
     def __repr__(self) -> str:
         return f"DiscoveredDevice(instance={self.instance}, address='{self.address_str}')"
+
+
+def decode_cov_values(notification: COVNotificationRequest) -> dict[str, object]:
+    """Decode COV notification property values to a Python dict.
+
+    Extracts and decodes the ``list_of_values`` from a COV notification
+    into a human-readable dictionary mapping property names to decoded
+    Python values.
+
+    Args:
+        notification: A decoded COV notification request.
+
+    Returns:
+        Dict mapping property name strings (hyphenated, lowercase) to
+        decoded Python values.
+
+    Example::
+
+        def on_change(notification, source):
+            values = decode_cov_values(notification)
+            print(values)
+            # {"present-value": 72.5, "status-flags": BitString(...)}
+    """
+    result: dict[str, object] = {}
+    for prop_value in notification.list_of_values:
+        prop_name = prop_value.property_identifier.name.lower().replace("_", "-")
+        if prop_value.value:
+            result[prop_name] = decode_and_unwrap(prop_value.value)
+        else:
+            result[prop_name] = None
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class BDTEntryInfo:
+    """Human-readable Broadcast Distribution Table entry.
+
+    Returned by :meth:`BACnetClient.read_bdt`.
+    """
+
+    address: str
+    """BBMD address string (e.g. ``"192.168.1.1:47808"``)."""
+
+    mask: str
+    """Broadcast distribution mask (e.g. ``"255.255.255.255"``)."""
+
+
+@dataclass(frozen=True, slots=True)
+class FDTEntryInfo:
+    """Human-readable Foreign Device Table entry.
+
+    Returned by :meth:`BACnetClient.read_fdt`.
+    """
+
+    address: str
+    """Foreign device address string (e.g. ``"10.0.0.50:47808"``)."""
+
+    ttl: int
+    """Registration time-to-live in seconds."""
+
+    remaining: int
+    """Seconds remaining before this entry expires."""
+
+
+@dataclass(frozen=True, slots=True)
+class RouterInfo:
+    """Router discovered via Who-Is-Router-To-Network.
+
+    Returned by :meth:`BACnetClient.who_is_router_to_network`.
+    """
+
+    address: str
+    """Router address string (MAC as hex)."""
+
+    networks: list[int]
+    """Network numbers reachable through this router."""
 
 
 class BACnetClient:
@@ -294,17 +383,6 @@ class BACnetClient:
            values accordingly (Real, Unsigned, Enumerated, Boolean).
         4. All other values fall back to ``encode_property_value()``.
         """
-        import enum
-
-        from bac_py.encoding.primitives import (
-            encode_application_boolean,
-            encode_application_enumerated,
-            encode_application_null,
-            encode_application_real,
-            encode_application_unsigned,
-            encode_property_value,
-        )
-
         # None -> Null (relinquish a command priority)
         if value is None:
             return encode_application_null()
@@ -391,10 +469,6 @@ class BACnetClient:
             value = await client.read("192.168.1.100", "ai,1", "pv")
             name = await client.read("192.168.1.100", "ai,1", "object-name")
         """
-        from bac_py.encoding.primitives import decode_and_unwrap
-        from bac_py.network.address import parse_address
-        from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
-
         addr = parse_address(address)
         obj_id = parse_object_identifier(object_identifier)
         prop_id = parse_property_identifier(property_identifier)
@@ -451,9 +525,6 @@ class BACnetClient:
             await client.write("192.168.1.100", "bo,1", "pv", 1, priority=8)
             await client.write("192.168.1.100", "av,1", "pv", None, priority=8)
         """
-        from bac_py.network.address import parse_address
-        from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
-
         addr = parse_address(address)
         obj_id = parse_object_identifier(object_identifier)
         prop_id = parse_property_identifier(property_identifier)
@@ -492,6 +563,10 @@ class BACnetClient:
             dicts. Property values are decoded to native Python types.
             Properties that returned errors have ``None`` as their value.
 
+            Result keys always use canonical hyphenated object type names
+            (e.g. ``"analog-input,1"``) regardless of the input format
+            used (e.g. ``"ai,1"``).
+
             Example::
 
                 {
@@ -502,10 +577,7 @@ class BACnetClient:
                     },
                 }
         """
-        from bac_py.encoding.primitives import decode_and_unwrap
-        from bac_py.network.address import parse_address
         from bac_py.services.read_property_multiple import PropertyReference
-        from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
 
         addr = parse_address(address)
 
@@ -541,6 +613,231 @@ class BACnetClient:
 
         return result
 
+    async def write_multiple(
+        self,
+        address: str | BACnetAddress,
+        specs: dict[
+            str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
+            dict[str | int | PropertyIdentifier, object],
+        ],
+        timeout: float | None = None,
+    ) -> None:
+        """Write multiple properties to multiple objects.
+
+        Convenience wrapper around ``write_property_multiple()`` that
+        accepts a simplified dict format and automatically encodes
+        Python values.
+
+        Args:
+            address: Target device (e.g. ``"192.168.1.100"``).
+            specs: Mapping of object identifiers to property/value dicts.
+                Example::
+
+                    {
+                        "av,1": {"pv": 72.5, "object-name": "Zone Temp"},
+                        "bo,1": {"pv": 1},
+                    }
+            timeout: Optional caller-level timeout in seconds.
+
+        Raises:
+            BACnetError: On Error-PDU response (first failing property).
+            BACnetRejectError: On Reject-PDU response.
+            BACnetAbortError: On Abort-PDU response.
+            BACnetTimeoutError: On timeout after all retries.
+
+        Example::
+
+            await client.write_multiple("192.168.1.100", {
+                "av,1": {"pv": 72.5},
+                "bo,1": {"pv": 1},
+            })
+        """
+        from bac_py.services.common import BACnetPropertyValue
+
+        addr = parse_address(address)
+
+        write_specs: list[WriteAccessSpecification] = []
+        for obj_key, prop_dict in specs.items():
+            obj_id = parse_object_identifier(obj_key)
+            prop_values: list[BACnetPropertyValue] = []
+            for prop_key, value in prop_dict.items():
+                prop_id = parse_property_identifier(prop_key)
+                encoded = self._encode_for_write(value, prop_id, obj_id.object_type)
+                prop_values.append(
+                    BACnetPropertyValue(
+                        property_identifier=prop_id,
+                        value=encoded,
+                    )
+                )
+            write_specs.append(
+                WriteAccessSpecification(
+                    object_identifier=obj_id,
+                    list_of_properties=prop_values,
+                )
+            )
+
+        await self.write_property_multiple(addr, write_specs, timeout=timeout)
+
+    async def get_object_list(
+        self,
+        address: str | BACnetAddress,
+        device_instance: int,
+        timeout: float | None = None,
+    ) -> list[ObjectIdentifier]:
+        """Read the complete object list from a device.
+
+        Attempts to read the full ``object-list`` property first. If
+        the response is too large (``BACnetAbortError`` with
+        segmentation-not-supported), falls back to reading the array
+        length then each element individually.
+
+        Args:
+            address: Target device (e.g. ``"192.168.1.100"``).
+            device_instance: Device instance number of the target.
+            timeout: Optional caller-level timeout in seconds.
+
+        Returns:
+            List of ObjectIdentifier for all objects in the device.
+
+        Example::
+
+            objects = await client.get_object_list("192.168.1.100", 1234)
+            for obj in objects:
+                print(obj.object_type, obj.instance_number)
+        """
+        from bac_py.services.errors import BACnetAbortError
+        from bac_py.types.enums import AbortReason
+
+        addr = parse_address(address)
+        device_obj = ObjectIdentifier(ObjectType.DEVICE, device_instance)
+        try:
+            ack = await self.read_property(
+                addr,
+                device_obj,
+                PropertyIdentifier.OBJECT_LIST,
+                timeout=timeout,
+            )
+            if ack.property_value:
+                values = decode_all_application_values(ack.property_value)
+                return [v for v in values if isinstance(v, ObjectIdentifier)]
+            return []
+        except BACnetAbortError as exc:
+            if exc.reason != AbortReason.SEGMENTATION_NOT_SUPPORTED:
+                raise
+
+        # Fallback: read array length, then each element
+        ack = await self.read_property(
+            addr,
+            device_obj,
+            PropertyIdentifier.OBJECT_LIST,
+            array_index=0,
+            timeout=timeout,
+        )
+        count_val = decode_and_unwrap(ack.property_value)
+        if not isinstance(count_val, int) or count_val == 0:
+            return []
+
+        result: list[ObjectIdentifier] = []
+        for i in range(1, count_val + 1):
+            ack = await self.read_property(
+                addr,
+                device_obj,
+                PropertyIdentifier.OBJECT_LIST,
+                array_index=i,
+                timeout=timeout,
+            )
+            val = decode_and_unwrap(ack.property_value)
+            if isinstance(val, ObjectIdentifier):
+                result.append(val)
+
+        return result
+
+    # --- COV convenience ---
+
+    async def subscribe_cov_ex(
+        self,
+        address: str | BACnetAddress,
+        object_identifier: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
+        process_id: int,
+        confirmed: bool = True,
+        lifetime: int | None = None,
+        callback: Callable[[COVNotificationRequest, BACnetAddress], object] | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        """Subscribe to COV notifications with string arguments.
+
+        Convenience wrapper around :meth:`subscribe_cov` that accepts
+        flexible address and object identifier formats and optionally
+        registers a notification callback.
+
+        Args:
+            address: Target device (e.g. ``"192.168.1.100"``).
+            object_identifier: Object to monitor (e.g. ``"ai,1"``).
+            process_id: Subscriber process identifier (caller-managed).
+            confirmed: True for confirmed notifications, False for unconfirmed.
+            lifetime: Subscription lifetime in seconds, or None for indefinite.
+            callback: Optional callback for COV notifications. Receives
+                ``(COVNotificationRequest, source_address)``. If provided,
+                automatically registered via
+                :meth:`~bac_py.app.application.BACnetApplication.register_cov_callback`.
+            timeout: Optional caller-level timeout in seconds.
+
+        Example::
+
+            def on_change(notification, source):
+                values = decode_cov_values(notification)
+                print(f"COV from {source}: {values}")
+
+            await client.subscribe_cov_ex(
+                "192.168.1.100", "ai,1",
+                process_id=1, callback=on_change, lifetime=3600,
+            )
+        """
+        addr = parse_address(address)
+        obj_id = parse_object_identifier(object_identifier)
+
+        if callback is not None:
+            self._app.register_cov_callback(process_id, callback)
+
+        try:
+            await self.subscribe_cov(
+                addr, obj_id, process_id, confirmed, lifetime, timeout=timeout
+            )
+        except BaseException:
+            # Undo callback registration on failure
+            if callback is not None:
+                self._app.unregister_cov_callback(process_id)
+            raise
+
+    async def unsubscribe_cov_ex(
+        self,
+        address: str | BACnetAddress,
+        object_identifier: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
+        process_id: int,
+        unregister_callback: bool = True,
+        timeout: float | None = None,
+    ) -> None:
+        """Cancel a COV subscription with string arguments.
+
+        Convenience wrapper around :meth:`unsubscribe_cov` that accepts
+        flexible address and object identifier formats and optionally
+        unregisters the notification callback.
+
+        Args:
+            address: Target device (e.g. ``"192.168.1.100"``).
+            object_identifier: Object being monitored (e.g. ``"ai,1"``).
+            process_id: Subscriber process identifier used during subscription.
+            unregister_callback: If True, also unregister the COV callback.
+            timeout: Optional caller-level timeout in seconds.
+        """
+        addr = parse_address(address)
+        obj_id = parse_object_identifier(object_identifier)
+
+        await self.unsubscribe_cov(addr, obj_id, process_id, timeout=timeout)
+
+        if unregister_callback:
+            self._app.unregister_cov_callback(process_id)
+
     async def read_range(
         self,
         address: BACnetAddress,
@@ -548,6 +845,7 @@ class BACnetClient:
         property_identifier: PropertyIdentifier,
         array_index: int | None = None,
         range_qualifier: RangeByPosition | RangeBySequenceNumber | RangeByTime | None = None,
+        timeout: float | None = None,
     ) -> ReadRangeACK:
         """Read a range of items from a list or array property.
 
@@ -558,6 +856,7 @@ class BACnetClient:
             array_index: Optional array index.
             range_qualifier: Optional range qualifier (by position,
                 sequence number, or time). If None, returns all items.
+            timeout: Optional caller-level timeout in seconds.
 
         Returns:
             Decoded ReadRange-ACK with the requested items.
@@ -578,8 +877,79 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.READ_RANGE,
             service_data=request.encode(),
+            timeout=timeout,
         )
         return ReadRangeACK.decode(response_data)
+
+    # --- Unconfirmed response collection helper ---
+
+    async def _collect_unconfirmed_responses(
+        self,
+        send_service: UnconfirmedServiceChoice,
+        send_data: bytes,
+        listen_service: UnconfirmedServiceChoice,
+        decoder: Callable[[bytes, BACnetAddress], _T],
+        destination: BACnetAddress,
+        timeout: float,
+        expected_count: int | None,
+    ) -> list[_T]:
+        """Send an unconfirmed request and collect decoded responses.
+
+        Shared implementation for :meth:`who_is`, :meth:`discover`,
+        and :meth:`who_has` which all follow the same broadcast-and-
+        collect pattern.
+
+        Args:
+            send_service: Service choice for the outgoing request.
+            send_data: Encoded service data to send.
+            listen_service: Service choice to listen for responses.
+            decoder: Callable that decodes ``(service_data, source)``
+                into a result object.  Return ``None`` to skip a
+                malformed response.
+            destination: Broadcast address for the request.
+            timeout: Seconds to wait for responses.
+            expected_count: When set, return early once this many
+                responses have been collected.
+
+        Returns:
+            List of decoded response objects.
+        """
+        results: list[_T] = []
+        done_event: asyncio.Event | None = (
+            asyncio.Event() if expected_count is not None else None
+        )
+
+        def _on_response(service_data: bytes, source: BACnetAddress) -> None:
+            try:
+                item = decoder(service_data, source)
+            except (ValueError, IndexError):
+                logger.debug("Dropped malformed %s from %s", listen_service.name, source)
+                return
+            if item is not None:
+                results.append(item)
+                if (
+                    done_event is not None
+                    and expected_count is not None
+                    and len(results) >= expected_count
+                ):
+                    done_event.set()
+
+        self._app.register_temporary_handler(listen_service, _on_response)
+        try:
+            self._app.unconfirmed_request(
+                destination=destination,
+                service_choice=send_service,
+                service_data=send_data,
+            )
+            if done_event is not None:
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(done_event.wait(), timeout)
+            else:
+                await asyncio.sleep(timeout)
+        finally:
+            self._app.unregister_temporary_handler(listen_service, _on_response)
+
+        return results
 
     async def who_is(
         self,
@@ -606,40 +976,16 @@ class BACnetClient:
         Returns:
             List of I-Am responses received within the timeout.
         """
-        responses: list[IAmRequest] = []
-        done_event: asyncio.Event | None = (
-            asyncio.Event() if expected_count is not None else None
+        request = WhoIsRequest(low_limit=low_limit, high_limit=high_limit)
+        return await self._collect_unconfirmed_responses(
+            send_service=UnconfirmedServiceChoice.WHO_IS,
+            send_data=request.encode(),
+            listen_service=UnconfirmedServiceChoice.I_AM,
+            decoder=lambda data, _src: IAmRequest.decode(data),
+            destination=destination,
+            timeout=timeout,
+            expected_count=expected_count,
         )
-
-        def on_i_am(service_data: bytes, source: BACnetAddress) -> None:
-            try:
-                iam = IAmRequest.decode(service_data)
-                responses.append(iam)
-                if done_event is not None and expected_count is not None and len(responses) >= expected_count:
-                    done_event.set()
-            except (ValueError, IndexError):
-                logger.debug("Dropped malformed I-Am from %s", source)
-
-        # Register temporary listener for I-Am responses
-        self._app.register_temporary_handler(UnconfirmedServiceChoice.I_AM, on_i_am)
-        try:
-            # Send Who-Is request
-            request = WhoIsRequest(low_limit=low_limit, high_limit=high_limit)
-            self._app.unconfirmed_request(
-                destination=destination,
-                service_choice=UnconfirmedServiceChoice.WHO_IS,
-                service_data=request.encode(),
-            )
-            # Collect responses until timeout or expected_count reached
-            if done_event is not None:
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(done_event.wait(), timeout)
-            else:
-                await asyncio.sleep(timeout)
-        finally:
-            self._app.unregister_temporary_handler(UnconfirmedServiceChoice.I_AM, on_i_am)
-
-        return responses
 
     async def discover(
         self,
@@ -654,6 +1000,17 @@ class BACnetClient:
         Convenience wrapper around :meth:`who_is` that captures the
         source address of each I-Am response and returns
         :class:`DiscoveredDevice` objects with parsed fields.
+
+        To discover devices on a remote network reachable through a
+        router, pass a remote broadcast ``BACnetAddress``::
+
+            from bac_py.network.address import BACnetAddress
+            remote = BACnetAddress(network=2, mac_address=b'\\xff\\xff\\xff\\xff')
+            devices = await client.discover(destination=remote, timeout=5.0)
+
+        When using the :class:`~bac_py.client.Client` wrapper, you can
+        pass a string like ``"192.168.1.255"`` for directed local
+        broadcast.
 
         Args:
             low_limit: Optional lower bound of device instance range.
@@ -673,45 +1030,27 @@ class BACnetClient:
             for dev in devices:
                 print(dev.instance, dev.address_str, dev.vendor_id)
         """
-        devices: list[DiscoveredDevice] = []
-        done_event: asyncio.Event | None = (
-            asyncio.Event() if expected_count is not None else None
-        )
 
-        def on_i_am(service_data: bytes, source: BACnetAddress) -> None:
-            try:
-                iam = IAmRequest.decode(service_data)
-                devices.append(
-                    DiscoveredDevice(
-                        address=source,
-                        instance=iam.object_identifier.instance_number,
-                        vendor_id=iam.vendor_id,
-                        max_apdu_length=iam.max_apdu_length,
-                        segmentation_supported=iam.segmentation_supported,
-                    )
-                )
-                if done_event is not None and expected_count is not None and len(devices) >= expected_count:
-                    done_event.set()
-            except (ValueError, IndexError):
-                logger.debug("Dropped malformed I-Am from %s", source)
-
-        self._app.register_temporary_handler(UnconfirmedServiceChoice.I_AM, on_i_am)
-        try:
-            request = WhoIsRequest(low_limit=low_limit, high_limit=high_limit)
-            self._app.unconfirmed_request(
-                destination=destination,
-                service_choice=UnconfirmedServiceChoice.WHO_IS,
-                service_data=request.encode(),
+        def _decode_device(service_data: bytes, source: BACnetAddress) -> DiscoveredDevice:
+            iam = IAmRequest.decode(service_data)
+            return DiscoveredDevice(
+                address=source,
+                instance=iam.object_identifier.instance_number,
+                vendor_id=iam.vendor_id,
+                max_apdu_length=iam.max_apdu_length,
+                segmentation_supported=iam.segmentation_supported,
             )
-            if done_event is not None:
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(done_event.wait(), timeout)
-            else:
-                await asyncio.sleep(timeout)
-        finally:
-            self._app.unregister_temporary_handler(UnconfirmedServiceChoice.I_AM, on_i_am)
 
-        return devices
+        request = WhoIsRequest(low_limit=low_limit, high_limit=high_limit)
+        return await self._collect_unconfirmed_responses(
+            send_service=UnconfirmedServiceChoice.WHO_IS,
+            send_data=request.encode(),
+            listen_service=UnconfirmedServiceChoice.I_AM,
+            decoder=_decode_device,
+            destination=destination,
+            timeout=timeout,
+            expected_count=expected_count,
+        )
 
     async def subscribe_cov(
         self,
@@ -720,6 +1059,7 @@ class BACnetClient:
         process_id: int,
         confirmed: bool = True,
         lifetime: int | None = None,
+        timeout: float | None = None,
     ) -> None:
         """Subscribe to COV notifications from a remote device.
 
@@ -733,6 +1073,7 @@ class BACnetClient:
             process_id: Subscriber process identifier (caller-managed).
             confirmed: True for confirmed notifications, False for unconfirmed.
             lifetime: Subscription lifetime in seconds, or None for indefinite.
+            timeout: Optional caller-level timeout in seconds.
 
         Raises:
             BACnetError: On Error-PDU response.
@@ -750,6 +1091,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.SUBSCRIBE_COV,
             service_data=request.encode(),
+            timeout=timeout,
         )
 
     async def unsubscribe_cov(
@@ -757,6 +1099,7 @@ class BACnetClient:
         address: BACnetAddress,
         object_identifier: ObjectIdentifier,
         process_id: int,
+        timeout: float | None = None,
     ) -> None:
         """Cancel a COV subscription on a remote device.
 
@@ -767,6 +1110,7 @@ class BACnetClient:
             address: Target device address.
             object_identifier: Object being monitored.
             process_id: Subscriber process identifier used during subscription.
+            timeout: Optional caller-level timeout in seconds.
 
         Raises:
             BACnetError: On Error-PDU response.
@@ -782,6 +1126,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.SUBSCRIBE_COV,
             service_data=request.encode(),
+            timeout=timeout,
         )
 
     # --- Device management ---
@@ -792,6 +1137,7 @@ class BACnetClient:
         enable_disable: EnableDisable,
         time_duration: int | None = None,
         password: str | None = None,
+        timeout: float | None = None,
     ) -> None:
         """Send DeviceCommunicationControl-Request per Clause 16.1.
 
@@ -800,6 +1146,7 @@ class BACnetClient:
             enable_disable: Enable/disable communication state.
             time_duration: Optional duration in minutes.
             password: Optional password string (1-20 chars).
+            timeout: Optional caller-level timeout in seconds.
 
         Raises:
             BACnetError: On Error-PDU response.
@@ -814,6 +1161,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.DEVICE_COMMUNICATION_CONTROL,
             service_data=request.encode(),
+            timeout=timeout,
         )
 
     async def reinitialize_device(
@@ -821,6 +1169,7 @@ class BACnetClient:
         address: BACnetAddress,
         reinitialized_state: ReinitializedState,
         password: str | None = None,
+        timeout: float | None = None,
     ) -> None:
         """Send ReinitializeDevice-Request per Clause 16.4.
 
@@ -828,6 +1177,7 @@ class BACnetClient:
             address: Target device address.
             reinitialized_state: Desired reinitialization state.
             password: Optional password string (1-20 chars).
+            timeout: Optional caller-level timeout in seconds.
 
         Raises:
             BACnetError: On Error-PDU response.
@@ -841,6 +1191,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.REINITIALIZE_DEVICE,
             service_data=request.encode(),
+            timeout=timeout,
         )
 
     def time_synchronization(
@@ -894,6 +1245,7 @@ class BACnetClient:
         address: BACnetAddress,
         file_identifier: ObjectIdentifier,
         access_method: StreamReadAccess | RecordReadAccess,
+        timeout: float | None = None,
     ) -> AtomicReadFileACK:
         """Send AtomicReadFile-Request per Clause 14.1.
 
@@ -901,6 +1253,7 @@ class BACnetClient:
             address: Target device address.
             file_identifier: ObjectIdentifier of the File object.
             access_method: Stream or record read parameters.
+            timeout: Optional caller-level timeout in seconds.
 
         Returns:
             Decoded AtomicReadFile-ACK with file data.
@@ -917,6 +1270,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.ATOMIC_READ_FILE,
             service_data=request.encode(),
+            timeout=timeout,
         )
         return AtomicReadFileACK.decode(response_data)
 
@@ -925,6 +1279,7 @@ class BACnetClient:
         address: BACnetAddress,
         file_identifier: ObjectIdentifier,
         access_method: StreamWriteAccess | RecordWriteAccess,
+        timeout: float | None = None,
     ) -> AtomicWriteFileACK:
         """Send AtomicWriteFile-Request per Clause 14.2.
 
@@ -932,6 +1287,7 @@ class BACnetClient:
             address: Target device address.
             file_identifier: ObjectIdentifier of the File object.
             access_method: Stream or record write parameters.
+            timeout: Optional caller-level timeout in seconds.
 
         Returns:
             Decoded AtomicWriteFile-ACK with actual start position.
@@ -948,6 +1304,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.ATOMIC_WRITE_FILE,
             service_data=request.encode(),
+            timeout=timeout,
         )
         return AtomicWriteFileACK.decode(response_data)
 
@@ -958,6 +1315,7 @@ class BACnetClient:
         address: BACnetAddress,
         object_type: ObjectType | None = None,
         object_identifier: ObjectIdentifier | None = None,
+        timeout: float | None = None,
     ) -> ObjectIdentifier:
         """Send CreateObject-Request per Clause 15.3.
 
@@ -968,6 +1326,7 @@ class BACnetClient:
             address: Target device address.
             object_type: Object type for auto-assigned instance.
             object_identifier: Explicit object identifier.
+            timeout: Optional caller-level timeout in seconds.
 
         Returns:
             ObjectIdentifier of the created object.
@@ -984,6 +1343,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.CREATE_OBJECT,
             service_data=request.encode(),
+            timeout=timeout,
         )
         tag, offset = decode_tag(response_data, 0)
         obj_type_val, instance = decode_object_identifier(
@@ -995,12 +1355,14 @@ class BACnetClient:
         self,
         address: BACnetAddress,
         object_identifier: ObjectIdentifier,
+        timeout: float | None = None,
     ) -> None:
         """Send DeleteObject-Request per Clause 15.4.
 
         Args:
             address: Target device address.
             object_identifier: Object to delete.
+            timeout: Optional caller-level timeout in seconds.
 
         Raises:
             BACnetError: On Error-PDU response.
@@ -1011,6 +1373,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.DELETE_OBJECT,
             service_data=request.encode(),
+            timeout=timeout,
         )
 
     # --- List manipulation ---
@@ -1022,6 +1385,7 @@ class BACnetClient:
         property_identifier: PropertyIdentifier,
         list_of_elements: bytes,
         array_index: int | None = None,
+        timeout: float | None = None,
     ) -> None:
         """Send AddListElement-Request per Clause 15.1.
 
@@ -1031,6 +1395,7 @@ class BACnetClient:
             property_identifier: List property to modify.
             list_of_elements: Application-tagged encoded elements to add.
             array_index: Optional array index.
+            timeout: Optional caller-level timeout in seconds.
 
         Raises:
             BACnetError: On Error-PDU response.
@@ -1046,6 +1411,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.ADD_LIST_ELEMENT,
             service_data=request.encode(),
+            timeout=timeout,
         )
 
     async def remove_list_element(
@@ -1055,6 +1421,7 @@ class BACnetClient:
         property_identifier: PropertyIdentifier,
         list_of_elements: bytes,
         array_index: int | None = None,
+        timeout: float | None = None,
     ) -> None:
         """Send RemoveListElement-Request per Clause 15.2.
 
@@ -1064,6 +1431,7 @@ class BACnetClient:
             property_identifier: List property to modify.
             list_of_elements: Application-tagged encoded elements to remove.
             array_index: Optional array index.
+            timeout: Optional caller-level timeout in seconds.
 
         Raises:
             BACnetError: On Error-PDU response.
@@ -1079,6 +1447,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.REMOVE_LIST_ELEMENT,
             service_data=request.encode(),
+            timeout=timeout,
         )
 
     # --- Discovery ---
@@ -1113,42 +1482,104 @@ class BACnetClient:
         Returns:
             List of I-Have responses received within the timeout.
         """
-        responses: list[IHaveRequest] = []
-        done_event: asyncio.Event | None = (
-            asyncio.Event() if expected_count is not None else None
+        request = WhoHasRequest(
+            object_identifier=object_identifier,
+            object_name=object_name,
+            low_limit=low_limit,
+            high_limit=high_limit,
+        )
+        return await self._collect_unconfirmed_responses(
+            send_service=UnconfirmedServiceChoice.WHO_HAS,
+            send_data=request.encode(),
+            listen_service=UnconfirmedServiceChoice.I_HAVE,
+            decoder=lambda data, _src: IHaveRequest.decode(data),
+            destination=destination,
+            timeout=timeout,
+            expected_count=expected_count,
         )
 
-        def on_i_have(service_data: bytes, source: BACnetAddress) -> None:
-            try:
-                ihave = IHaveRequest.decode(service_data)
-                responses.append(ihave)
-                if done_event is not None and expected_count is not None and len(responses) >= expected_count:
-                    done_event.set()
-            except (ValueError, IndexError):
-                logger.debug("Dropped malformed I-Have from %s", source)
+    # --- Router discovery ---
 
-        self._app.register_temporary_handler(UnconfirmedServiceChoice.I_HAVE, on_i_have)
+    async def who_is_router_to_network(
+        self,
+        network: int | None = None,
+        destination: str | BACnetAddress | None = None,
+        timeout: float = 3.0,
+    ) -> list[RouterInfo]:
+        """Discover routers and reachable networks.
+
+        Sends a Who-Is-Router-To-Network message and collects
+        I-Am-Router-To-Network responses.
+
+        Args:
+            network: Optional specific network to query. If ``None``,
+                discovers all reachable networks.
+            destination: Target for the query. Accepts an IP string,
+                a :class:`BACnetAddress`, or ``None`` for local
+                broadcast.
+            timeout: Seconds to wait for responses.
+
+        Returns:
+            List of router information with address and accessible
+            networks. Multiple responses from the same router are
+            merged.
+
+        Example::
+
+            routers = await client.who_is_router_to_network(timeout=3.0)
+            for router in routers:
+                print(f"Router at {router.address}: networks {router.networks}")
+        """
+        from bac_py.network.address import BIPAddress
+        from bac_py.network.messages import (
+            IAmRouterToNetwork,
+            WhoIsRouterToNetwork,
+            encode_network_message,
+        )
+        from bac_py.types.enums import NetworkMessageType
+
+        # Collect responses keyed by router MAC
+        router_map: dict[str, list[int]] = {}
+
+        def on_i_am_router(msg: object, source_mac: bytes) -> None:
+            if not isinstance(msg, IAmRouterToNetwork):
+                return
+            # Build human-readable address from 6-byte MAC
+            addr = BIPAddress.decode(source_mac)
+            addr_str = f"{addr.host}:{addr.port}"
+            existing = router_map.get(addr_str, [])
+            for net in msg.networks:
+                if net not in existing:
+                    existing.append(net)
+            router_map[addr_str] = existing
+
+        self._app.register_network_message_handler(
+            NetworkMessageType.I_AM_ROUTER_TO_NETWORK, on_i_am_router
+        )
         try:
-            request = WhoHasRequest(
-                object_identifier=object_identifier,
-                object_name=object_name,
-                low_limit=low_limit,
-                high_limit=high_limit,
-            )
-            self._app.unconfirmed_request(
-                destination=destination,
-                service_choice=UnconfirmedServiceChoice.WHO_HAS,
-                service_data=request.encode(),
-            )
-            if done_event is not None:
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(done_event.wait(), timeout)
-            else:
-                await asyncio.sleep(timeout)
-        finally:
-            self._app.unregister_temporary_handler(UnconfirmedServiceChoice.I_HAVE, on_i_have)
+            # Send Who-Is-Router-To-Network
+            who_msg = WhoIsRouterToNetwork(network=network)
+            dest_addr: BACnetAddress | None = None
+            if isinstance(destination, str):
+                dest_addr = parse_address(destination)
+            elif destination is not None:
+                dest_addr = destination
 
-        return responses
+            self._app.send_network_message(
+                NetworkMessageType.WHO_IS_ROUTER_TO_NETWORK,
+                encode_network_message(who_msg),
+                dest_addr,
+            )
+            await asyncio.sleep(timeout)
+        finally:
+            self._app.unregister_network_message_handler(
+                NetworkMessageType.I_AM_ROUTER_TO_NETWORK, on_i_am_router
+            )
+
+        return [
+            RouterInfo(address=addr, networks=nets)
+            for addr, nets in router_map.items()
+        ]
 
     # --- Private transfer ---
 
@@ -1158,6 +1589,7 @@ class BACnetClient:
         vendor_id: int,
         service_number: int,
         service_parameters: bytes | None = None,
+        timeout: float | None = None,
     ) -> ConfirmedPrivateTransferACK:
         """Send ConfirmedPrivateTransfer-Request per Clause 16.2.
 
@@ -1166,6 +1598,7 @@ class BACnetClient:
             vendor_id: Vendor identifier.
             service_number: Vendor-specific service number.
             service_parameters: Optional vendor-specific data.
+            timeout: Optional caller-level timeout in seconds.
 
         Returns:
             Decoded ConfirmedPrivateTransfer-ACK.
@@ -1183,6 +1616,7 @@ class BACnetClient:
             destination=address,
             service_choice=ConfirmedServiceChoice.CONFIRMED_PRIVATE_TRANSFER,
             service_data=request.encode(),
+            timeout=timeout,
         )
         return ConfirmedPrivateTransferACK.decode(response_data)
 
@@ -1213,3 +1647,150 @@ class BACnetClient:
             service_choice=UnconfirmedServiceChoice.UNCONFIRMED_PRIVATE_TRANSFER,
             service_data=request.encode(),
         )
+
+    # --- BBMD table management ---
+
+    def _require_transport(self):  # noqa: ANN202
+        """Return the primary BIPTransport or raise if unavailable."""
+        transport = self._app._transport  # noqa: SLF001
+        if transport is None:
+            msg = "Transport not available (application not started or in router mode)"
+            raise RuntimeError(msg)
+        return transport
+
+    async def read_bdt(
+        self,
+        bbmd_address: str | BACnetAddress,
+        timeout: float = 5.0,
+    ) -> list[BDTEntryInfo]:
+        """Read the Broadcast Distribution Table from a remote BBMD.
+
+        Args:
+            bbmd_address: Address of the BBMD to query (e.g.
+                ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
+            timeout: Seconds to wait for a response.
+
+        Returns:
+            List of BDT entries with address and mask information.
+
+        Raises:
+            RuntimeError: If transport is not available.
+            TimeoutError: If no response within *timeout*.
+        """
+        transport = self._require_transport()
+        bip_addr = self._app._parse_bip_address(  # noqa: SLF001
+            bbmd_address if isinstance(bbmd_address, str) else str(bbmd_address)
+        )
+        entries = await transport.read_bdt(bip_addr, timeout=timeout)
+        return [
+            BDTEntryInfo(
+                address=f"{e.address.host}:{e.address.port}",
+                mask=".".join(str(b) for b in e.broadcast_mask),
+            )
+            for e in entries
+        ]
+
+    async def read_fdt(
+        self,
+        bbmd_address: str | BACnetAddress,
+        timeout: float = 5.0,
+    ) -> list[FDTEntryInfo]:
+        """Read the Foreign Device Table from a remote BBMD.
+
+        Args:
+            bbmd_address: Address of the BBMD to query (e.g.
+                ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
+            timeout: Seconds to wait for a response.
+
+        Returns:
+            List of FDT entries with address, TTL, and remaining time.
+
+        Raises:
+            RuntimeError: If transport is not available.
+            TimeoutError: If no response within *timeout*.
+        """
+        transport = self._require_transport()
+        bip_addr = self._app._parse_bip_address(  # noqa: SLF001
+            bbmd_address if isinstance(bbmd_address, str) else str(bbmd_address)
+        )
+        entries = await transport.read_fdt(bip_addr, timeout=timeout)
+        return [
+            FDTEntryInfo(
+                address=f"{e.address.host}:{e.address.port}",
+                ttl=e.ttl,
+                remaining=e.remaining,
+            )
+            for e in entries
+        ]
+
+    async def write_bdt(
+        self,
+        bbmd_address: str | BACnetAddress,
+        entries: list[BDTEntryInfo],
+        timeout: float = 5.0,
+    ) -> None:
+        """Write a Broadcast Distribution Table to a remote BBMD.
+
+        Args:
+            bbmd_address: Address of the BBMD to configure (e.g.
+                ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
+            entries: BDT entries to write.
+            timeout: Seconds to wait for a response.
+
+        Raises:
+            RuntimeError: If transport is not available or BBMD
+                rejects the write (NAK).
+            TimeoutError: If no response within *timeout*.
+        """
+        from bac_py.transport.bbmd import BDTEntry
+        from bac_py.types.enums import BvlcResultCode
+
+        transport = self._require_transport()
+        bip_addr = self._app._parse_bip_address(  # noqa: SLF001
+            bbmd_address if isinstance(bbmd_address, str) else str(bbmd_address)
+        )
+        bdt_entries = []
+        for info in entries:
+            entry_addr = self._app._parse_bip_address(info.address)  # noqa: SLF001
+            mask_parts = [int(x) for x in info.mask.split(".")]
+            bdt_entries.append(
+                BDTEntry(address=entry_addr, broadcast_mask=bytes(mask_parts))
+            )
+        result = await transport.write_bdt(bip_addr, bdt_entries, timeout=timeout)
+        if result != BvlcResultCode.SUCCESSFUL_COMPLETION:
+            msg = f"BBMD rejected Write-BDT: {result.name}"
+            raise RuntimeError(msg)
+
+    async def delete_fdt_entry(
+        self,
+        bbmd_address: str | BACnetAddress,
+        entry_address: str,
+        timeout: float = 5.0,
+    ) -> None:
+        """Delete a Foreign Device Table entry on a remote BBMD.
+
+        Args:
+            bbmd_address: Address of the BBMD (e.g.
+                ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
+            entry_address: Address of the FDT entry to delete
+                (e.g. ``"10.0.0.50:47808"``).
+            timeout: Seconds to wait for a response.
+
+        Raises:
+            RuntimeError: If transport is not available or BBMD
+                rejects the delete (NAK).
+            TimeoutError: If no response within *timeout*.
+        """
+        from bac_py.types.enums import BvlcResultCode
+
+        transport = self._require_transport()
+        bip_bbmd = self._app._parse_bip_address(  # noqa: SLF001
+            bbmd_address if isinstance(bbmd_address, str) else str(bbmd_address)
+        )
+        bip_entry = self._app._parse_bip_address(entry_address)  # noqa: SLF001
+        result = await transport.delete_fdt_entry(
+            bip_bbmd, bip_entry, timeout=timeout
+        )
+        if result != BvlcResultCode.SUCCESSFUL_COMPLETION:
+            msg = f"BBMD rejected Delete-FDT-Entry: {result.name}"
+            raise RuntimeError(msg)

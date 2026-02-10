@@ -136,6 +136,27 @@ class DeviceConfig:
     When set, incoming requests must include a matching password."""
 
 
+@dataclass(frozen=True, slots=True)
+class ForeignDeviceStatus:
+    """Foreign device registration status.
+
+    Provides a snapshot of the current registration state when
+    operating as a foreign device via a BBMD.
+    """
+
+    bbmd_address: str
+    """BBMD address string (e.g. ``"192.168.1.1:47808"``)."""
+
+    ttl: int
+    """Registration time-to-live in seconds."""
+
+    is_registered: bool
+    """Whether registration is currently active."""
+
+    last_result: str | None
+    """Last BVLC result code name, or ``None`` if no response yet."""
+
+
 class BACnetApplication:
     """Central orchestrator connecting all protocol layers.
 
@@ -411,6 +432,174 @@ class BACnetApplication:
             service_choice=UnconfirmedServiceChoice.I_AM,
             service_data=iam.encode(),
         )
+
+    # --- Foreign device API ---
+
+    def _parse_bip_address(self, address: str) -> BIPAddress:
+        """Parse a string to a BIPAddress.
+
+        Accepts ``"host:port"`` or ``"host"`` (default port 47808).
+        """
+        from bac_py.network.address import BIPAddress as BIP
+
+        if ":" in address:
+            host, port_str = address.rsplit(":", 1)
+            return BIP(host=host, port=int(port_str))
+        return BIP(host=address, port=0xBAC0)
+
+    async def register_as_foreign_device(
+        self,
+        bbmd_address: str,
+        ttl: int = 60,
+    ) -> None:
+        """Register as a foreign device with a BBMD.
+
+        Attaches a :class:`~bac_py.transport.foreign_device.ForeignDeviceManager`
+        to the primary transport and begins periodic re-registration
+        at TTL/2 intervals.
+
+        Args:
+            bbmd_address: Address of the BBMD (e.g. ``"192.168.1.1"`` or
+                ``"192.168.1.1:47808"``).
+            ttl: Registration time-to-live in seconds.
+
+        Raises:
+            RuntimeError: If already registered, application not started,
+                or running in router mode.
+        """
+        if self._transport is None:
+            if self._router is not None:
+                msg = "Foreign device registration is not supported in router mode"
+                raise RuntimeError(msg)
+            msg = "Application not started"
+            raise RuntimeError(msg)
+        if self._transport.foreign_device is not None:
+            msg = "Already registered as a foreign device"
+            raise RuntimeError(msg)
+
+        bip_addr = self._parse_bip_address(bbmd_address)
+        await self._transport.attach_foreign_device(bip_addr, ttl)
+
+    async def deregister_foreign_device(self) -> None:
+        """Deregister from the BBMD and stop re-registration.
+
+        Sends a Delete-Foreign-Device-Table-Entry to the BBMD so the
+        entry is removed immediately rather than waiting for TTL expiry.
+
+        Raises:
+            RuntimeError: If not registered as a foreign device.
+        """
+        if self._transport is None or self._transport.foreign_device is None:
+            msg = "Not registered as a foreign device"
+            raise RuntimeError(msg)
+        await self._transport.foreign_device.stop()
+        self._transport._foreign_device = None  # noqa: SLF001
+
+    @property
+    def is_foreign_device(self) -> bool:
+        """Whether this device is currently registered as a foreign device."""
+        return (
+            self._transport is not None
+            and self._transport.foreign_device is not None
+            and self._transport.foreign_device.is_registered
+        )
+
+    @property
+    def foreign_device_status(self) -> ForeignDeviceStatus | None:
+        """Current foreign device registration status.
+
+        Returns ``None`` if foreign device mode is not active.
+        """
+        if self._transport is None or self._transport.foreign_device is None:
+            return None
+        fd = self._transport.foreign_device
+        return ForeignDeviceStatus(
+            bbmd_address=f"{fd.bbmd_address.host}:{fd.bbmd_address.port}",
+            ttl=fd.ttl,
+            is_registered=fd.is_registered,
+            last_result=fd.last_result.name if fd.last_result is not None else None,
+        )
+
+    async def wait_for_registration(self, timeout: float = 10.0) -> bool:
+        """Wait for foreign device registration to complete.
+
+        Blocks until the BBMD confirms registration or the timeout
+        elapses. Useful after :meth:`register_as_foreign_device` to
+        ensure broadcasts will be distributed before performing
+        discovery.
+
+        Args:
+            timeout: Maximum seconds to wait.
+
+        Returns:
+            ``True`` if registered, ``False`` if timeout expired.
+        """
+        if self._transport is None or self._transport.foreign_device is None:
+            return False
+        fd = self._transport.foreign_device
+        try:
+            await asyncio.wait_for(fd._registered.wait(), timeout)  # noqa: SLF001
+        except TimeoutError:
+            return False
+        return fd.is_registered
+
+    # --- Network message API ---
+
+    def send_network_message(
+        self,
+        message_type: int,
+        data: bytes,
+        destination: BACnetAddress | None = None,
+    ) -> None:
+        """Send a network-layer message (non-APDU).
+
+        Args:
+            message_type: Network message type code.
+            data: Encoded message payload.
+            destination: Target address. If ``None``, broadcasts locally.
+
+        Raises:
+            RuntimeError: If the application is not started or is
+                running in router mode (which has its own message API).
+        """
+        if self._network is None:
+            msg = "Network layer not available"
+            raise RuntimeError(msg)
+        self._network.send_network_message(message_type, data, destination)
+
+    def register_network_message_handler(
+        self,
+        message_type: int,
+        handler: object,
+    ) -> None:
+        """Register a handler for incoming network-layer messages.
+
+        Args:
+            message_type: Network message type code to listen for.
+            handler: Called with ``(decoded_message, source_mac)`` when a
+                matching network message is received.
+
+        Raises:
+            RuntimeError: If the network layer is not available.
+        """
+        if self._network is None:
+            msg = "Network layer not available"
+            raise RuntimeError(msg)
+        self._network.register_network_message_handler(message_type, handler)
+
+    def unregister_network_message_handler(
+        self,
+        message_type: int,
+        handler: object,
+    ) -> None:
+        """Remove a network-layer message handler.
+
+        Args:
+            message_type: Network message type code.
+            handler: The handler to remove.
+        """
+        if self._network is not None:
+            self._network.unregister_network_message_handler(message_type, handler)
 
     async def confirmed_request(
         self,

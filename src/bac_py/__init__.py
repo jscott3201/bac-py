@@ -10,16 +10,27 @@ Typical usage::
 
 __version__ = "0.1.0"
 
-from bac_py.app.application import DeviceConfig
-from bac_py.app.client import DiscoveredDevice
+from bac_py.app.application import DeviceConfig, ForeignDeviceStatus
+from bac_py.app.client import (
+    BDTEntryInfo,
+    DiscoveredDevice,
+    FDTEntryInfo,
+    RouterInfo,
+    decode_cov_values,
+)
 from bac_py.client import Client
 from bac_py.serialization import deserialize, serialize
 
 __all__ = [
+    "BDTEntryInfo",
     "Client",
     "DeviceConfig",
     "DiscoveredDevice",
+    "FDTEntryInfo",
+    "ForeignDeviceStatus",
+    "RouterInfo",
     "__version__",
+    "decode_cov_values",
     "deserialize",
     "serialize",
 ]
