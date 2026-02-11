@@ -6,6 +6,7 @@ _deprecated/
 design_docs/
 refactors/
 _dev_examples/
+_future/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
