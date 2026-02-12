@@ -1,6 +1,6 @@
 .PHONY: lint typecheck test docs check fix format coverage coverage-html \
        docker-build docker-test docker-stress docker-test-client docker-test-bbmd \
-       docker-test-router docker-clean
+       docker-test-router docker-demo docker-demo-auto docker-clean
 
 lint:
 	uv run ruff check src/ tests/
@@ -64,6 +64,14 @@ docker-test: docker-build
 docker-stress: docker-build
 	$(COMPOSE) --profile stress-runner up --abort-on-container-exit --exit-code-from stress-runner
 	$(COMPOSE) --profile stress-runner down -v
+
+docker-demo: docker-build
+	$(COMPOSE) --profile demo run --rm demo-client
+	$(COMPOSE) --profile demo down -v
+
+docker-demo-auto: docker-build
+	$(COMPOSE) --profile demo up --abort-on-container-exit --exit-code-from demo-client
+	$(COMPOSE) --profile demo down -v
 
 docker-clean:
 	$(COMPOSE) --profile all down -v --rmi local

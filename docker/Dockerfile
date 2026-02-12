@@ -14,7 +14,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 WORKDIR /app
 
 # Layer 1: dependency metadata (changes rarely)
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock README.md ./
 
 # Layer 2: install deps including orjson via serialization extra
 RUN uv sync --frozen --group test --extra serialization --no-install-project

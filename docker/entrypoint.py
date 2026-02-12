@@ -233,7 +233,7 @@ def run_test() -> None:
     logger.info("Running tests: %s", test_path)
 
     result = subprocess.run(
-        ["uv", "run", "pytest", test_path, "-v", "--tb=short", "-x"],
+        ["uv", "run", "pytest", test_path, "-v", "-s", "--tb=short", "-x"],
         cwd="/app",
     )
     sys.exit(result.returncode)
@@ -244,6 +244,28 @@ def run_stress() -> None:
     logger.info("Running stress tests...")
     result = subprocess.run(
         ["uv", "run", "python", "docker/lib/stress_runner.py"],
+        cwd="/app",
+    )
+    sys.exit(result.returncode)
+
+
+async def run_thermostat() -> None:
+    """Run the smart thermostat demo server."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "thermostat", os.path.join(os.path.dirname(__file__), "demos", "thermostat.py")
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    await mod.run()
+
+
+def run_demo_client() -> None:
+    """Run the interactive thermostat demo client."""
+    logger.info("Running demo client...")
+    result = subprocess.run(
+        ["uv", "run", "python", "docker/demos/demo_client.py"],
         cwd="/app",
     )
     sys.exit(result.returncode)
@@ -269,8 +291,16 @@ def main() -> None:
         run_test()
     elif role == "stress":
         run_stress()
+    elif role == "thermostat":
+        asyncio.run(run_thermostat())
+    elif role == "demo-client":
+        run_demo_client()
     else:
-        logger.error("Unknown ROLE: %r (expected: server, bbmd, router, test, stress)", role)
+        logger.error(
+            "Unknown ROLE: %r (expected: server, bbmd, router, test, stress, "
+            "thermostat, demo-client)",
+            role,
+        )
         sys.exit(1)
 
 
