@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-02-12
+
+### Added
+
+- **4 new `Client` wrapper methods** -- `traverse_hierarchy()` walks Structured
+  View object hierarchies with string addressing; `subscribe_cov_property_multiple()`
+  batches property-level COV subscriptions in a single request;
+  `write_group()` sends unconfirmed WriteGroup channel writes;
+  `discover_unconfigured()` finds unconfigured devices via Who-Am-I (Clause 19.7).
+- **`UnconfiguredDevice` top-level export** -- `UnconfiguredDevice` is now
+  importable directly from `bac_py`.
+- ~40 new `Client` unit tests covering string address parsing, `BACnetAddress`
+  pass-through, broadcast destination defaults, enum string parsing, and new
+  wrapper delegation.
+
+### Changed
+
+- **Consistent string support across all `Client` methods** -- 11 methods that
+  previously required typed parameters now accept strings:
+  `time_synchronization` and `utc_time_synchronization` (address),
+  `atomic_read_file` and `atomic_write_file` (address, file identifier),
+  `confirmed_private_transfer` and `unconfirmed_private_transfer` (address),
+  `add_list_element` and `remove_list_element` (address, object identifier,
+  property identifier), `subscribe_cov` and `unsubscribe_cov` (address, object
+  identifier), `who_has` (object identifier). All parsing functions handle
+  typed pass-through, so existing code using `BACnetAddress` / `ObjectIdentifier`
+  / `PropertyIdentifier` continues to work unchanged.
+- **Internal deduplication** -- Extracted `_resolve_broadcast_destination()` and
+  `_parse_enum()` helpers to replace ~20 copy-pasted address parsing, broadcast
+  resolution, and enum parsing blocks across the `Client` class. Moved
+  `parse_address` to a top-level import.
+- **Documentation updates** -- Added `discover_unconfigured()` and `who_has()`
+  string usage to the Discovery and Networking guide. Added
+  `subscribe_cov_property_multiple()` example to the COV section. Updated
+  `traverse_hierarchy` example in Features to use string-friendly syntax.
+  Expanded the Convenience API feature list with new methods and consistent
+  string support note.
+
 ## [1.0.2] - 2026-02-12
 
 ### Fixed

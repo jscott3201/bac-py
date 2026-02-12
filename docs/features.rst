@@ -50,7 +50,16 @@ common operations. See :doc:`getting-started` for a walkthrough.
   Clause 19.1 procedure
 - **Audit log queries** -- ``query_audit_log()`` with string addressing
 - **Property-level COV** -- ``subscribe_cov_property()`` for monitoring
-  specific properties
+  specific properties, ``subscribe_cov_property_multiple()`` for batching
+  multiple subscriptions in a single request
+- **Hierarchy traversal** -- ``traverse_hierarchy()`` walks Structured View
+  objects to collect all object identifiers
+- **WriteGroup** -- ``write_group()`` for unconfirmed channel writes
+- **Unconfigured device discovery** -- ``discover_unconfigured()`` finds
+  devices via Who-Am-I (Clause 19.7)
+- **Consistent string support** -- all methods accept string addresses,
+  object identifiers, property identifiers, and enum values wherever
+  applicable
 - **Top-level server exports** -- ``BACnetApplication``, ``DefaultServerHandlers``,
   ``DeviceObject``, ``RouterConfig``, ``RouterPortConfig`` importable
   directly from ``bac_py``
@@ -246,17 +255,15 @@ Devices that do not support these optional properties gracefully return
        print(dev.instance, dev.profile_name, dev.tags)
 
 Hierarchy traversal via
-:meth:`~bac_py.app.client.BACnetClient.traverse_hierarchy` reads
+:meth:`~bac_py.client.Client.traverse_hierarchy` reads
 ``Subordinate_List`` from Structured View objects and recursively descends
 to collect all object identifiers in a device's object hierarchy:
 
 .. code-block:: python
 
-   from bac_py.types.primitives import ObjectIdentifier
-   from bac_py.types.enums import ObjectType
-
-   root = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
-   all_objects = await client.traverse_hierarchy(device_addr, root)
+   all_objects = await client.traverse_hierarchy(
+       "192.168.1.100", "structured-view,1"
+   )
 
 
 .. _bacnet-ipv6:

@@ -71,6 +71,37 @@ with Annex X profile metadata (``Profile_Name``, ``Profile_Location``,
            print(f"    tags: {dev.tags}")
 
 
+Discover unconfigured devices
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:meth:`~bac_py.client.Client.discover_unconfigured` listens for Who-Am-I
+broadcasts from unconfigured devices (Clause 19.7). This is useful for
+commissioning new devices that have not yet been assigned an instance number:
+
+.. code-block:: python
+
+   devices = await client.discover_unconfigured(timeout=5.0)
+   for dev in devices:
+       print(f"  Vendor: {dev.vendor_id}  Model: {dev.model_name}")
+       print(f"  Serial: {dev.serial_number}  Address: {dev.address}")
+
+
+Find objects by identifier or name
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:meth:`~bac_py.client.Client.who_has` sends a Who-Has broadcast to find
+devices that contain a specific object. Accepts string object identifiers:
+
+.. code-block:: python
+
+   results = await client.who_has(object_identifier="ai,1", timeout=3.0)
+   for r in results:
+       print(f"  Device {r.device_identifier} has {r.object_identifier}")
+
+   # Or search by name
+   results = await client.who_has(object_name="Zone Temp", timeout=3.0)
+
+
 .. _foreign-device-registration:
 
 Foreign Device Registration

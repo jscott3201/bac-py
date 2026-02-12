@@ -5,13 +5,19 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from bac_py.app.application import DeviceConfig
-from bac_py.client import Client
+from bac_py.client import Client, _parse_enum, _resolve_broadcast_destination
 from bac_py.encoding.primitives import (
     encode_application_character_string,
     encode_application_real,
 )
+from bac_py.network.address import GLOBAL_BROADCAST, BACnetAddress, parse_address
 from bac_py.services.read_property import ReadPropertyACK
-from bac_py.types.enums import ObjectType, PropertyIdentifier
+from bac_py.types.enums import (
+    EnableDisable,
+    ObjectType,
+    PropertyIdentifier,
+    ReinitializedState,
+)
 from bac_py.types.primitives import ObjectIdentifier
 
 
@@ -157,3 +163,496 @@ class TestClientDelegation:
             props = result["analog-input,1"]
             assert props["present-value"] == pytest.approx(72.5)
             assert props["object-name"] == "Zone Temp"
+
+
+# ---------------------------------------------------------------------------
+# Helper function tests
+# ---------------------------------------------------------------------------
+
+
+class TestResolveBroadcastDestination:
+    """Tests for _resolve_broadcast_destination()."""
+
+    def test_none_returns_global_broadcast(self):
+        result = _resolve_broadcast_destination(None)
+        assert result is GLOBAL_BROADCAST
+
+    def test_string_parsed(self):
+        result = _resolve_broadcast_destination("192.168.1.255")
+        assert isinstance(result, BACnetAddress)
+        assert result == parse_address("192.168.1.255")
+
+    def test_bacnet_address_passthrough(self):
+        addr = parse_address("10.0.0.1")
+        result = _resolve_broadcast_destination(addr)
+        assert result is addr
+
+
+class TestParseEnum:
+    """Tests for _parse_enum()."""
+
+    def test_enum_passthrough(self):
+        result = _parse_enum(EnableDisable.DISABLE, EnableDisable)
+        assert result is EnableDisable.DISABLE
+
+    def test_string_lowercase(self):
+        result = _parse_enum("disable", EnableDisable)
+        assert result is EnableDisable.DISABLE
+
+    def test_string_uppercase(self):
+        result = _parse_enum("DISABLE", EnableDisable)
+        assert result is EnableDisable.DISABLE
+
+    def test_string_with_hyphens(self):
+        result = _parse_enum("disable-initiation", EnableDisable)
+        assert result is EnableDisable.DISABLE_INITIATION
+
+    def test_string_with_whitespace(self):
+        result = _parse_enum("  coldstart  ", ReinitializedState)
+        assert result is ReinitializedState.COLDSTART
+
+    def test_string_start_backup(self):
+        result = _parse_enum("start-backup", ReinitializedState)
+        assert result is ReinitializedState.START_BACKUP
+
+    def test_invalid_string_raises(self):
+        with pytest.raises(KeyError):
+            _parse_enum("nonexistent", EnableDisable)
+
+
+# ---------------------------------------------------------------------------
+# Refactored method tests — verify string parsing and delegation
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_client():
+    """Create a Client with a mock BACnetClient injected."""
+    client = Client()
+    mock_bacnet_client = MagicMock()
+    # Make all methods return AsyncMock by default
+    for attr in (
+        "get_alarm_summary",
+        "get_enrollment_summary",
+        "get_event_information",
+        "acknowledge_alarm",
+        "send_confirmed_text_message",
+        "send_unconfirmed_text_message",
+        "backup_device",
+        "restore_device",
+        "query_audit_log",
+        "subscribe_cov_property",
+        "subscribe_cov",
+        "unsubscribe_cov",
+        "device_communication_control",
+        "reinitialize_device",
+        "time_synchronization",
+        "utc_time_synchronization",
+        "atomic_read_file",
+        "atomic_write_file",
+        "create_object",
+        "delete_object",
+        "add_list_element",
+        "remove_list_element",
+        "who_has",
+        "who_is",
+        "discover",
+        "discover_extended",
+        "confirmed_private_transfer",
+        "unconfirmed_private_transfer",
+        "traverse_hierarchy",
+        "subscribe_cov_property_multiple",
+        "write_group",
+        "discover_unconfigured",
+    ):
+        setattr(mock_bacnet_client, attr, AsyncMock())
+    # Sync methods
+    for attr in (
+        "time_synchronization",
+        "utc_time_synchronization",
+        "send_unconfirmed_text_message",
+        "unconfirmed_private_transfer",
+        "write_group",
+    ):
+        setattr(mock_bacnet_client, attr, MagicMock())
+
+    mock_app = MagicMock()
+    mock_app.device_object_identifier = ObjectIdentifier(ObjectType.DEVICE, 999)
+    client._client = mock_bacnet_client
+    client._app = mock_app
+    return client, mock_bacnet_client
+
+
+class TestStringAddressParsing:
+    """Verify methods accept string addresses and parse them."""
+
+    async def test_get_alarm_summary_string_address(self):
+        client, mock = _make_mock_client()
+        await client.get_alarm_summary("192.168.1.100")
+        addr_arg = mock.get_alarm_summary.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_get_enrollment_summary_string_address(self):
+        from bac_py.types.enums import AcknowledgmentFilter
+
+        client, mock = _make_mock_client()
+        await client.get_enrollment_summary("10.0.0.1", AcknowledgmentFilter.ALL)
+        addr_arg = mock.get_enrollment_summary.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_get_event_information_string_address(self):
+        client, mock = _make_mock_client()
+        await client.get_event_information("192.168.1.100")
+        addr_arg = mock.get_event_information.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_acknowledge_alarm_string_address(self):
+        from bac_py.types.constructed import BACnetTimeStamp
+        from bac_py.types.enums import EventState
+        from bac_py.types.primitives import BACnetTime
+
+        ts = BACnetTimeStamp(choice=0, value=BACnetTime(12, 0, 0, 0))
+        client, mock = _make_mock_client()
+        await client.acknowledge_alarm(
+            "192.168.1.100", 1, "ai,1", EventState.NORMAL, ts, "test", ts
+        )
+        addr_arg = mock.acknowledge_alarm.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_backup_string_address(self):
+        client, mock = _make_mock_client()
+        await client.backup("10.0.0.1")
+        addr_arg = mock.backup_device.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_restore_string_address(self):
+        from bac_py.app.client import BackupData
+
+        client, mock = _make_mock_client()
+        await client.restore("10.0.0.1", BackupData(device_instance=1, configuration_files=[]))
+        addr_arg = mock.restore_device.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_query_audit_log_string_address(self):
+        client, mock = _make_mock_client()
+        query = MagicMock()
+        await client.query_audit_log("10.0.0.1", "audit-log,1", query)
+        addr_arg = mock.query_audit_log.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_subscribe_cov_property_string_address(self):
+        client, mock = _make_mock_client()
+        await client.subscribe_cov_property("10.0.0.1", "ai,1", "pv", 1)
+        addr_arg = mock.subscribe_cov_property.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_device_communication_control_string_address(self):
+        client, mock = _make_mock_client()
+        await client.device_communication_control("10.0.0.1", "disable")
+        addr_arg = mock.device_communication_control.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_reinitialize_device_string_address(self):
+        client, mock = _make_mock_client()
+        await client.reinitialize_device("10.0.0.1", "coldstart")
+        addr_arg = mock.reinitialize_device.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_create_object_string_address(self):
+        client, mock = _make_mock_client()
+        await client.create_object("10.0.0.1", object_type="av")
+        addr_arg = mock.create_object.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_delete_object_string_address(self):
+        client, mock = _make_mock_client()
+        await client.delete_object("10.0.0.1", "av,1")
+        addr_arg = mock.delete_object.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+
+class TestBACnetAddressPassthrough:
+    """Verify methods accept BACnetAddress objects directly."""
+
+    async def test_get_alarm_summary_bacnet_address(self):
+        client, mock = _make_mock_client()
+        addr = parse_address("192.168.1.100")
+        await client.get_alarm_summary(addr)
+        addr_arg = mock.get_alarm_summary.call_args[0][0]
+        assert addr_arg == addr
+
+    async def test_backup_bacnet_address(self):
+        client, mock = _make_mock_client()
+        addr = parse_address("192.168.1.100")
+        await client.backup(addr)
+        addr_arg = mock.backup_device.call_args[0][0]
+        assert addr_arg == addr
+
+    async def test_subscribe_cov_bacnet_address(self):
+        client, mock = _make_mock_client()
+        addr = parse_address("192.168.1.100")
+        oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        await client.subscribe_cov(addr, oid, 1)
+        addr_arg = mock.subscribe_cov.call_args[0][0]
+        assert addr_arg == addr
+
+    async def test_unsubscribe_cov_bacnet_address(self):
+        client, mock = _make_mock_client()
+        addr = parse_address("192.168.1.100")
+        oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        await client.unsubscribe_cov(addr, oid, 1)
+        addr_arg = mock.unsubscribe_cov.call_args[0][0]
+        assert addr_arg == addr
+
+
+class TestNewStringSupport:
+    """Test newly widened string support on previously typed-only methods."""
+
+    def test_time_synchronization_string_address(self):
+        from bac_py.types.primitives import BACnetDate, BACnetTime
+
+        client, mock = _make_mock_client()
+        client.time_synchronization(
+            "192.168.1.100", BACnetDate(2026, 2, 12, 4), BACnetTime(12, 0, 0, 0)
+        )
+        addr_arg = mock.time_synchronization.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    def test_utc_time_synchronization_string_address(self):
+        from bac_py.types.primitives import BACnetDate, BACnetTime
+
+        client, mock = _make_mock_client()
+        client.utc_time_synchronization(
+            "192.168.1.100", BACnetDate(2026, 2, 12, 4), BACnetTime(12, 0, 0, 0)
+        )
+        addr_arg = mock.utc_time_synchronization.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_atomic_read_file_string_address_and_oid(self):
+        client, mock = _make_mock_client()
+        access = MagicMock()
+        await client.atomic_read_file("10.0.0.1", "file,1", access)
+        addr_arg = mock.atomic_read_file.call_args[0][0]
+        file_arg = mock.atomic_read_file.call_args[0][1]
+        assert isinstance(addr_arg, BACnetAddress)
+        assert isinstance(file_arg, ObjectIdentifier)
+        assert file_arg.object_type == ObjectType.FILE
+
+    async def test_atomic_write_file_string_address_and_oid(self):
+        client, mock = _make_mock_client()
+        access = MagicMock()
+        await client.atomic_write_file("10.0.0.1", "file,2", access)
+        addr_arg = mock.atomic_write_file.call_args[0][0]
+        file_arg = mock.atomic_write_file.call_args[0][1]
+        assert isinstance(addr_arg, BACnetAddress)
+        assert isinstance(file_arg, ObjectIdentifier)
+        assert file_arg.instance_number == 2
+
+    async def test_confirmed_private_transfer_string_address(self):
+        client, mock = _make_mock_client()
+        await client.confirmed_private_transfer("10.0.0.1", 99, 1)
+        addr_arg = mock.confirmed_private_transfer.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    def test_unconfirmed_private_transfer_string_address(self):
+        client, mock = _make_mock_client()
+        client.unconfirmed_private_transfer("10.0.0.1", 99, 1)
+        addr_arg = mock.unconfirmed_private_transfer.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+
+    async def test_add_list_element_string_params(self):
+        client, mock = _make_mock_client()
+        await client.add_list_element(
+            "10.0.0.1", "notification-class,1", "recipient-list", b"\x00"
+        )
+        addr_arg = mock.add_list_element.call_args[0][0]
+        oid_arg = mock.add_list_element.call_args[0][1]
+        prop_arg = mock.add_list_element.call_args[0][2]
+        assert isinstance(addr_arg, BACnetAddress)
+        assert isinstance(oid_arg, ObjectIdentifier)
+        assert isinstance(prop_arg, PropertyIdentifier)
+
+    async def test_remove_list_element_string_params(self):
+        client, mock = _make_mock_client()
+        await client.remove_list_element(
+            "10.0.0.1", "notification-class,1", "recipient-list", b"\x00"
+        )
+        addr_arg = mock.remove_list_element.call_args[0][0]
+        oid_arg = mock.remove_list_element.call_args[0][1]
+        prop_arg = mock.remove_list_element.call_args[0][2]
+        assert isinstance(addr_arg, BACnetAddress)
+        assert isinstance(oid_arg, ObjectIdentifier)
+        assert isinstance(prop_arg, PropertyIdentifier)
+
+    async def test_subscribe_cov_string_params(self):
+        client, mock = _make_mock_client()
+        await client.subscribe_cov("10.0.0.1", "ai,1", 1)
+        addr_arg = mock.subscribe_cov.call_args[0][0]
+        oid_arg = mock.subscribe_cov.call_args[0][1]
+        assert isinstance(addr_arg, BACnetAddress)
+        assert isinstance(oid_arg, ObjectIdentifier)
+
+    async def test_unsubscribe_cov_string_params(self):
+        client, mock = _make_mock_client()
+        await client.unsubscribe_cov("10.0.0.1", "ai,1", 1)
+        addr_arg = mock.unsubscribe_cov.call_args[0][0]
+        oid_arg = mock.unsubscribe_cov.call_args[0][1]
+        assert isinstance(addr_arg, BACnetAddress)
+        assert isinstance(oid_arg, ObjectIdentifier)
+
+    async def test_who_has_string_oid(self):
+        mock_result = []
+        client, mock = _make_mock_client()
+        mock.who_has.return_value = mock_result
+        await client.who_has(object_identifier="ai,1")
+        oid_arg = mock.who_has.call_args[1]["object_identifier"]
+        assert isinstance(oid_arg, ObjectIdentifier)
+        assert oid_arg.object_type == ObjectType.ANALOG_INPUT
+
+
+class TestBroadcastDestinationDefault:
+    """Verify broadcast methods default to GLOBAL_BROADCAST."""
+
+    async def test_who_is_default_broadcast(self):
+        client, mock = _make_mock_client()
+        mock.who_is.return_value = []
+        await client.who_is()
+        dest_arg = mock.who_is.call_args[1]["destination"]
+        assert dest_arg is GLOBAL_BROADCAST
+
+    async def test_discover_default_broadcast(self):
+        client, mock = _make_mock_client()
+        mock.discover.return_value = []
+        await client.discover()
+        dest_arg = mock.discover.call_args[1]["destination"]
+        assert dest_arg is GLOBAL_BROADCAST
+
+    async def test_discover_extended_default_broadcast(self):
+        client, mock = _make_mock_client()
+        mock.discover_extended.return_value = []
+        await client.discover_extended()
+        dest_arg = mock.discover_extended.call_args[1]["destination"]
+        assert dest_arg is GLOBAL_BROADCAST
+
+    async def test_who_has_default_broadcast(self):
+        client, mock = _make_mock_client()
+        mock.who_has.return_value = []
+        await client.who_has(object_name="Test")
+        dest_arg = mock.who_has.call_args[1]["destination"]
+        assert dest_arg is GLOBAL_BROADCAST
+
+    async def test_discover_unconfigured_default_broadcast(self):
+        client, mock = _make_mock_client()
+        mock.discover_unconfigured.return_value = []
+        await client.discover_unconfigured()
+        dest_arg = mock.discover_unconfigured.call_args[1]["destination"]
+        assert dest_arg is GLOBAL_BROADCAST
+
+    async def test_who_is_string_broadcast(self):
+        client, mock = _make_mock_client()
+        mock.who_is.return_value = []
+        await client.who_is(destination="192.168.1.255")
+        dest_arg = mock.who_is.call_args[1]["destination"]
+        assert isinstance(dest_arg, BACnetAddress)
+
+
+class TestEnumStringParsing:
+    """Verify enum parsing in device_communication_control and reinitialize_device."""
+
+    async def test_dcc_string_enable(self):
+        client, mock = _make_mock_client()
+        await client.device_communication_control("10.0.0.1", "enable")
+        state_arg = mock.device_communication_control.call_args[0][1]
+        assert state_arg is EnableDisable.ENABLE
+
+    async def test_dcc_string_disable(self):
+        client, mock = _make_mock_client()
+        await client.device_communication_control("10.0.0.1", "disable")
+        state_arg = mock.device_communication_control.call_args[0][1]
+        assert state_arg is EnableDisable.DISABLE
+
+    async def test_dcc_string_disable_initiation(self):
+        client, mock = _make_mock_client()
+        await client.device_communication_control("10.0.0.1", "disable-initiation")
+        state_arg = mock.device_communication_control.call_args[0][1]
+        assert state_arg is EnableDisable.DISABLE_INITIATION
+
+    async def test_dcc_enum_passthrough(self):
+        client, mock = _make_mock_client()
+        await client.device_communication_control("10.0.0.1", EnableDisable.DISABLE)
+        state_arg = mock.device_communication_control.call_args[0][1]
+        assert state_arg is EnableDisable.DISABLE
+
+    async def test_reinitialize_string_coldstart(self):
+        client, mock = _make_mock_client()
+        await client.reinitialize_device("10.0.0.1", "coldstart")
+        state_arg = mock.reinitialize_device.call_args[0][1]
+        assert state_arg is ReinitializedState.COLDSTART
+
+    async def test_reinitialize_string_warmstart(self):
+        client, mock = _make_mock_client()
+        await client.reinitialize_device("10.0.0.1", "warmstart")
+        state_arg = mock.reinitialize_device.call_args[0][1]
+        assert state_arg is ReinitializedState.WARMSTART
+
+    async def test_reinitialize_string_start_backup(self):
+        client, mock = _make_mock_client()
+        await client.reinitialize_device("10.0.0.1", "start-backup")
+        state_arg = mock.reinitialize_device.call_args[0][1]
+        assert state_arg is ReinitializedState.START_BACKUP
+
+    async def test_reinitialize_enum_passthrough(self):
+        client, mock = _make_mock_client()
+        await client.reinitialize_device("10.0.0.1", ReinitializedState.COLDSTART)
+        state_arg = mock.reinitialize_device.call_args[0][1]
+        assert state_arg is ReinitializedState.COLDSTART
+
+
+class TestNewWrapperDelegation:
+    """Tests for the 4 new wrapper methods."""
+
+    async def test_traverse_hierarchy_delegates(self):
+        client, mock = _make_mock_client()
+        mock.traverse_hierarchy.return_value = []
+        await client.traverse_hierarchy("10.0.0.1", "structured-view,1", max_depth=5)
+        addr_arg = mock.traverse_hierarchy.call_args[0][0]
+        root_arg = mock.traverse_hierarchy.call_args[0][1]
+        assert isinstance(addr_arg, BACnetAddress)
+        assert isinstance(root_arg, ObjectIdentifier)
+        assert root_arg.object_type == ObjectType.STRUCTURED_VIEW
+        assert mock.traverse_hierarchy.call_args[1]["max_depth"] == 5
+
+    async def test_subscribe_cov_property_multiple_delegates(self):
+        client, mock = _make_mock_client()
+        specs = []
+        await client.subscribe_cov_property_multiple("10.0.0.1", 1, specs, lifetime=300)
+        addr_arg = mock.subscribe_cov_property_multiple.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+        assert mock.subscribe_cov_property_multiple.call_args[1]["lifetime"] == 300
+
+    def test_write_group_delegates(self):
+        client, mock = _make_mock_client()
+        client.write_group("10.0.0.1", 1, 8, [])
+        addr_arg = mock.write_group.call_args[0][0]
+        assert isinstance(addr_arg, BACnetAddress)
+        assert mock.write_group.call_args[0][1] == 1
+        assert mock.write_group.call_args[0][2] == 8
+
+    async def test_discover_unconfigured_delegates(self):
+        client, mock = _make_mock_client()
+        mock.discover_unconfigured.return_value = []
+        result = await client.discover_unconfigured("192.168.1.255", timeout=3.0)
+        assert result == []
+        dest_arg = mock.discover_unconfigured.call_args[1]["destination"]
+        assert isinstance(dest_arg, BACnetAddress)
+        assert mock.discover_unconfigured.call_args[1]["timeout"] == 3.0
+
+    async def test_traverse_hierarchy_bacnet_address(self):
+        client, mock = _make_mock_client()
+        mock.traverse_hierarchy.return_value = []
+        addr = parse_address("10.0.0.1")
+        oid = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
+        await client.traverse_hierarchy(addr, oid)
+        addr_arg = mock.traverse_hierarchy.call_args[0][0]
+        root_arg = mock.traverse_hierarchy.call_args[0][1]
+        assert addr_arg == addr
+        assert root_arg == oid

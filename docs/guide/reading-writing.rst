@@ -197,3 +197,45 @@ property rather than the default COV properties for the object type:
        cov_increment=0.5,  # notify when value changes by 0.5
        lifetime=3600,
    )
+
+Multi-object COV subscriptions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:meth:`~bac_py.client.Client.subscribe_cov_property_multiple` subscribes to
+property-level COV for multiple objects in a single request:
+
+.. code-block:: python
+
+   from bac_py.services.cov import (
+       BACnetPropertyReference,
+       COVReference,
+       COVSubscriptionSpecification,
+   )
+   from bac_py.types.enums import ObjectType, PropertyIdentifier
+   from bac_py.types.primitives import ObjectIdentifier
+
+   specs = [
+       COVSubscriptionSpecification(
+           monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+           list_of_cov_references=[
+               COVReference(
+                   monitored_property=BACnetPropertyReference(
+                       property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                   ),
+               ),
+           ],
+       ),
+       COVSubscriptionSpecification(
+           monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 2),
+           list_of_cov_references=[
+               COVReference(
+                   monitored_property=BACnetPropertyReference(
+                       property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                   ),
+               ),
+           ],
+       ),
+   ]
+   await client.subscribe_cov_property_multiple(
+       "192.168.1.100", process_id=3, specifications=specs, lifetime=3600,
+   )

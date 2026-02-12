@@ -8,7 +8,7 @@ Typical usage::
         value = await client.read("192.168.1.100", "ai,1", "pv")
 """
 
-__version__ = "1.0.2"
+__version__ = "1.1.0"
 
 from bac_py.app.application import (
     BACnetApplication,
@@ -23,6 +23,7 @@ from bac_py.app.client import (
     DiscoveredDevice,
     FDTEntryInfo,
     RouterInfo,
+    UnconfiguredDevice,
     decode_cov_values,
 )
 from bac_py.app.server import DefaultServerHandlers
@@ -44,6 +45,7 @@ __all__ = [
     "RouterConfig",
     "RouterInfo",
     "RouterPortConfig",
+    "UnconfiguredDevice",
     "__version__",
     "decode_cov_values",
     "deserialize",
