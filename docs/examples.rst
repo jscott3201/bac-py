@@ -360,6 +360,233 @@ and WriteProperty/WritePropertyMultiple to update writable objects. See
 :ref:`object-model` for the full list of supported object types.
 
 
+.. _event-notifications:
+
+Event Notifications
+-------------------
+
+Configure intrinsic event reporting on an AnalogInput with high/low limits
+and a NotificationClass for routing notifications:
+
+.. code-block:: python
+
+   import asyncio
+   from bac_py.app.application import BACnetApplication, DeviceConfig
+   from bac_py.app.server import DefaultServerHandlers
+   from bac_py.objects.analog import AnalogInputObject
+   from bac_py.objects.device import DeviceObject
+   from bac_py.objects.notification import NotificationClassObject
+   from bac_py.types.enums import EngineeringUnits, EventState, EventType, NotifyType
+
+   async def serve_with_events():
+       config = DeviceConfig(instance_number=100, name="My-Device",
+                             vendor_name="ACME", vendor_id=999)
+
+       async with BACnetApplication(config) as app:
+           device = DeviceObject(instance_number=100, object_name="My-Device",
+                                 vendor_name="ACME", vendor_identifier=999)
+           app.object_db.add(device)
+
+           # NotificationClass routes events to recipients
+           app.object_db.add(NotificationClassObject(
+               instance_number=1,
+               object_name="Critical-Alarms",
+               notification_class=1,
+               priority=[3, 3, 3],  # to-offnormal, to-fault, to-normal
+           ))
+
+           # AnalogInput with intrinsic out-of-range reporting
+           app.object_db.add(AnalogInputObject(
+               instance_number=1,
+               object_name="Zone-Temp",
+               units=EngineeringUnits.DEGREES_CELSIUS,
+               present_value=22.5,
+               high_limit=30.0,
+               low_limit=15.0,
+               deadband=1.0,
+               notification_class=1,
+               event_enable=[True, True, True],
+               notify_type=NotifyType.ALARM,
+           ))
+
+           handlers = DefaultServerHandlers(app, app.object_db, device)
+           handlers.register()
+
+           # The EventEngine starts automatically with the application
+           # and evaluates intrinsic reporting objects each scan cycle.
+           await app.run()
+
+   asyncio.run(serve_with_events())
+
+
+.. _audit-logging-example:
+
+Audit Logging
+-------------
+
+Audit logging is built into ``DefaultServerHandlers``. When the server's
+object database contains an :class:`~bac_py.objects.audit_reporter.AuditReporterObject`
+and an :class:`~bac_py.objects.audit_log.AuditLogObject`, write/create/delete
+operations are automatically recorded:
+
+.. code-block:: python
+
+   from bac_py.objects.audit_log import AuditLogObject
+   from bac_py.objects.audit_reporter import AuditReporterObject
+   from bac_py.types.enums import AuditLevel
+
+   # Add audit objects to the server's object database
+   app.object_db.add(AuditReporterObject(
+       instance_number=1,
+       object_name="Audit-Reporter",
+       audit_level=AuditLevel.DEFAULT,
+   ))
+
+   app.object_db.add(AuditLogObject(
+       instance_number=1,
+       object_name="Audit-Log",
+       buffer_size=1000,
+   ))
+
+   # Now any WriteProperty, CreateObject, or DeleteObject handled by
+   # DefaultServerHandlers will automatically create audit records.
+
+
+.. _scheduling-example:
+
+Scheduling
+----------
+
+Create a Schedule object with weekly time-value pairs and run the
+:class:`~bac_py.app.schedule_engine.ScheduleEngine` to evaluate it:
+
+.. code-block:: python
+
+   import asyncio
+   from bac_py.app.application import BACnetApplication, DeviceConfig
+   from bac_py.app.schedule_engine import ScheduleEngine
+   from bac_py.objects.schedule import ScheduleObject
+   from bac_py.types.constructed import BACnetTimeValue
+   from bac_py.types.primitives import BACnetTime
+
+   async def serve_with_schedule():
+       config = DeviceConfig(instance_number=100, name="My-Device",
+                             vendor_name="ACME", vendor_id=999)
+
+       async with BACnetApplication(config) as app:
+           # ... add device and other objects ...
+
+           # Occupied/unoccupied schedule (Mon-Fri 8am-6pm = 1, else = 0)
+           weekday_entries = [
+               BACnetTimeValue(time=BACnetTime(8, 0, 0, 0), value=1),
+               BACnetTimeValue(time=BACnetTime(18, 0, 0, 0), value=0),
+           ]
+           app.object_db.add(ScheduleObject(
+               instance_number=1,
+               object_name="Occupancy-Schedule",
+               weekly_schedule=[
+                   weekday_entries,  # Monday
+                   weekday_entries,  # Tuesday
+                   weekday_entries,  # Wednesday
+                   weekday_entries,  # Thursday
+                   weekday_entries,  # Friday
+                   [],               # Saturday
+                   [],               # Sunday
+               ],
+               schedule_default=0,
+           ))
+
+           # Start the schedule engine
+           engine = ScheduleEngine(app, scan_interval=10.0)
+           await engine.start()
+
+           try:
+               await app.run()
+           finally:
+               await engine.stop()
+
+   asyncio.run(serve_with_schedule())
+
+
+.. _trend-logging-example:
+
+Trend Logging
+-------------
+
+Create a TrendLog object that records AnalogInput present-value readings
+using the :class:`~bac_py.app.trendlog_engine.TrendLogEngine`:
+
+.. code-block:: python
+
+   import asyncio
+   from bac_py.app.application import BACnetApplication, DeviceConfig
+   from bac_py.app.trendlog_engine import TrendLogEngine
+   from bac_py.objects.trendlog import TrendLogObject
+   from bac_py.types.enums import LoggingType, ObjectType, PropertyIdentifier
+   from bac_py.types.primitives import ObjectIdentifier
+
+   async def serve_with_trendlog():
+       config = DeviceConfig(instance_number=100, name="My-Device",
+                             vendor_name="ACME", vendor_id=999)
+
+       async with BACnetApplication(config) as app:
+           # ... add device and AnalogInput objects ...
+
+           # Log ai,1 present-value every 60 seconds
+           app.object_db.add(TrendLogObject(
+               instance_number=1,
+               object_name="Zone-Temp-Log",
+               log_device_object_property=ObjectIdentifier(
+                   ObjectType.ANALOG_INPUT, 1),
+               logging_type=LoggingType.POLLED,
+               log_interval=60,  # seconds
+               buffer_size=1000,
+           ))
+
+           engine = TrendLogEngine(app, scan_interval=1.0)
+           await engine.start()
+
+           try:
+               await app.run()
+           finally:
+               await engine.stop()
+
+   asyncio.run(serve_with_trendlog())
+
+
+.. _json-serialization-example:
+
+JSON Serialization
+------------------
+
+Serialize BACnet objects and data structures to JSON for REST APIs, webhooks,
+or data export. Any object with a ``to_dict()`` method can be serialized:
+
+.. code-block:: python
+
+   from bac_py.serialization import serialize, deserialize
+
+   # Serialize an object snapshot to JSON bytes
+   ai = app.object_db.get(ObjectIdentifier(ObjectType.ANALOG_INPUT, 1))
+   json_bytes = serialize(ai)
+
+   # Deserialize back to a dict
+   data = deserialize(json_bytes)
+   print(data["object_name"], data["present_value"])
+
+   # Serialize notification parameters for a webhook
+   from bac_py.types.notification_params import NotificationParameters
+   json_bytes = serialize(notification_params)
+
+   # Round-trip a plain dict
+   snapshot = {"device": 100, "readings": [
+       {"object": "ai,1", "value": 22.5},
+       {"object": "ai,2", "value": 19.8},
+   ]}
+   json_bytes = serialize(snapshot)
+   restored = deserialize(json_bytes)
+
+
 .. _multi-network-routing:
 
 Multi-Network Routing

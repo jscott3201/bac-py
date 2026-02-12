@@ -11,5 +11,6 @@ API Reference
    services
    objects
    app
+   conformance
    segmentation
    serialization

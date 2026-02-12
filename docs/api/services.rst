@@ -115,3 +115,59 @@ Private Transfer
 .. automodule:: bac_py.services.private_transfer
    :members:
    :undoc-members:
+
+Event Notification
+------------------
+
+.. automodule:: bac_py.services.event_notification
+   :members:
+   :undoc-members:
+
+Alarm Summary
+-------------
+
+.. automodule:: bac_py.services.alarm_summary
+   :members:
+   :undoc-members:
+
+Audit Services
+--------------
+
+.. automodule:: bac_py.services.audit
+   :members:
+   :undoc-members:
+
+Device Discovery
+----------------
+
+.. automodule:: bac_py.services.device_discovery
+   :members:
+   :undoc-members:
+
+Text Message
+------------
+
+.. automodule:: bac_py.services.text_message
+   :members:
+   :undoc-members:
+
+Virtual Terminal
+----------------
+
+.. automodule:: bac_py.services.virtual_terminal
+   :members:
+   :undoc-members:
+
+Write Group
+-----------
+
+.. automodule:: bac_py.services.write_group
+   :members:
+   :undoc-members:
+
+Fault Algorithms
+----------------
+
+.. automodule:: bac_py.services.fault_algorithms
+   :members:
+   :undoc-members:

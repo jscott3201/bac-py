@@ -38,3 +38,31 @@ COV Manager
 .. automodule:: bac_py.app.cov
    :members:
    :undoc-members:
+
+Event Engine
+------------
+
+.. automodule:: bac_py.app.event_engine
+   :members:
+   :undoc-members:
+
+Audit Manager
+-------------
+
+.. automodule:: bac_py.app.audit
+   :members:
+   :undoc-members:
+
+Schedule Engine
+---------------
+
+.. automodule:: bac_py.app.schedule_engine
+   :members:
+   :undoc-members:
+
+TrendLog Engine
+---------------
+
+.. automodule:: bac_py.app.trendlog_engine
+   :members:
+   :undoc-members:

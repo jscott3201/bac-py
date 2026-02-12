@@ -129,3 +129,129 @@ Value Type Objects
 .. automodule:: bac_py.objects.value_types
    :members:
    :undoc-members:
+
+Access Control Objects
+----------------------
+
+.. automodule:: bac_py.objects.access_control
+   :members:
+   :undoc-members:
+
+Alert Enrollment Object
+-----------------------
+
+.. automodule:: bac_py.objects.alert_enrollment
+   :members:
+   :undoc-members:
+
+Audit Log Object
+----------------
+
+.. automodule:: bac_py.objects.audit_log
+   :members:
+   :undoc-members:
+
+Audit Reporter Object
+---------------------
+
+.. automodule:: bac_py.objects.audit_reporter
+   :members:
+   :undoc-members:
+
+Averaging Object
+----------------
+
+.. automodule:: bac_py.objects.averaging
+   :members:
+   :undoc-members:
+
+Command Object
+--------------
+
+.. automodule:: bac_py.objects.command
+   :members:
+   :undoc-members:
+
+Event Log Object
+----------------
+
+.. automodule:: bac_py.objects.event_log
+   :members:
+   :undoc-members:
+
+Global Group Object
+-------------------
+
+.. automodule:: bac_py.objects.global_group
+   :members:
+   :undoc-members:
+
+Group Object
+------------
+
+.. automodule:: bac_py.objects.group
+   :members:
+   :undoc-members:
+
+Lighting Objects
+----------------
+
+.. automodule:: bac_py.objects.lighting
+   :members:
+   :undoc-members:
+
+Load Control Object
+-------------------
+
+.. automodule:: bac_py.objects.load_control
+   :members:
+   :undoc-members:
+
+Notification Forwarder Object
+-----------------------------
+
+.. automodule:: bac_py.objects.notification_forwarder
+   :members:
+   :undoc-members:
+
+Pulse Converter Object
+----------------------
+
+.. automodule:: bac_py.objects.pulse_converter
+   :members:
+   :undoc-members:
+
+Staging Object
+--------------
+
+.. automodule:: bac_py.objects.staging
+   :members:
+   :undoc-members:
+
+Structured View Object
+----------------------
+
+.. automodule:: bac_py.objects.structured_view
+   :members:
+   :undoc-members:
+
+Timer Object
+------------
+
+.. automodule:: bac_py.objects.timer
+   :members:
+   :undoc-members:
+
+Elevator/Escalator Objects
+--------------------------
+
+.. automodule:: bac_py.objects.transportation
+   :members:
+   :undoc-members:
+
+TrendLog Multiple Object
+-------------------------
+
+.. automodule:: bac_py.objects.trendlog_multiple
+   :members:
+   :undoc-members:

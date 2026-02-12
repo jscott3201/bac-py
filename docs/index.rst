@@ -3,7 +3,7 @@ bac-py
 
 Asynchronous BACnet/IP protocol library for Python 3.13+.
 
-bac-py implements ASHRAE Standard 135-2016 (BACnet) with an async-first
+bac-py implements ASHRAE Standard 135-2020 (BACnet) with an async-first
 architecture built on Python's native ``asyncio`` framework. It provides both
 client and server capabilities for BACnet/IP networks with zero required
 dependencies.

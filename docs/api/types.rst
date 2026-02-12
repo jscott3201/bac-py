@@ -31,3 +31,24 @@ Parsing
 .. automodule:: bac_py.types.parsing
    :members:
    :undoc-members:
+
+Notification Parameters
+-----------------------
+
+.. automodule:: bac_py.types.notification_params
+   :members:
+   :undoc-members:
+
+Fault Parameters
+----------------
+
+.. automodule:: bac_py.types.fault_params
+   :members:
+   :undoc-members:
+
+Audit Types
+-----------
+
+.. automodule:: bac_py.types.audit_types
+   :members:
+   :undoc-members:

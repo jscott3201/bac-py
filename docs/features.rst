@@ -8,7 +8,7 @@ Features
 Core Protocol
 -------------
 
-- **Full BACnet/IP support** per ASHRAE 135-2016 Annex J over UDP
+- **Full BACnet/IP support** per ASHRAE 135-2020 Annex J over UDP
 - **Client and server** in a single library
 - **Async-first** design using native ``asyncio`` -- no threads, no blocking
 - **Zero dependencies** for the core library (optional ``orjson`` for JSON
@@ -83,6 +83,13 @@ Confirmed services (request/response, reliable delivery):
 - AddListElement / RemoveListElement
 - AtomicReadFile / AtomicWriteFile
 - SubscribeCOV
+- ConfirmedEventNotification
+- GetAlarmSummary / GetEnrollmentSummary
+- AcknowledgeAlarm
+- ConfirmedTextMessage
+- ConfirmedAuditNotification *(new in 2020)*
+- AuditLogQuery *(new in 2020)*
+- VT-Open / VT-Close / VT-Data
 - DeviceCommunicationControl
 - ReinitializeDevice
 - ConfirmedPrivateTransfer
@@ -93,6 +100,11 @@ Unconfirmed services (broadcast, fire-and-forget):
 - Who-Has / I-Have
 - TimeSynchronization / UTCTimeSynchronization
 - UnconfirmedCOVNotification
+- UnconfirmedEventNotification
+- UnconfirmedTextMessage
+- UnconfirmedAuditNotification *(new in 2020)*
+- Who-Am-I / You-Are *(new in 2020)*
+- WriteGroup
 - UnconfirmedPrivateTransfer
 
 See :ref:`reading-properties`, :ref:`writing-properties`,
@@ -112,10 +124,18 @@ property validation and read/write access control:
 - **Values:** AnalogValue, BinaryValue, MultiStateValue
 - **Infrastructure:** Device, File, NetworkPort, Channel
 - **Scheduling:** Schedule, Calendar
-- **Trending:** TrendLog
-- **Events:** EventEnrollment, NotificationClass
+- **Trending:** TrendLog, TrendLogMultiple
+- **Events:** EventEnrollment, NotificationClass, EventLog, AlertEnrollment,
+  NotificationForwarder
 - **Safety:** LifeSafetyPoint, LifeSafetyZone
-- **Other:** Accumulator, Loop, Program
+- **Auditing:** AuditReporter, AuditLog *(new in 2020)*
+- **Access Control:** AccessDoor, AccessPoint, AccessZone, AccessCredential,
+  AccessRights, CredentialDataInput
+- **Advanced Control:** Command, Timer, Staging, LoadControl
+- **Lighting:** LightingOutput
+- **Facility:** Elevator, EscalatorGroup, Lift (transportation objects)
+- **Other:** Accumulator, Loop, Program, Averaging, PulseConverter, Group,
+  GlobalGroup, StructuredView
 - **Generic values:** IntegerValue, CharacterStringValue, DateValue,
   DateTimeValue, LargeAnalogValue, OctetStringValue, PositiveIntegerValue,
   TimeValue, BitStringValue, and pattern variants
@@ -210,6 +230,73 @@ lifetimes and per-subscription callbacks. See :ref:`cov-subscriptions` for
 a full example.
 
 
+.. _event-reporting:
+
+Event Reporting
+---------------
+
+Intrinsic and algorithmic event detection per Clause 13. The
+:class:`~bac_py.app.event_engine.EventEngine` evaluates all 18 standard event
+algorithms (change-of-bitstring, change-of-state, change-of-value, out-of-range,
+floating-limit, etc.) and generates event notifications routed through
+:class:`~bac_py.objects.notification.NotificationClassObject` recipient lists
+with day/time filtering and per-recipient confirmed/unconfirmed delivery.
+
+- 18 event algorithms dispatched by the event engine
+- Intrinsic reporting for Accumulator, Loop, and LifeSafety objects
+- NotificationClass recipient list routing with calendar-aware filtering
+- Alarm acknowledgment via AcknowledgeAlarm service
+- GetAlarmSummary and GetEnrollmentSummary queries
+
+See :ref:`event-notifications` for a usage example.
+
+
+.. _scheduling:
+
+Scheduling
+----------
+
+The :class:`~bac_py.app.schedule_engine.ScheduleEngine` evaluates
+:class:`~bac_py.objects.schedule.ScheduleObject` instances, resolving
+``Weekly_Schedule`` and ``Exception_Schedule`` entries with calendar-aware
+priority to determine the effective present value at any point in time.
+
+See :ref:`scheduling-example` for a usage example.
+
+
+.. _trend-logging:
+
+Trend Logging
+-------------
+
+The :class:`~bac_py.app.trendlog_engine.TrendLogEngine` records property
+values from :class:`~bac_py.objects.trendlog.TrendLogObject` instances via
+polling, COV, or triggered acquisition modes. Configurable buffer sizes and
+circular buffer management.
+
+See :ref:`trend-logging-example` for a usage example.
+
+
+.. _audit-logging:
+
+Audit Logging
+-------------
+
+Audit logging support *(new in ASHRAE 135-2020)*. The
+:class:`~bac_py.app.audit.AuditManager` instruments server handlers to
+automatically record write, create, and delete operations as audit log entries.
+Includes audit log query and notification services for distributing audit records.
+
+- :class:`~bac_py.objects.audit_reporter.AuditReporterObject` for generating
+  audit records
+- :class:`~bac_py.objects.audit_log.AuditLogObject` for storing audit records
+  with buffer management
+- ConfirmedAuditNotification / UnconfirmedAuditNotification services
+- AuditLogQuery service for retrieving stored records
+
+See :ref:`audit-logging-example` for a usage example.
+
+
 .. _type-safety:
 
 Type Safety
@@ -250,7 +337,9 @@ Architecture
 .. code-block:: text
 
    src/bac_py/
-     app/            High-level application, client API, server handlers, TSM
+     app/            High-level application, client API, server handlers, TSM,
+                     event engine, schedule engine, trendlog engine, audit manager
+     conformance/    BIBB declarations and PICS generation
      encoding/       ASN.1/BER tag-length-value encoding and APDU codec
      network/        Addressing, NPDU network layer, multi-port router
      objects/        BACnet object model (Device, Analog, Binary, MultiState, ...)
