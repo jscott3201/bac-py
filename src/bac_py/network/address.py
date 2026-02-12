@@ -193,6 +193,7 @@ class BACnetAddress:
         - ``"2:192.168.1.100:47808"`` for remote BACnet/IP unicast
         - ``"*"`` for global broadcast
         - ``"2:*"`` for remote broadcast on network 2
+        - ``"4352:01"`` for remote non-IP station (e.g. MS/TP behind router)
         - ``""`` for local broadcast (no MAC)
         """
         if self.is_global_broadcast:
@@ -296,6 +297,11 @@ _ADDR6_RE = re.compile(
     r"(?::(\d+))?$"  # optional :port
 )
 
+# Remote station with arbitrary hex MAC: "NETWORK:HEXMAC"
+# Handles MS/TP (1-byte), ARCNET (1-byte), or other non-IP data links
+# behind routers. MAC must be even-length hex (at least 1 byte).
+_REMOTE_HEX_RE = re.compile(r"^(\d+):([0-9a-fA-F]{2}(?:[0-9a-fA-F]{2})*)$")
+
 
 def parse_address(addr: str | BACnetAddress) -> BACnetAddress:
     """Parse a human-readable address string to a BACnetAddress.
@@ -309,6 +315,9 @@ def parse_address(addr: str | BACnetAddress) -> BACnetAddress:
         "[::1]"                   -> local BACnet/IPv6, default port 0xBAC0
         "[::1]:47808"             -> local BACnet/IPv6, explicit port
         "2:[::1]:47808"           -> remote network 2, IPv6
+        "AA:BB:CC:DD:EE:FF"       -> local Ethernet MAC
+        "2:AA:BB:CC:DD:EE:FF"     -> remote Ethernet MAC on network 2
+        "4352:01"                 -> remote station with hex MAC (e.g. MS/TP)
         "*"                       -> global broadcast
         "2:*"                     -> remote broadcast on network 2
 
@@ -357,30 +366,38 @@ def parse_address(addr: str | BACnetAddress) -> BACnetAddress:
         return BACnetAddress(mac_address=mac)
 
     m = _ADDR_RE.match(addr)
-    if not m:
-        msg = (
-            f"Cannot parse address: {addr!r}. "
-            "Expected format like '192.168.1.100', '192.168.1.100:47808', "
-            "'2:192.168.1.100', '[::1]:47808', or '*'"
-        )
-        raise ValueError(msg)
+    if m:
+        network_str, ip, port_str, wildcard = m.groups()
+        network = int(network_str) if network_str is not None else None
 
-    network_str, ip, port_str, wildcard = m.groups()
-    network = int(network_str) if network_str is not None else None
+        if wildcard:
+            # "*" or "N:*"
+            if network is None:
+                return GLOBAL_BROADCAST
+            return remote_broadcast(network)
 
-    if wildcard:
-        # "*" or "N:*"
-        if network is None:
-            return GLOBAL_BROADCAST
-        return remote_broadcast(network)
+        # IP address with optional port
+        port = int(port_str) if port_str else _DEFAULT_PORT
+        if not (0 <= port <= 65535):
+            msg = f"Port number out of range: {port}"
+            raise ValueError(msg)
+        mac = BIPAddress(host=ip, port=port).encode()
 
-    # IP address with optional port
-    port = int(port_str) if port_str else _DEFAULT_PORT
-    if not (0 <= port <= 65535):
-        msg = f"Port number out of range: {port}"
-        raise ValueError(msg)
-    mac = BIPAddress(host=ip, port=port).encode()
+        if network is not None:
+            return remote_station(network, mac)
+        return BACnetAddress(mac_address=mac)
 
-    if network is not None:
+    # Try remote station with arbitrary hex MAC (e.g. MS/TP: "4352:01")
+    mh = _REMOTE_HEX_RE.match(addr)
+    if mh:
+        network = int(mh.group(1))
+        mac = bytes.fromhex(mh.group(2))
         return remote_station(network, mac)
-    return BACnetAddress(mac_address=mac)
+
+    msg = (
+        f"Cannot parse address: {addr!r}. "
+        "Expected format like '192.168.1.100', '192.168.1.100:47808', "
+        "'2:192.168.1.100', '[::1]:47808', 'AA:BB:CC:DD:EE:FF', "
+        "'4352:01' (network:hex_mac), or '*'"
+    )
+    raise ValueError(msg)

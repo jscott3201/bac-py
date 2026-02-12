@@ -21,17 +21,40 @@ dependencies.
    asyncio.run(main())
 
 Head to :doc:`getting-started` for installation and first steps, or browse
-the :doc:`examples` to see what bac-py can do. For a high-level overview of
+the :doc:`guide/reading-writing` to see what bac-py can do. For a high-level overview of
 capabilities, see :doc:`features`.
 
 .. toctree::
+   :caption: Getting Started
    :maxdepth: 2
-   :caption: Contents
 
    getting-started
    features
-   examples
-   api/index
+
+.. toctree::
+   :caption: User Guide
+   :maxdepth: 2
+
+   guide/reading-writing
+   guide/discovery-networking
+   guide/events-alarms
+   guide/server-mode
+   guide/device-management
+
+.. toctree::
+   :caption: API Reference
+   :maxdepth: 2
+
+   api/app
+   api/types
+   api/services
+   api/objects
+   api/encoding
+   api/network
+   api/transport
+   api/segmentation
+   api/conformance
+   api/serialization
 
 
 Indices and tables

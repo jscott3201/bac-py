@@ -178,6 +178,10 @@ The convenience API accepts device addresses as plain strings:
    # Remote Ethernet address on network 5
    addr = parse_address("5:aa:bb:cc:dd:ee:ff")
 
+   # Remote MS/TP or non-IP station (network:hex_mac)
+   addr = parse_address("4352:01")       # 1-byte MS/TP address on network 4352
+   addr = parse_address("100:0a0b")      # 2-byte address on network 100
+
 
 .. _configuration:
 

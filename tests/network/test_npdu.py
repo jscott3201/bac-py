@@ -177,3 +177,196 @@ class TestSourceValidation:
         npdu = NPDU(source=src, apdu=b"\x01")
         with pytest.raises(ValueError, match="SLEN cannot be 0"):
             encode_npdu(npdu)
+
+
+# ---------------------------------------------------------------------------
+# Variable-length MAC address parametrized tests
+# ---------------------------------------------------------------------------
+
+# MAC lengths to test (skip 6 = BIP and 18 = BIP6 as already well-tested)
+_MAC_LENGTHS = [1, 2, 3, 4, 5, 7, 8]
+
+
+def _make_mac(length: int) -> bytes:
+    """Generate a deterministic MAC of the given length."""
+    return bytes(range(0x10, 0x10 + length))
+
+
+class TestVariableMacLengths:
+    """Parametrized tests for variable-length MAC addresses in NPDU encode/decode."""
+
+    # -- SADR round-trips with variable MAC lengths --
+
+    @pytest.mark.parametrize("mac_len", _MAC_LENGTHS, ids=[f"slen_{n}" for n in _MAC_LENGTHS])
+    def test_sadr_round_trip(self, mac_len: int):
+        """Source address with variable MAC length encodes and decodes correctly."""
+        mac = _make_mac(mac_len)
+        src = BACnetAddress(network=100, mac_address=mac)
+        npdu = NPDU(source=src, apdu=b"\xfe\xed")
+
+        encoded = encode_npdu(npdu)
+        decoded = decode_npdu(encoded)
+
+        assert decoded.source is not None
+        assert decoded.source.network == 100
+        assert decoded.source.mac_address == mac
+        assert len(decoded.source.mac_address) == mac_len
+        assert decoded.destination is None
+        assert decoded.apdu == b"\xfe\xed"
+
+    @pytest.mark.parametrize("mac_len", _MAC_LENGTHS, ids=[f"slen_{n}" for n in _MAC_LENGTHS])
+    def test_sadr_slen_byte_in_wire(self, mac_len: int):
+        """SLEN byte in the encoded output matches the actual source MAC length."""
+        mac = _make_mac(mac_len)
+        src = BACnetAddress(network=100, mac_address=mac)
+        npdu = NPDU(source=src, apdu=b"\xaa")
+
+        encoded = encode_npdu(npdu)
+        # Wire layout (source only, no destination):
+        #   [0] version
+        #   [1] control (source bit 0x08 set)
+        #   [2..3] SNET (2 bytes big-endian)
+        #   [4] SLEN
+        slen_byte = encoded[4]
+        assert slen_byte == mac_len
+        # Verify the MAC bytes follow immediately after SLEN
+        assert encoded[5 : 5 + mac_len] == mac
+
+    # -- DADR round-trips with variable MAC lengths --
+
+    @pytest.mark.parametrize("mac_len", _MAC_LENGTHS, ids=[f"dlen_{n}" for n in _MAC_LENGTHS])
+    def test_dadr_round_trip(self, mac_len: int):
+        """Destination address with variable MAC length encodes and decodes correctly."""
+        mac = _make_mac(mac_len)
+        dest = BACnetAddress(network=200, mac_address=mac)
+        npdu = NPDU(destination=dest, apdu=b"\xca\xfe")
+
+        encoded = encode_npdu(npdu)
+        decoded = decode_npdu(encoded)
+
+        assert decoded.destination is not None
+        assert decoded.destination.network == 200
+        assert decoded.destination.mac_address == mac
+        assert len(decoded.destination.mac_address) == mac_len
+        assert decoded.source is None
+        assert decoded.apdu == b"\xca\xfe"
+
+    @pytest.mark.parametrize("mac_len", _MAC_LENGTHS, ids=[f"dlen_{n}" for n in _MAC_LENGTHS])
+    def test_dadr_dlen_byte_in_wire(self, mac_len: int):
+        """DLEN byte in the encoded output matches the actual destination MAC length."""
+        mac = _make_mac(mac_len)
+        dest = BACnetAddress(network=200, mac_address=mac)
+        npdu = NPDU(destination=dest, apdu=b"\xbb")
+
+        encoded = encode_npdu(npdu)
+        # Wire layout (destination only, no source):
+        #   [0] version
+        #   [1] control (destination bit 0x20 set)
+        #   [2..3] DNET (2 bytes big-endian)
+        #   [4] DLEN
+        dlen_byte = encoded[4]
+        assert dlen_byte == mac_len
+        # Verify the MAC bytes follow immediately after DLEN
+        assert encoded[5 : 5 + mac_len] == mac
+
+    # -- Combined SADR + DADR with different MAC lengths --
+
+    @pytest.mark.parametrize(
+        ("src_mac_len", "dst_mac_len"),
+        [
+            (1, 5),
+            (5, 1),
+            (2, 7),
+            (7, 2),
+            (3, 8),
+            (8, 3),
+            (4, 7),
+            (1, 8),
+        ],
+        ids=[
+            "src1_dst5",
+            "src5_dst1",
+            "src2_dst7",
+            "src7_dst2",
+            "src3_dst8",
+            "src8_dst3",
+            "src4_dst7",
+            "src1_dst8",
+        ],
+    )
+    def test_combined_sadr_dadr_round_trip(self, src_mac_len: int, dst_mac_len: int):
+        """NPDU with both source and destination of different MAC lengths round-trips."""
+        src_mac = _make_mac(src_mac_len)
+        dst_mac = bytes(range(0xA0, 0xA0 + dst_mac_len))
+        src = BACnetAddress(network=300, mac_address=src_mac)
+        dest = BACnetAddress(network=400, mac_address=dst_mac)
+        npdu = NPDU(source=src, destination=dest, hop_count=42, apdu=b"\xde\xad")
+
+        encoded = encode_npdu(npdu)
+        decoded = decode_npdu(encoded)
+
+        assert decoded.source is not None
+        assert decoded.source.network == 300
+        assert decoded.source.mac_address == src_mac
+        assert len(decoded.source.mac_address) == src_mac_len
+
+        assert decoded.destination is not None
+        assert decoded.destination.network == 400
+        assert decoded.destination.mac_address == dst_mac
+        assert len(decoded.destination.mac_address) == dst_mac_len
+
+        assert decoded.hop_count == 42
+        assert decoded.apdu == b"\xde\xad"
+
+    @pytest.mark.parametrize(
+        ("src_mac_len", "dst_mac_len"),
+        [
+            (1, 5),
+            (5, 1),
+            (2, 7),
+            (7, 2),
+            (3, 8),
+            (8, 3),
+            (4, 7),
+            (1, 8),
+        ],
+        ids=[
+            "src1_dst5",
+            "src5_dst1",
+            "src2_dst7",
+            "src7_dst2",
+            "src3_dst8",
+            "src8_dst3",
+            "src4_dst7",
+            "src1_dst8",
+        ],
+    )
+    def test_combined_dlen_slen_bytes_in_wire(self, src_mac_len: int, dst_mac_len: int):
+        """DLEN and SLEN bytes in the wire format match actual MAC lengths when both present."""
+        src_mac = _make_mac(src_mac_len)
+        dst_mac = bytes(range(0xA0, 0xA0 + dst_mac_len))
+        src = BACnetAddress(network=300, mac_address=src_mac)
+        dest = BACnetAddress(network=400, mac_address=dst_mac)
+        npdu = NPDU(source=src, destination=dest, hop_count=42, apdu=b"\x01")
+
+        encoded = encode_npdu(npdu)
+        # Wire layout (both destination and source):
+        #   [0] version
+        #   [1] control (destination 0x20 | source 0x08 set)
+        #   [2..3] DNET
+        #   [4] DLEN
+        #   [5 .. 5+DLEN-1] DADR
+        #   [5+DLEN .. 5+DLEN+1] SNET
+        #   [5+DLEN+2] SLEN
+        #   [5+DLEN+3 .. ] SADR
+        #   then hop_count, then APDU
+
+        # Verify DLEN
+        dlen_offset = 4
+        assert encoded[dlen_offset] == dst_mac_len
+        assert encoded[dlen_offset + 1 : dlen_offset + 1 + dst_mac_len] == dst_mac
+
+        # Verify SLEN
+        slen_offset = 5 + dst_mac_len + 2  # after DADR + 2 bytes SNET
+        assert encoded[slen_offset] == src_mac_len
+        assert encoded[slen_offset + 1 : slen_offset + 1 + src_mac_len] == src_mac

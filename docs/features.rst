@@ -200,9 +200,12 @@ Network Routing
 ---------------
 
 Multi-port BACnet router support per Clause 6. Configure bac-py to route
-between multiple BACnet/IP networks with dynamic routing tables. See
-:ref:`multi-network-routing` for configuration and :ref:`router-discovery`
-for discovering existing routers on the network.
+between multiple BACnet/IP networks with dynamic routing tables, including
+mixed data link forwarding between BACnet/IP, MS/TP, and Ethernet networks.
+The network layer automatically learns router paths from routed APDUs
+(SNET/SADR fields), enabling efficient unicast routing to devices on remote
+networks. See :ref:`multi-network-routing` for configuration and
+:ref:`router-discovery` for discovering existing routers on the network.
 
 .. code-block:: python
 
@@ -314,6 +317,17 @@ using colon-separated hex notation:
 
    # Remote Ethernet address on network 5
    addr = parse_address("5:aa:bb:cc:dd:ee:ff")
+
+Remote MS/TP, ARCNET, and other non-IP stations behind routers are addressed
+using ``network:hex_mac`` notation where the MAC is even-length hex:
+
+.. code-block:: python
+
+   # MS/TP device (1-byte MAC) on network 4352
+   addr = parse_address("4352:01")
+
+   # 2-byte MAC device on network 100
+   addr = parse_address("100:0a0b")
 
 
 .. _bbmd-support:
@@ -567,4 +581,4 @@ Architecture
      transport/      BACnet/IP (Annex J) UDP, BACnet/IPv6, Ethernet, BVLL, BBMD
      types/          Primitive types, enumerations, and string parsing
 
-See the :doc:`api/index` for full API documentation of each module.
+See the :doc:`api/app` for full API documentation of each module.

@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-02-12
+
+### Fixed
+
+- **MS/TP and non-IP address parsing** -- `parse_address()` now supports
+  `"NETWORK:HEXMAC"` format (e.g. `"4352:01"` for MS/TP devices behind routers),
+  enabling the high-level Client to communicate with devices on remote non-IP
+  data links discovered via BBMD or router forwarding.
+- **Router path learning from routed APDUs** -- The network layer now learns
+  router paths from the SNET/SADR fields of incoming routed APDUs. When a
+  response arrives from a remote network, the transport-level sender is cached
+  as the router for that network, enabling efficient unicast routing for
+  subsequent requests instead of broadcasting.
+- **`BACnetAddress.__str__()` round-trip completeness** -- Address string output
+  for non-IP MACs (1-byte MS/TP, 2-byte ARCNET, etc.) now round-trips correctly
+  through `parse_address()`.
+
+### Changed
+
+- **Documentation sidebar restructure** -- Split monolithic `examples.rst` (907
+  lines) into 5 topical guide pages under `docs/guide/` (Reading and Writing
+  Properties, Discovery and Networking, Events and Alarms, Server Mode, Device
+  Management and Tools). Reorganized the Sphinx sidebar from 4 flat entries into
+  3 captioned sections (Getting Started, User Guide, API Reference) with 17
+  navigable entries. API modules are now listed directly in the top-level toctree
+  instead of behind an intermediate landing page.
+
+### Added
+
+- 116 new unit tests for Ethernet and MS/TP device support:
+  - NPDU variable MAC length encode/decode (1--8 byte SADR/DADR)
+  - Mixed data link router forwarding (BIP↔MS/TP, 2-byte MAC, broadcasts)
+  - Address `str()`↔`parse_address()` round-trips for all MAC formats
+  - Network layer remote send with variable-length MACs and router cache learning
+
 ## [1.0.0] - 2026-02-12
 
 ### Added

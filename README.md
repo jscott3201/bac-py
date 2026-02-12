@@ -424,7 +424,7 @@ from bac_py.encoding.primitives import (
 ## Testing
 
 ```bash
-# Run the unit test suite (4,779+ tests)
+# Run the unit test suite (4,920+ tests)
 make test
 
 # With coverage

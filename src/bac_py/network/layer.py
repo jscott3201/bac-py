@@ -252,6 +252,11 @@ class NetworkLayer:
         # network from the NPDU if present (for routed messages).
         if npdu.source is not None:
             src_addr = npdu.source
+            # Learn that source_mac is a router for this remote network.
+            # This enables efficient unicast routing for subsequent requests
+            # to devices on that network (e.g. MS/TP devices behind a router).
+            if src_addr.network is not None and src_addr.network != 0xFFFF:
+                self._learn_router_from_source(src_addr.network, source_mac)
         else:
             src_addr = BACnetAddress(
                 mac_address=source_mac,
@@ -332,6 +337,45 @@ class NetworkLayer:
         logger.debug(
             "Router cache updated: %s via %s",
             msg.networks,
+            source_mac.hex(),
+        )
+
+    def _learn_router_from_source(self, snet: int, source_mac: bytes) -> None:
+        """Learn a router path from a routed APDU's SNET/SADR fields.
+
+        When an APDU arrives with SNET set, the transport-level sender
+        (source_mac) is a router that can reach that remote network.
+        Cache this path so subsequent requests to devices on that network
+        can be sent as unicast to the router rather than broadcast.
+
+        Only creates an entry if one doesn't already exist or the existing
+        entry has expired, to avoid overwriting explicit I-Am-Router-To-Network
+        entries.
+
+        :param snet: The source network number from the NPDU.
+        :param source_mac: Transport-level MAC of the router that forwarded
+            the message.
+        """
+        existing = self._router_cache.get(snet)
+        if existing is not None:
+            now = time.monotonic()
+            if now - existing.last_seen <= self._cache_ttl:
+                # Fresh entry exists — just refresh the timestamp
+                self._router_cache[snet] = RouterCacheEntry(
+                    network=snet,
+                    router_mac=existing.router_mac,
+                    last_seen=now,
+                )
+                return
+        # No entry or stale — learn from source
+        self._router_cache[snet] = RouterCacheEntry(
+            network=snet,
+            router_mac=source_mac,
+            last_seen=time.monotonic(),
+        )
+        logger.debug(
+            "Learned router for network %d from routed APDU via %s",
+            snet,
             source_mac.hex(),
         )
 

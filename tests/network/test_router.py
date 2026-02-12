@@ -1858,3 +1858,342 @@ class TestEstablishDisconnectConnection:
         router._on_port_receive(1, data, _MAC_DEVICE_A)
 
         assert len(router.routing_table.get_all_entries()) == count_before
+
+
+# ---------------------------------------------------------------------------
+# Mixed data-link forwarding (BIP 6-byte / MS/TP 1-byte / 2-byte MACs)
+# ---------------------------------------------------------------------------
+
+# MAC addresses for the mixed-datalink tests
+_BIP_MAC_ROUTER = b"\xc0\xa8\x01\x01\xba\xc0"  # 192.168.1.1:47808 (router BIP port)
+_MSTP_MAC_ROUTER = b"\x01"  # MS/TP MAC 1 (router MS/TP port)
+_MSTP_MAC_ROUTER_P3 = b"\x02"  # MS/TP MAC 2 (router 2nd MS/TP port)
+_BIP_DEVICE = b"\xc0\xa8\x01\x0a\xba\xc0"  # 192.168.1.10:47808
+_MSTP_DEVICE = b"\x0a"  # MS/TP address 10
+_MSTP_DEVICE_P3 = b"\x14"  # MS/TP address 20 on net 30
+_TWO_BYTE_MAC_ROUTER = b"\x00\x01"  # 2-byte router MAC
+_TWO_BYTE_DEVICE = b"\x00\x0a"  # 2-byte device MAC
+
+
+def _make_mixed_router(
+    *,
+    three_port: bool = False,
+) -> tuple:
+    """Create a router with mixed BIP (net 10) and MS/TP (net 20) ports.
+
+    If *three_port* is True, adds a third MS/TP port (net 30).
+
+    Returns (router, t_bip, t_mstp[, t_mstp2]).
+    """
+    t_bip = _make_transport(local_mac=_BIP_MAC_ROUTER)
+    t_mstp = _make_transport(local_mac=_MSTP_MAC_ROUTER)
+    p_bip = RouterPort(
+        port_id=1,
+        network_number=10,
+        transport=t_bip,
+        mac_address=_BIP_MAC_ROUTER,
+        max_npdu_length=1497,
+    )
+    p_mstp = RouterPort(
+        port_id=2,
+        network_number=20,
+        transport=t_mstp,
+        mac_address=_MSTP_MAC_ROUTER,
+        max_npdu_length=501,
+    )
+    ports = [p_bip, p_mstp]
+    if three_port:
+        t_mstp2 = _make_transport(local_mac=_MSTP_MAC_ROUTER_P3)
+        p_mstp2 = RouterPort(
+            port_id=3,
+            network_number=30,
+            transport=t_mstp2,
+            mac_address=_MSTP_MAC_ROUTER_P3,
+            max_npdu_length=501,
+        )
+        ports.append(p_mstp2)
+        router = NetworkRouter(ports, application_port_id=1)
+        return router, t_bip, t_mstp, t_mstp2
+    router = NetworkRouter(ports, application_port_id=1)
+    return router, t_bip, t_mstp
+
+
+class TestMixedDataLinkForwarding:
+    """Tests for router forwarding between mixed data link types.
+
+    Covers BACnet/IP (6-byte MAC) and MS/TP (1-byte MAC) networks,
+    plus 2-byte MAC scenarios.
+    """
+
+    # 1. BIP -> MS/TP unicast forwarding
+    def test_bip_to_mstp_unicast(self) -> None:
+        """Route APDU from BIP (6-byte MAC, net 10) to MS/TP (1-byte MAC, net 20).
+
+        Verify DADR length, SNET/SADR injection, and hop count decrement.
+        """
+        router, _t_bip, t_mstp = _make_mixed_router()
+
+        data = _build_routed_npdu(
+            dnet=20,
+            dadr=_MSTP_DEVICE,  # 1-byte MS/TP MAC
+            apdu=b"\x10\x00",
+            hop_count=100,
+        )
+        router._on_port_receive(1, data, _BIP_DEVICE)
+
+        # Should be delivered as unicast on the MS/TP port
+        t_mstp.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t_mstp.send_unicast.call_args[0]
+
+        # MAC on the wire must be the 1-byte MS/TP address
+        assert sent_mac == _MSTP_DEVICE
+        assert len(sent_mac) == 1
+
+        delivered = decode_npdu(sent_bytes)
+        # Destination stripped on final-hop delivery
+        assert delivered.destination is None
+        assert delivered.apdu == b"\x10\x00"
+
+        # SNET/SADR injected with originator's 6-byte BIP MAC
+        assert delivered.source is not None
+        assert delivered.source.network == 10
+        assert delivered.source.mac_address == _BIP_DEVICE
+        assert len(delivered.source.mac_address) == 6
+
+    # 2. MS/TP -> BIP unicast forwarding
+    def test_mstp_to_bip_unicast(self) -> None:
+        """Route APDU from MS/TP (1-byte MAC, net 20) to BIP (6-byte MAC, net 10).
+
+        Verify DADR length and SNET/SADR injection with 1-byte source MAC.
+        """
+        router, t_bip, _t_mstp = _make_mixed_router()
+
+        data = _build_routed_npdu(
+            dnet=10,
+            dadr=_BIP_DEVICE,  # 6-byte BIP MAC
+            apdu=b"\x20\x00",
+        )
+        router._on_port_receive(2, data, _MSTP_DEVICE)
+
+        t_bip.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t_bip.send_unicast.call_args[0]
+
+        # Wire MAC is the 6-byte BIP address
+        assert sent_mac == _BIP_DEVICE
+        assert len(sent_mac) == 6
+
+        delivered = decode_npdu(sent_bytes)
+        assert delivered.destination is None
+        assert delivered.apdu == b"\x20\x00"
+
+        # Source injected as 1-byte MS/TP MAC from net 20
+        assert delivered.source is not None
+        assert delivered.source.network == 20
+        assert delivered.source.mac_address == _MSTP_DEVICE
+        assert len(delivered.source.mac_address) == 1
+
+    # 3. MS/TP -> MS/TP across different networks
+    def test_mstp_to_mstp_cross_network(self) -> None:
+        """Route from net 20 (1-byte MAC) to net 30 (1-byte MAC) via router.
+
+        Verify 1-byte MAC preserved in both DADR and SADR.
+        """
+        router, _t_bip, _t_mstp, t_mstp2 = _make_mixed_router(three_port=True)
+
+        data = _build_routed_npdu(
+            dnet=30,
+            dadr=_MSTP_DEVICE_P3,  # 1-byte target on net 30
+            apdu=b"\x30\x00",
+        )
+        router._on_port_receive(2, data, _MSTP_DEVICE)
+
+        t_mstp2.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t_mstp2.send_unicast.call_args[0]
+
+        # Wire MAC to the 1-byte MS/TP destination
+        assert sent_mac == _MSTP_DEVICE_P3
+        assert len(sent_mac) == 1
+
+        delivered = decode_npdu(sent_bytes)
+        assert delivered.destination is None
+        assert delivered.apdu == b"\x30\x00"
+
+        # Source injected as 1-byte MS/TP MAC from net 20
+        assert delivered.source is not None
+        assert delivered.source.network == 20
+        assert delivered.source.mac_address == _MSTP_DEVICE
+        assert len(delivered.source.mac_address) == 1
+
+    # 4. BIP -> MS/TP directed broadcast (DLEN=0)
+    def test_bip_to_mstp_directed_broadcast(self) -> None:
+        """Directed broadcast from BIP to MS/TP (DNET=20, DLEN=0).
+
+        Router forwards as local broadcast on the MS/TP port.
+        """
+        router, _t_bip, t_mstp = _make_mixed_router()
+
+        data = _build_routed_npdu(
+            dnet=20,
+            dadr=b"",  # DLEN=0 -> broadcast on destination network
+            apdu=b"\x10\x08",  # e.g. Who-Is APDU
+        )
+        router._on_port_receive(1, data, _BIP_DEVICE)
+
+        t_mstp.send_broadcast.assert_called_once()
+        sent_bytes = t_mstp.send_broadcast.call_args[0][0]
+
+        delivered = decode_npdu(sent_bytes)
+        # Destination stripped on delivery (local broadcast)
+        assert delivered.destination is None
+        assert delivered.apdu == b"\x10\x08"
+
+        # SNET/SADR injected with 6-byte BIP source
+        assert delivered.source is not None
+        assert delivered.source.network == 10
+        assert delivered.source.mac_address == _BIP_DEVICE
+
+    # 5. MS/TP global broadcast (I-Am style) forwarded to all ports
+    def test_mstp_global_broadcast_preserves_source(self) -> None:
+        """Global broadcast from MS/TP device preserves SNET/SADR.
+
+        SNET/SADR (1-byte MAC) should be injected and preserved across
+        all forwarded ports.
+        """
+        router, t_bip, _t_mstp = _make_mixed_router()
+
+        data = _build_global_broadcast_npdu(
+            apdu=b"\x10\x00\x04\x00",  # I-Am-like APDU
+        )
+        router._on_port_receive(2, data, _MSTP_DEVICE)
+
+        # Global broadcast forwarded to the BIP port
+        t_bip.send_broadcast.assert_called_once()
+        forwarded_bytes = t_bip.send_broadcast.call_args[0][0]
+        forwarded = decode_npdu(forwarded_bytes)
+
+        # SNET/SADR injected with 1-byte MS/TP MAC
+        assert forwarded.source is not None
+        assert forwarded.source.network == 20
+        assert forwarded.source.mac_address == _MSTP_DEVICE
+        assert len(forwarded.source.mac_address) == 1
+
+        # Global broadcast destination preserved
+        assert forwarded.destination is not None
+        assert forwarded.destination.network == 0xFFFF
+
+    def test_mstp_global_broadcast_preserves_existing_snet_sadr(self) -> None:
+        """Global broadcast with existing SNET/SADR (multi-hop).
+
+        The existing 1-byte SADR must be preserved.
+        """
+        router, t_bip, _t_mstp = _make_mixed_router()
+
+        orig_src = BACnetAddress(network=20, mac_address=_MSTP_DEVICE)
+        data = _build_global_broadcast_npdu(
+            apdu=b"\x10\x00",
+            source=orig_src,
+        )
+        router._on_port_receive(2, data, _MSTP_MAC_ROUTER)
+
+        t_bip.send_broadcast.assert_called_once()
+        forwarded_bytes = t_bip.send_broadcast.call_args[0][0]
+        forwarded = decode_npdu(forwarded_bytes)
+
+        assert forwarded.source is not None
+        assert forwarded.source.network == 20
+        assert forwarded.source.mac_address == _MSTP_DEVICE
+        assert len(forwarded.source.mac_address) == 1
+
+    # 6. 2-byte MAC forwarding (ARCNET-like)
+    def test_two_byte_mac_forwarding(self) -> None:
+        """Route from BIP (6-byte) to a network with 2-byte MACs.
+
+        Verify DLEN=2 is preserved and SADR is injected correctly.
+        """
+        t_bip = _make_transport(local_mac=_BIP_MAC_ROUTER)
+        t_two = _make_transport(local_mac=_TWO_BYTE_MAC_ROUTER)
+        p_bip = RouterPort(
+            port_id=1,
+            network_number=10,
+            transport=t_bip,
+            mac_address=_BIP_MAC_ROUTER,
+            max_npdu_length=1497,
+        )
+        p_two = RouterPort(
+            port_id=2,
+            network_number=40,
+            transport=t_two,
+            mac_address=_TWO_BYTE_MAC_ROUTER,
+            max_npdu_length=501,
+        )
+        router = NetworkRouter([p_bip, p_two], application_port_id=1)
+
+        data = _build_routed_npdu(
+            dnet=40,
+            dadr=_TWO_BYTE_DEVICE,  # 2-byte MAC
+            apdu=b"\x40\x00",
+        )
+        router._on_port_receive(1, data, _BIP_DEVICE)
+
+        t_two.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t_two.send_unicast.call_args[0]
+
+        # Wire MAC is the 2-byte address
+        assert sent_mac == _TWO_BYTE_DEVICE
+        assert len(sent_mac) == 2
+
+        delivered = decode_npdu(sent_bytes)
+        assert delivered.destination is None
+        assert delivered.apdu == b"\x40\x00"
+
+        # SNET/SADR injected with 6-byte BIP source
+        assert delivered.source is not None
+        assert delivered.source.network == 10
+        assert delivered.source.mac_address == _BIP_DEVICE
+        assert len(delivered.source.mac_address) == 6
+
+    def test_two_byte_mac_to_bip_forwarding(self) -> None:
+        """Route from 2-byte MAC network (net 40) to BIP (net 10).
+
+        Verify SADR is 2-byte and DADR is 6-byte.
+        """
+        t_bip = _make_transport(local_mac=_BIP_MAC_ROUTER)
+        t_two = _make_transport(local_mac=_TWO_BYTE_MAC_ROUTER)
+        p_bip = RouterPort(
+            port_id=1,
+            network_number=10,
+            transport=t_bip,
+            mac_address=_BIP_MAC_ROUTER,
+            max_npdu_length=1497,
+        )
+        p_two = RouterPort(
+            port_id=2,
+            network_number=40,
+            transport=t_two,
+            mac_address=_TWO_BYTE_MAC_ROUTER,
+            max_npdu_length=501,
+        )
+        router = NetworkRouter([p_bip, p_two], application_port_id=1)
+
+        data = _build_routed_npdu(
+            dnet=10,
+            dadr=_BIP_DEVICE,  # 6-byte BIP target
+            apdu=b"\x50\x00",
+        )
+        router._on_port_receive(2, data, _TWO_BYTE_DEVICE)
+
+        t_bip.send_unicast.assert_called_once()
+        sent_bytes, sent_mac = t_bip.send_unicast.call_args[0]
+
+        assert sent_mac == _BIP_DEVICE
+        assert len(sent_mac) == 6
+
+        delivered = decode_npdu(sent_bytes)
+        assert delivered.destination is None
+        assert delivered.apdu == b"\x50\x00"
+
+        # SNET/SADR injected with 2-byte source MAC
+        assert delivered.source is not None
+        assert delivered.source.network == 40
+        assert delivered.source.mac_address == _TWO_BYTE_DEVICE
+        assert len(delivered.source.mac_address) == 2

@@ -530,3 +530,346 @@ class TestMalformedNetworkMessage:
         assert len(received) == 0
         assert len(transport.sent_broadcast) == 0
         assert len(transport.sent_unicast) == 0
+
+
+# --------------------------------------------------------------------------
+# Router path learning from routed APDUs (SNET/SADR)
+# --------------------------------------------------------------------------
+
+
+class TestRouterLearningFromRoutedAPDU:
+    """When a routed APDU arrives with SNET/SADR, learn the router path."""
+
+    def _build_routed_apdu(self, snet: int, sadr: bytes, apdu: bytes = b"\x00") -> bytes:
+        """Build an NPDU with SNET/SADR set (as a router would forward)."""
+        npdu = NPDU(
+            is_network_message=False,
+            expecting_reply=False,
+            source=BACnetAddress(network=snet, mac_address=sadr),
+            apdu=apdu,
+        )
+        return encode_npdu(npdu)
+
+    def test_learns_router_from_routed_apdu(self):
+        """Receiving a routed APDU should populate the router cache."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        received = []
+        layer.on_receive(lambda data, src: received.append((data, src)))
+
+        # Simulate a router at 10.0.0.1 forwarding an APDU from network 1100
+        data = self._build_routed_apdu(snet=1100, sadr=b"\x01")
+        transport.inject_receive(data, _ROUTER_MAC)
+
+        # APDU should be delivered
+        assert len(received) == 1
+        assert received[0][1] == BACnetAddress(network=1100, mac_address=b"\x01")
+
+        # Router cache should have learned the path
+        assert layer.get_router_for_network(1100) == _ROUTER_MAC
+
+    def test_learns_router_for_mstp_one_byte_mac(self):
+        """MS/TP device (1-byte MAC) behind a router."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        layer.on_receive(lambda data, src: None)
+
+        data = self._build_routed_apdu(snet=4352, sadr=b"\xfe")
+        transport.inject_receive(data, _ROUTER_MAC)
+        assert layer.get_router_for_network(4352) == _ROUTER_MAC
+
+    def test_does_not_overwrite_fresh_i_am_router_entry(self):
+        """Explicit I-Am-Router-To-Network entries should not be overwritten."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        layer.on_receive(lambda data, src: None)
+
+        # First: explicit I-Am-Router from router_a
+        router_a = BIPAddress(host="10.0.0.1", port=0xBAC0).encode()
+        i_am_data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(i_am_data, router_a)
+        assert layer.get_router_for_network(20) == router_a
+
+        # Then: receive a routed APDU from router_b for network 20
+        router_b = BIPAddress(host="10.0.0.2", port=0xBAC0).encode()
+        data = self._build_routed_apdu(snet=20, sadr=b"\x05")
+        transport.inject_receive(data, router_b)
+
+        # Should NOT overwrite the explicit I-Am-Router entry
+        assert layer.get_router_for_network(20) == router_a
+
+    def test_populates_empty_cache(self):
+        """When no router cache entry exists, learning from SNET creates one."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        layer.on_receive(lambda data, src: None)
+
+        assert layer.get_router_for_network(500) is None
+        data = self._build_routed_apdu(snet=500, sadr=b"\x0a\x0b")
+        transport.inject_receive(data, _ROUTER_MAC)
+        assert layer.get_router_for_network(500) == _ROUTER_MAC
+
+    def test_replaces_stale_entry(self):
+        """Stale cache entry should be replaced by learned route."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport, cache_ttl=0.01)  # very short TTL
+        layer.on_receive(lambda data, src: None)
+
+        # Populate cache, then let it expire
+        router_a = BIPAddress(host="10.0.0.1", port=0xBAC0).encode()
+        i_am_data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(i_am_data, router_a)
+        time.sleep(0.02)  # let it go stale
+
+        # Now learn from a different router
+        router_b = BIPAddress(host="10.0.0.2", port=0xBAC0).encode()
+        data = self._build_routed_apdu(snet=20, sadr=b"\x05")
+        transport.inject_receive(data, router_b)
+        assert layer.get_router_for_network(20) == router_b
+
+    def test_no_source_network_not_learned(self):
+        """APDU without SNET (local) should not populate router cache."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        layer.on_receive(lambda data, src: None)
+
+        # Local APDU — no source network
+        npdu = NPDU(
+            is_network_message=False,
+            expecting_reply=False,
+            apdu=b"\x00",
+        )
+        transport.inject_receive(encode_npdu(npdu), _ROUTER_MAC)
+        # Router cache should remain empty
+        assert layer._router_cache == {}
+
+    def test_subsequent_sends_use_learned_router(self):
+        """After learning a router, sends to that network should use unicast."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        layer.on_receive(lambda data, src: None)
+
+        # Learn router from routed APDU
+        data = self._build_routed_apdu(snet=1100, sadr=b"\x01")
+        transport.inject_receive(data, _ROUTER_MAC)
+
+        # Now send to a device on network 1100
+        dest = BACnetAddress(network=1100, mac_address=b"\x02")
+        layer.send(b"\x00", dest, expecting_reply=True)
+
+        # Should unicast to the learned router, not broadcast
+        assert len(transport.sent_unicast) == 1
+        assert transport.sent_unicast[0][1] == _ROUTER_MAC
+        assert len(transport.sent_broadcast) == 0
+
+
+# --------------------------------------------------------------------------
+# NetworkLayer -- Remote send with variable-length MAC addresses (MS/TP, ARCNET)
+# --------------------------------------------------------------------------
+
+
+class TestRemoteSendVariableMac:
+    """Tests for sending to remote devices with variable-length MAC addresses.
+
+    MS/TP and ARCNET devices use 1-byte MACs; other data links may use
+    2-byte or other non-IP address sizes.  The network layer must correctly
+    encode DNET/DADR/DLEN in the outgoing NPDU regardless of MAC length.
+    """
+
+    def _build_routed_apdu(self, snet: int, sadr: bytes, apdu: bytes = b"\x00") -> bytes:
+        """Build an NPDU with SNET/SADR set (as a router would forward)."""
+        npdu = NPDU(
+            is_network_message=False,
+            expecting_reply=False,
+            source=BACnetAddress(network=snet, mac_address=sadr),
+            apdu=apdu,
+        )
+        return encode_npdu(npdu)
+
+    def test_send_1byte_mstp_via_cached_router(self):
+        """Send to 1-byte MS/TP address via cached router.
+
+        Populates router cache for network 4352, sends to a 1-byte MAC,
+        and verifies the NPDU encodes DNET=4352, DADR=0x01, DLEN=1.
+        """
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+
+        # Populate cache for network 4352
+        data = _build_i_am_router_npdu(networks=(4352,))
+        transport.inject_receive(data, _ROUTER_MAC)
+        transport.sent_unicast.clear()
+        transport.sent_broadcast.clear()
+
+        # Send APDU to 1-byte MS/TP address
+        dest = BACnetAddress(network=4352, mac_address=b"\x01")
+        apdu = b"\x10\x08"
+        layer.send(apdu, dest, expecting_reply=True)
+
+        # Should unicast to the cached router
+        assert len(transport.sent_unicast) == 1
+        assert len(transport.sent_broadcast) == 0
+        npdu_bytes, bip_dest = transport.sent_unicast[0]
+        assert bip_dest == _ROUTER_MAC
+
+        # Decode and verify NPDU destination fields
+        npdu = decode_npdu(memoryview(npdu_bytes))
+        assert npdu.destination is not None
+        assert npdu.destination.network == 4352
+        assert npdu.destination.mac_address == b"\x01"
+        assert len(npdu.destination.mac_address) == 1  # DLEN=1
+        assert npdu.hop_count == 255
+        assert npdu.apdu == apdu
+        assert npdu.expecting_reply is True
+
+    def test_send_2byte_mac_via_cached_router(self):
+        """Send to 2-byte MAC via cached router.
+
+        Verifies DLEN=2 in the outgoing NPDU for a non-standard 2-byte
+        data link address.
+        """
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+
+        # Populate cache for network 4352
+        data = _build_i_am_router_npdu(networks=(4352,))
+        transport.inject_receive(data, _ROUTER_MAC)
+        transport.sent_unicast.clear()
+        transport.sent_broadcast.clear()
+
+        # Send APDU to 2-byte MAC
+        dest = BACnetAddress(network=4352, mac_address=b"\x0a\x0b")
+        apdu = b"\x10\x08"
+        layer.send(apdu, dest, expecting_reply=True)
+
+        assert len(transport.sent_unicast) == 1
+        assert len(transport.sent_broadcast) == 0
+        npdu_bytes, bip_dest = transport.sent_unicast[0]
+        assert bip_dest == _ROUTER_MAC
+
+        # Decode and verify NPDU destination fields
+        npdu = decode_npdu(memoryview(npdu_bytes))
+        assert npdu.destination is not None
+        assert npdu.destination.network == 4352
+        assert npdu.destination.mac_address == b"\x0a\x0b"
+        assert len(npdu.destination.mac_address) == 2  # DLEN=2
+        assert npdu.hop_count == 255
+        assert npdu.apdu == apdu
+
+    def test_send_1byte_mstp_cache_miss_broadcasts(self):
+        """Send to 1-byte MS/TP address without cached router (cache miss).
+
+        Should broadcast the NPDU and send Who-Is-Router-To-Network.
+        The broadcast NPDU must still carry the correct DNET/DADR.
+        """
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+
+        # No router cached for network 4352
+        dest = BACnetAddress(network=4352, mac_address=b"\xfe")
+        apdu = b"\x10\x08"
+        layer.send(apdu, dest, expecting_reply=True)
+
+        # Should broadcast NPDU + Who-Is-Router-To-Network
+        assert len(transport.sent_broadcast) == 2
+        assert len(transport.sent_unicast) == 0
+
+        # First broadcast: the APDU wrapped in NPDU with DNET/DADR
+        npdu = decode_npdu(memoryview(transport.sent_broadcast[0]))
+        assert npdu.is_network_message is False
+        assert npdu.destination is not None
+        assert npdu.destination.network == 4352
+        assert npdu.destination.mac_address == b"\xfe"
+        assert len(npdu.destination.mac_address) == 1
+        assert npdu.apdu == apdu
+
+        # Second broadcast: Who-Is-Router-To-Network
+        who_npdu = decode_npdu(memoryview(transport.sent_broadcast[1]))
+        assert who_npdu.is_network_message is True
+        assert who_npdu.message_type == NetworkMessageType.WHO_IS_ROUTER_TO_NETWORK
+
+    def test_receive_routed_iam_then_send_reply(self):
+        """Receive routed I-Am from MS/TP device, then send reply back.
+
+        Injects a routed APDU with SNET=1100, SADR=0x01 (simulating an
+        I-Am from an MS/TP device behind a router).  Verifies the router
+        cache was learned, then sends an APDU to the same device and
+        confirms it unicasts to the learned router, not broadcast.
+        """
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        received = []
+        layer.on_receive(lambda data, src: received.append((data, src)))
+
+        # Inject routed APDU: router at _ROUTER_MAC forwards from SNET=1100
+        i_am_apdu = b"\x10\x00"  # simulated I-Am APDU
+        routed_npdu = self._build_routed_apdu(snet=1100, sadr=b"\x01", apdu=i_am_apdu)
+        transport.inject_receive(routed_npdu, _ROUTER_MAC)
+
+        # APDU should be delivered with correct source address
+        assert len(received) == 1
+        data, src = received[0]
+        assert data == i_am_apdu
+        assert src == BACnetAddress(network=1100, mac_address=b"\x01")
+
+        # Router cache should have learned the path
+        assert layer.get_router_for_network(1100) == _ROUTER_MAC
+
+        # Clear transport logs for the send phase
+        transport.sent_unicast.clear()
+        transport.sent_broadcast.clear()
+
+        # Send APDU to the same MS/TP device
+        dest = BACnetAddress(network=1100, mac_address=b"\x01")
+        reply_apdu = b"\x30\x01"
+        layer.send(reply_apdu, dest, expecting_reply=False)
+
+        # Should unicast to the learned router, not broadcast
+        assert len(transport.sent_unicast) == 1
+        assert len(transport.sent_broadcast) == 0
+        npdu_bytes, bip_dest = transport.sent_unicast[0]
+        assert bip_dest == _ROUTER_MAC
+
+        # Verify NPDU destination
+        npdu = decode_npdu(memoryview(npdu_bytes))
+        assert npdu.destination is not None
+        assert npdu.destination.network == 1100
+        assert npdu.destination.mac_address == b"\x01"
+        assert len(npdu.destination.mac_address) == 1
+        assert npdu.apdu == reply_apdu
+
+    def test_remote_broadcast_to_mstp_network(self):
+        """Remote broadcast to MS/TP network.
+
+        Sends to BACnetAddress(network=4352, mac_address=b"") which is a
+        directed broadcast on a remote network.  Verifies DNET=4352 and
+        DLEN=0 in the outgoing NPDU.
+        """
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+
+        # Populate cache so we can verify unicast to router
+        data = _build_i_am_router_npdu(networks=(4352,))
+        transport.inject_receive(data, _ROUTER_MAC)
+        transport.sent_unicast.clear()
+        transport.sent_broadcast.clear()
+
+        # Remote broadcast: network set, empty MAC
+        dest = BACnetAddress(network=4352, mac_address=b"")
+        apdu = b"\x10\x08"
+        layer.send(apdu, dest, expecting_reply=False)
+
+        # With cached router, remote broadcast should unicast to router
+        assert len(transport.sent_unicast) == 1
+        assert len(transport.sent_broadcast) == 0
+        npdu_bytes, bip_dest = transport.sent_unicast[0]
+        assert bip_dest == _ROUTER_MAC
+
+        # Decode and verify DNET=4352, DLEN=0 (empty DADR)
+        npdu = decode_npdu(memoryview(npdu_bytes))
+        assert npdu.destination is not None
+        assert npdu.destination.network == 4352
+        assert npdu.destination.mac_address == b""
+        assert len(npdu.destination.mac_address) == 0  # DLEN=0
+        assert npdu.hop_count == 255
+        assert npdu.apdu == apdu
