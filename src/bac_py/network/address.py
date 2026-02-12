@@ -1,8 +1,9 @@
-"""BACnet addressing types per ASHRAE 135-2016 Clause 6."""
+"""BACnet addressing types per ASHRAE 135-2020 Clause 6."""
 
 from __future__ import annotations
 
 import re
+import socket
 from dataclasses import dataclass
 from typing import Any
 
@@ -50,6 +51,37 @@ class BIPAddress:
         :param data: Dictionary containing ``"host"`` and ``"port"`` keys.
         :returns: The reconstructed :class:`BIPAddress`.
         """
+        return cls(host=data["host"], port=data["port"])
+
+
+@dataclass(frozen=True, slots=True)
+class BIP6Address:
+    """An 18-octet BACnet/IPv6 address: 16-byte IPv6 + 2-byte UDP port.
+
+    Used as the MAC-layer address for BACnet/IPv6 data links (Annex U).
+    """
+
+    host: str
+    port: int
+
+    def encode(self) -> bytes:
+        """Encode to 18-byte wire format (16 octets IPv6 + 2 octets port, big-endian)."""
+        return socket.inet_pton(socket.AF_INET6, self.host) + self.port.to_bytes(2, "big")
+
+    @classmethod
+    def decode(cls, data: bytes | memoryview) -> BIP6Address:
+        """Decode from 18-byte wire format."""
+        host = socket.inet_ntop(socket.AF_INET6, bytes(data[:16]))
+        port = int.from_bytes(data[16:18], "big")
+        return cls(host=host, port=port)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize this address to a JSON-friendly dictionary."""
+        return {"host": self.host, "port": self.port}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BIP6Address:
+        """Reconstruct a :class:`BIP6Address` from a dictionary produced by :meth:`to_dict`."""
         return cls(host=data["host"], port=data["port"])
 
 
@@ -116,6 +148,12 @@ class BACnetAddress:
         if len(self.mac_address) == 6:
             bip = BIPAddress.decode(self.mac_address)
             ip_port = f"{bip.host}:{bip.port}"
+            if self.network is not None:
+                return f"{self.network}:{ip_port}"
+            return ip_port
+        if len(self.mac_address) == 18:
+            bip6 = BIP6Address.decode(self.mac_address)
+            ip_port = f"[{bip6.host}]:{bip6.port}"
             if self.network is not None:
                 return f"{self.network}:{ip_port}"
             return ip_port
@@ -190,6 +228,13 @@ _ADDR_RE = re.compile(
     r")$"
 )
 
+# IPv6 bracket notation: optional "network:" prefix, then [ipv6]:port or [ipv6]
+_ADDR6_RE = re.compile(
+    r"^(?:(\d+):)?"  # optional network number + colon
+    r"\[([^\]]+)\]"  # IPv6 address in brackets
+    r"(?::(\d+))?$"  # optional :port
+)
+
 
 def parse_address(addr: str | BACnetAddress) -> BACnetAddress:
     """Parse a human-readable address string to a BACnetAddress.
@@ -200,6 +245,9 @@ def parse_address(addr: str | BACnetAddress) -> BACnetAddress:
         "192.168.1.100:47809"     -> local BACnet/IP, explicit port
         "2:192.168.1.100"         -> remote network 2, default port
         "2:192.168.1.100:47809"   -> remote network 2, explicit port
+        "[::1]"                   -> local BACnet/IPv6, default port 0xBAC0
+        "[::1]:47808"             -> local BACnet/IPv6, explicit port
+        "2:[::1]:47808"           -> remote network 2, IPv6
         "*"                       -> global broadcast
         "2:*"                     -> remote broadcast on network 2
 
@@ -217,12 +265,32 @@ def parse_address(addr: str | BACnetAddress) -> BACnetAddress:
         msg = "Address string must not be empty"
         raise ValueError(msg)
 
+    # Try IPv6 bracket notation first
+    m6 = _ADDR6_RE.match(addr)
+    if m6:
+        network_str, ipv6, port_str = m6.groups()
+        network = int(network_str) if network_str is not None else None
+        port = int(port_str) if port_str else _DEFAULT_PORT
+        if not (0 <= port <= 65535):
+            msg = f"Port number out of range: {port}"
+            raise ValueError(msg)
+        # Validate IPv6 address
+        try:
+            socket.inet_pton(socket.AF_INET6, ipv6)
+        except OSError:
+            msg = f"Invalid IPv6 address: {ipv6!r}"
+            raise ValueError(msg) from None
+        mac = BIP6Address(host=ipv6, port=port).encode()
+        if network is not None:
+            return remote_station(network, mac)
+        return BACnetAddress(mac_address=mac)
+
     m = _ADDR_RE.match(addr)
     if not m:
         msg = (
             f"Cannot parse address: {addr!r}. "
             "Expected format like '192.168.1.100', '192.168.1.100:47808', "
-            "'2:192.168.1.100', or '*'"
+            "'2:192.168.1.100', '[::1]:47808', or '*'"
         )
         raise ValueError(msg)
 

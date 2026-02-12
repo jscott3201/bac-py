@@ -32,6 +32,20 @@ Foreign Device
    :members:
    :undoc-members:
 
+BACnet/IPv6 BVLL
+-----------------
+
+.. automodule:: bac_py.transport.bvll_ipv6
+   :members:
+   :undoc-members:
+
+BACnet/IPv6 Transport
+---------------------
+
+.. automodule:: bac_py.transport.bip6
+   :members:
+   :undoc-members:
+
 Transport Port
 --------------
 

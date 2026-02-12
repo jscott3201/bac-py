@@ -24,8 +24,9 @@ class TransportPort(Protocol):
     underlying data-link technology.
 
     MAC encoding conventions (by data-link type):
-        - BACnet/IP:  6 bytes  (4-byte IPv4 + 2-byte port, big-endian)
-        - MS/TP:      1 byte   (station address 0-254)
+        - BACnet/IP:    6 bytes  (4-byte IPv4 + 2-byte port, big-endian)
+        - BACnet/IPv6:  3 bytes  (VMAC virtual address)
+        - MS/TP:        1 byte   (station address 0-254)
     """
 
     async def start(self) -> None:

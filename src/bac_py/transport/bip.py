@@ -117,6 +117,10 @@ class BIPTransport:
         interface: str = "0.0.0.0",
         port: int = 0xBAC0,
         broadcast_address: str = "255.255.255.255",
+        *,
+        multicast_enabled: bool = False,
+        multicast_address: str = "239.255.186.192",
+        multicast_ttl: int = 32,
     ) -> None:
         """Initialize the BACnet/IP transport.
 
@@ -124,10 +128,16 @@ class BIPTransport:
             interfaces.
         :param port: UDP port number. Defaults to ``0xBAC0`` (47808).
         :param broadcast_address: Directed broadcast address for this subnet.
+        :param multicast_enabled: Enable IPv4 multicast per Annex J.8.
+        :param multicast_address: Multicast group address (default ``239.255.186.192``).
+        :param multicast_ttl: Multicast TTL (hop limit). Defaults to 32.
         """
         self._interface = interface
         self._port = port
         self._broadcast_address = broadcast_address
+        self._multicast_enabled = multicast_enabled
+        self._multicast_address = multicast_address
+        self._multicast_ttl = multicast_ttl
         self._protocol: _UDPProtocol | None = None
         self._transport: asyncio.DatagramTransport | None = None
         self._receive_callback: Callable[[bytes, bytes], None] | None = None
@@ -160,6 +170,19 @@ class BIPTransport:
         if host == "0.0.0.0":
             host = _resolve_local_ip()
         self._local_address = BIPAddress(host=host, port=addr[1])
+
+        # Join IPv4 multicast group if enabled (Annex J.8)
+        if self._multicast_enabled:
+            try:
+                group = socket.inet_aton(self._multicast_address)
+                iface = socket.inet_aton(self._interface if self._interface != "0.0.0.0" else host)
+                mreq = group + iface
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, mreq)
+                sock.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, self._multicast_ttl)
+                logger.info("Joined multicast group %s", self._multicast_address)
+            except OSError:
+                logger.warning("Failed to join multicast group %s", self._multicast_address)
+
         logger.info("BIPTransport started on %s:%d", host, addr[1])
 
     async def stop(self) -> None:
@@ -171,6 +194,17 @@ class BIPTransport:
             await self._bbmd.stop()
             self._bbmd = None
         if self._transport:
+            # Leave multicast group if joined
+            if self._multicast_enabled:
+                try:
+                    sock = self._transport.get_extra_info("socket")
+                    host = self._local_address.host if self._local_address else "0.0.0.0"
+                    group = socket.inet_aton(self._multicast_address)
+                    iface = socket.inet_aton(host)
+                    mreq = group + iface
+                    sock.setsockopt(socket.IPPROTO_IP, socket.IP_DROP_MEMBERSHIP, mreq)
+                except OSError:
+                    pass
             self._transport.close()
             self._transport = None
             self._protocol = None
@@ -219,6 +253,10 @@ class BIPTransport:
             return
 
         bvll = encode_bvll(BvlcFunction.ORIGINAL_BROADCAST_NPDU, npdu)
+        if self._multicast_enabled:
+            # Send to multicast group per Annex J.8
+            self._transport.sendto(bvll, (self._multicast_address, self._port))
+        # Also send to directed broadcast (mixed mode interop with legacy devices)
         self._transport.sendto(bvll, (self._broadcast_address, self._port))
 
         # If BBMD attached, also forward to peers and foreign devices

@@ -1,4 +1,4 @@
-"""BACnet Network Port object type per ASHRAE 135-2016 Clause 12.56."""
+"""BACnet Network Port object type per ASHRAE 135-2020 Clause 12.56."""
 
 from __future__ import annotations
 
@@ -175,6 +175,61 @@ class NetworkPortObject(BACnetObject):
             PropertyIdentifier.BACNET_IP_GLOBAL_ADDRESS,
             bytes,
             PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        # BACnet/IPv6 properties (Clause 12.56, Annex U)
+        PropertyIdentifier.BACNET_IPV6_MODE: PropertyDefinition(
+            PropertyIdentifier.BACNET_IPV6_MODE,
+            IPMode,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.BACNET_IPV6_UDP_PORT: PropertyDefinition(
+            PropertyIdentifier.BACNET_IPV6_UDP_PORT,
+            int,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.BACNET_IPV6_MULTICAST_ADDRESS: PropertyDefinition(
+            PropertyIdentifier.BACNET_IPV6_MULTICAST_ADDRESS,
+            bytes,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.IPV6_ADDRESS: PropertyDefinition(
+            PropertyIdentifier.IPV6_ADDRESS,
+            bytes,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.IPV6_PREFIX_LENGTH: PropertyDefinition(
+            PropertyIdentifier.IPV6_PREFIX_LENGTH,
+            int,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.IPV6_DEFAULT_GATEWAY: PropertyDefinition(
+            PropertyIdentifier.IPV6_DEFAULT_GATEWAY,
+            bytes,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.IPV6_DNS_SERVER: PropertyDefinition(
+            PropertyIdentifier.IPV6_DNS_SERVER,
+            list,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.IPV6_AUTO_ADDRESSING_ENABLE: PropertyDefinition(
+            PropertyIdentifier.IPV6_AUTO_ADDRESSING_ENABLE,
+            bool,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.VIRTUAL_MAC_ADDRESS_TABLE: PropertyDefinition(
+            PropertyIdentifier.VIRTUAL_MAC_ADDRESS_TABLE,
+            list,
+            PropertyAccess.READ_ONLY,
             required=False,
         ),
         # MS/TP specific (optional)

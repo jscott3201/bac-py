@@ -184,6 +184,27 @@ for discovering existing routers on the network.
    )
 
 
+.. _bacnet-ipv6:
+
+BACnet/IPv6
+-----------
+
+Full BACnet/IPv6 transport per ASHRAE 135-2020 Annex U:
+
+- **IPv6 BVLL** with all 13 function codes (type ``0x82``)
+- **3-byte VMAC** virtual addressing with automatic address resolution
+- **IPv6 multicast** broadcasts (``ff02::bac0`` link-local, ``ff05::bac0`` site-local)
+- **Address resolution** protocol with TTL-based caching
+- Foreign device registration over IPv6
+
+.. code-block:: python
+
+   from bac_py.transport.bip6 import BIP6Transport
+
+   transport = BIP6Transport(interface="::", port=0xBAC0)
+   await transport.start()
+
+
 .. _bbmd-support:
 
 BBMD Support
@@ -197,6 +218,8 @@ See :ref:`foreign-device-registration` for a full example.
 - Read and write Broadcast Distribution Tables (BDT)
 - Read Foreign Device Tables (FDT)
 - Delete FDT entries
+- **IPv4 multicast** (Annex J.8) as an alternative to directed broadcast using
+  multicast group ``239.255.186.192`` -- enable with ``multicast_enabled=True``
 
 
 .. _priority-arrays:
