@@ -1,4 +1,4 @@
-"""BACnet Trend Log object per ASHRAE 135-2016 Clause 12.25."""
+"""BACnet Trend Log object per ASHRAE 135-2020 Clause 12.25."""
 
 from __future__ import annotations
 
@@ -12,7 +12,11 @@ from bac_py.objects.base import (
     standard_properties,
     status_properties,
 )
-from bac_py.types.constructed import BACnetDateTime, BACnetDeviceObjectPropertyReference
+from bac_py.types.constructed import (
+    BACnetDateTime,
+    BACnetDeviceObjectPropertyReference,
+    BACnetLogRecord,
+)
 from bac_py.types.enums import (
     LoggingType,
     ObjectType,
@@ -137,3 +141,32 @@ class TrendLogObject(BACnetObject):
         self._init_status_flags()
         self._set_default(PropertyIdentifier.LOG_BUFFER, [])
         self._set_default(PropertyIdentifier.LOGGING_TYPE, LoggingType.POLLED)
+
+    # --- Buffer management helpers ---
+
+    def append_record(self, record: BACnetLogRecord) -> bool:
+        """Append a log record to the buffer.
+
+        Handles circular overwrite vs stop-when-full semantics.
+
+        Returns:
+            ``True`` if the record was appended, ``False`` if the buffer
+            is full and ``stop_when_full`` is set.
+        """
+        buf: list[BACnetLogRecord] = self._properties[PropertyIdentifier.LOG_BUFFER]
+        buf_size: int = self._properties.get(PropertyIdentifier.BUFFER_SIZE, 0)
+        stop_when_full: bool = self._properties.get(
+            PropertyIdentifier.STOP_WHEN_FULL, False
+        )
+
+        if buf_size > 0 and len(buf) >= buf_size:
+            if stop_when_full:
+                return False
+            # Circular: remove oldest
+            buf.pop(0)
+
+        buf.append(record)
+        self._properties[PropertyIdentifier.RECORD_COUNT] = len(buf)
+        total = self._properties.get(PropertyIdentifier.TOTAL_RECORD_COUNT, 0)
+        self._properties[PropertyIdentifier.TOTAL_RECORD_COUNT] = total + 1
+        return True

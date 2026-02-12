@@ -1,126 +1,92 @@
-# Phase 5 -- BACnet Procedures and Conformance Implementation Plan
+# Phase 6 -- Operational Completeness Implementation Plan
 
 ## Scope Analysis
 
-Phase 5 has 6 sub-phases. After analysis, here's the implementation plan ordered by
-dependency and impact:
+Phase 6 has 4 sub-phases making Schedule, Calendar, TrendLog, and Binary Output
+objects operationally functional. Object shells and types already exist; we need
+the evaluation engines and enforcement logic.
 
-### Step 1. Backup and Restore Procedures (Clause 19.1)
+### Step 1. Calendar Evaluation Logic (Clause 12.9)
 
-**Server-side (state machine in `handle_reinitialize_device`):**
+**File: `src/bac_py/objects/calendar.py`**
 
-Modify `src/bac_py/app/server.py` `handle_reinitialize_device()` to manage backup/restore
-state transitions on the Device object:
+Add `evaluate(date)` method to `CalendarObject`:
+- Iterate `date_list` (list of `BACnetCalendarEntry` items)
+- For each entry, match against current date:
+  - `choice=0` (BACnetDate): match year/month/day with wildcard support (0xFF=any,
+    month 13=odd, 14=even, day 32=last, 33=odd, 34=even)
+  - `choice=1` (BACnetDateRange): inclusive range check
+  - `choice=2` (BACnetWeekNDay): match month/week-of-month/day-of-week patterns
+- Set `present_value = True` if any entry matches, `False` otherwise
 
-- `START_BACKUP` → set `system_status = BACKUP_IN_PROGRESS`, set `backup_and_restore_state`
-- `END_BACKUP` → restore `system_status = OPERATIONAL`
-- `START_RESTORE` → set `system_status = DOWNLOAD_IN_PROGRESS`
-- `END_RESTORE` → restore `system_status = OPERATIONAL`, record `last_restore_time`
-- `ABORT_RESTORE` → restore `system_status = OPERATIONAL`
+**Helper function**: `_matches_date()` for BACnetDate wildcard matching (reusable
+by Schedule engine).
 
-Add `BACKUP_AND_RESTORE_STATE`, `CONFIGURATION_FILES`, `LAST_RESTORE_TIME`,
-`BACKUP_PREPARATION_TIME`, `RESTORE_PREPARATION_TIME`, `RESTORE_COMPLETION_TIME`
-properties to `DeviceObject`.
+### Step 2. Schedule and Calendar Evaluation Engine (Clause 12.24)
 
-**Client-side (orchestration in `app/client.py`):**
+**New file: `src/bac_py/app/schedule_engine.py`**
 
-- `backup_device(address) -> BackupData`: Full backup sequence (reinit START_BACKUP →
-   poll status → read config files → download via AtomicReadFile → reinit END_BACKUP)
-- `restore_device(address, backup_data)`: Full restore sequence (reinit START_RESTORE →
-   poll status → upload via AtomicWriteFile → reinit END_RESTORE → verify)
+`ScheduleEngine` class following `EventEngine` lifecycle pattern (start/stop/async loop):
 
-**New type**: `BackupData` dataclass with device info + file contents.
+1. **Calendar evaluation**: On each cycle, update all CalendarObject `present_value`
+2. **Schedule evaluation** per Clause 12.24.4-12.24.9:
+   - Check `effective_period` -- outside → use `schedule_default`
+   - Check `exception_schedule` -- highest-priority BACnetSpecialEvent that matches
+     today; if entry's `period` is a CalendarEntry, match directly; if ObjectIdentifier
+     (referencing a Calendar), check that Calendar's `present_value`
+   - Fall back to `weekly_schedule[day_of_week]` (0=Monday..6=Sunday)
+   - Within matching day: find latest `BACnetTimeValue` with `time <= current_time`
+   - No match: use `schedule_default`
+3. **Output writing**: On value change, write to each target in
+   `list_of_object_property_references` at `priority_for_writing`
 
-**Files**: `src/bac_py/app/client.py`, `src/bac_py/app/server.py`,
-`src/bac_py/objects/device.py`
+**Lifecycle**: `start()` → async loop → `stop()`. Default scan interval 10 seconds.
 
-### Step 2. Value Source Mechanism (Clause 19.5 -- New in 2020)
+### Step 3. Trend Log Recording Engine (Clause 12.25)
 
-**New type in `src/bac_py/types/constructed.py`:**
+**New file: `src/bac_py/app/trendlog_engine.py`**
 
-`BACnetValueSource` -- CHOICE { none [0] NULL, object [1] BACnetDeviceObjectReference,
-address [2] BACnetAddress }. Encode/decode methods.
+`TrendLogEngine` class with async lifecycle:
 
-**New PropertyIdentifier values in `src/bac_py/types/enums.py`:**
+1. **Polled logging** (Clause 12.25.12): Timer per TrendLog at `log_interval`. On
+   tick: read monitored property from object DB, construct `BACnetLogRecord`, append
+   to `log_buffer`. Support `align_intervals` and `interval_offset`.
 
-- `VALUE_SOURCE = 433`
-- `VALUE_SOURCE_ARRAY = 434`
-- `LAST_COMMAND_TIME = 432`
-- `COMMAND_TIME_ARRAY = 435`
+2. **Triggered logging** (Clause 12.25.14): When `trigger` property written to True,
+   record and reset to False.
 
-**Extend `commandable_properties()` in `src/bac_py/objects/base.py`:**
+3. **Buffer management**: Circular overwrite vs stop-when-full. Update `record_count`
+   and `total_record_count`. Helper method on TrendLogObject for `append_record()`.
 
-Add `VALUE_SOURCE`, `VALUE_SOURCE_ARRAY`, `LAST_COMMAND_TIME`, `COMMAND_TIME_ARRAY`.
+4. **Log control**: Honor `log_enable`, `start_time`/`stop_time`.
 
-**Update `_write_with_priority()` in `src/bac_py/objects/base.py`:**
+**COV-based logging** deferred to future work (requires cross-device subscriptions).
 
-On write: set `value_source_array[priority]` with source info, update
-`command_time_array[priority]`. On relinquish: clear slot. Resolve winning slot's
-source into `value_source` and `last_command_time`.
+### Step 4. Minimum On/Off Time Enforcement (Clause 19.2)
 
-**Files**: `src/bac_py/types/constructed.py`, `src/bac_py/types/enums.py`,
-`src/bac_py/objects/base.py`
+**File: `src/bac_py/objects/binary.py`**
 
-### Step 3. PICS Generation (Clause 22 / Annex A)
+Add timer-based enforcement to `BinaryOutputObject`:
+- On write changing present_value state: start a lock timer for `minimum_on_time`
+  or `minimum_off_time` (in centiseconds per spec, stored as seconds)
+- During lock: writes are accepted into priority array but present_value stays locked
+- On timer expiry: re-evaluate priority array and update present_value
+- Store lock state as `_min_time_lock_until: float | None` timestamp
 
-**New file `src/bac_py/conformance/pics.py`:**
-
-`PICGenerator` class that introspects a `BACnetApplication` to generate a Protocol
-Implementation Conformance Statement:
-
-- General device info (vendor, model, firmware)
-- Services supported (from `PROTOCOL_SERVICES_SUPPORTED` bitstring)
-- Object types supported (from `PROTOCOL_OBJECT_TYPES_SUPPORTED` bitstring)
-- Data link options
-- Character set support
-
-Output: structured dict (JSON-serializable).
-
-**Files**: `src/bac_py/conformance/__init__.py`, `src/bac_py/conformance/pics.py`
-
-### Step 4. BIBB Conformance Matrix (Annex K)
-
-**New file `src/bac_py/conformance/bibb.py`:**
-
-`BIBBMatrix` class that maps registered services and objects to BACnet Interoperability
-Building Blocks. Auto-detects which BIBBs are supported:
-
-- DS-RP-A/B (ReadProperty), DS-WP-A/B (WriteProperty)
-- DS-RPM-A/B (ReadPropertyMultiple), DS-WPM-A/B (WritePropertyMultiple)
-- AE-N-A/B (Event Notification), AE-ACK-A/B (Alarm Acknowledgment)
-- DM-DDB-A/B (Dynamic Device Binding - Who-Is/I-Am)
-- etc.
-
-**Files**: `src/bac_py/conformance/bibb.py`
-
-### Step 5. Unconfigured Device Discovery (Clause 19.7)
-
-Who-Am-I/You-Are services already exist (Phase 2). This step adds the procedure
-orchestration:
-
-- **Supervisor mode**: `DeviceAssignmentTable` mapping (vendor_id, serial_number) →
-  device identity. Callback-based handler in server for Who-Am-I that looks up
-  assignment and sends You-Are.
-- **Client helper**: `discover_unconfigured(timeout)` that broadcasts Who-Am-I
-  and collects responses.
-
-**Files**: `src/bac_py/app/client.py`, `src/bac_py/app/server.py`
-
-### Step 6. Tests
+### Step 5. Tests
 
 **New test files:**
-- `tests/app/test_backup_restore.py` -- backup/restore state machine + client orchestration
-- `tests/types/test_value_source.py` -- BACnetValueSource encode/decode
-- `tests/objects/test_commandable_value_source.py` -- value source tracking on writes
-- `tests/conformance/test_pics.py` -- PICS generation
-- `tests/conformance/test_bibb.py` -- BIBB matrix detection
+- `tests/objects/test_calendar_eval.py` -- date matching with wildcards, ranges, weekNDay
+- `tests/app/test_schedule_engine.py` -- schedule evaluation, priority resolution, output writes
+- `tests/app/test_trendlog_engine.py` -- polled logging, buffer management, triggered logging
+- `tests/objects/test_min_on_off_time.py` -- minimum time enforcement
 
 ## Verification
 
 1. `pytest tests/ --ignore=tests/serialization/test_json.py` -- all pass
 2. `.venv/bin/ruff check src/ tests/` -- clean on new files
 3. `.venv/bin/mypy --ignore-missing-imports src/` -- clean
-4. Backup/restore state transitions correct
-5. Value source metadata populated on commandable writes
-6. PICS output matches registered services/objects
-7. BIBB matrix accurately reflects implementation
+4. Calendar wildcard matching for all date patterns
+5. Schedule resolves exception > weekly > default correctly
+6. TrendLog records polled and triggered data correctly
+7. Min on/off time prevents rapid state changes
