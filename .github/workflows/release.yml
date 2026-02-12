@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  ci-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: test
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 15
+
+  release:
+    needs: ci-check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from pyproject.toml
+        id: version
+        run: |
+          VERSION=$(python3 -c "
+          import re, pathlib
+          text = pathlib.Path('pyproject.toml').read_text()
+          print(re.search(r'^version\s*=\s*\"([^\"]+)\"', text, re.M).group(1))
+          ")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Check if tag already exists
+        id: check_tag
+        run: |
+          if git rev-parse "refs/tags/${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract changelog section
+        if: steps.check_tag.outputs.exists == 'false'
+        id: changelog
+        run: |
+          python3 -c "
+          import re, pathlib, os
+          text = pathlib.Path('CHANGELOG.md').read_text()
+          version = '${{ steps.version.outputs.version }}'
+          pattern = rf'## \[{re.escape(version)}\][^\n]*\n(.*?)(?=\n## \[|\Z)'
+          match = re.search(pattern, text, re.DOTALL)
+          body = match.group(1).strip() if match else 'No changelog entry found.'
+          # Write to file to avoid shell escaping issues
+          pathlib.Path('release_body.md').write_text(body)
+          "
+
+      - name: Create and push tag
+        if: steps.check_tag.outputs.exists == 'false'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.version.outputs.tag }}" -m "Release ${{ steps.version.outputs.tag }}"
+          git push origin "${{ steps.version.outputs.tag }}"
+
+      - name: Create GitHub Release
+        if: steps.check_tag.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: ${{ steps.version.outputs.tag }}
+          body_path: release_body.md
+          draft: false
+          prerelease: false
+
+      # ──────────────────────────────────────────────────────────
+      # PyPI Publish (disabled until repo is public)
+      #
+      # Prerequisites before enabling:
+      #   1. Create a PyPI project at https://pypi.org/manage/projects/
+      #   2. Add GitHub as a trusted publisher:
+      #      PyPI → Project → Settings → Publishing → Add Publisher
+      #      - Owner: jscott3201
+      #      - Repository: bac-py
+      #      - Workflow: release.yml
+      #      - Environment: (leave blank)
+      #   3. Uncomment the step below
+      #   4. Ensure `hatchling` build-backend is configured in pyproject.toml (already done)
+      #
+      # - name: Build package
+      #   if: steps.check_tag.outputs.exists == 'false'
+      #   run: |
+      #     pip install build
+      #     python -m build
+      #
+      # - name: Publish to PyPI
+      #   if: steps.check_tag.outputs.exists == 'false'
+      #   uses: pypa/gh-action-pypi-publish@release/v1
+      #   with:
+      #     print-hash: true
+      # ──────────────────────────────────────────────────────────
