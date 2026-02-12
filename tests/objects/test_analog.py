@@ -1,7 +1,5 @@
 """Tests for BACnet Analog object types (Clause 12.2-12.4)."""
 
-import asyncio
-
 import pytest
 
 from bac_py.objects.analog import AnalogInputObject, AnalogOutputObject, AnalogValueObject
@@ -276,13 +274,10 @@ class TestAnalogObjectsInDatabase:
         aos = db.get_objects_of_type(ObjectType.ANALOG_OUTPUT)
         assert len(aos) == 1
 
-    def test_async_write(self):
+    async def test_async_write(self):
         ao = AnalogOutputObject(1)
 
-        async def run():
-            await ao.async_write_property(PropertyIdentifier.PRESENT_VALUE, 99.0)
-
-        asyncio.get_event_loop().run_until_complete(run())
+        await ao.async_write_property(PropertyIdentifier.PRESENT_VALUE, 99.0)
         assert ao.read_property(PropertyIdentifier.PRESENT_VALUE) == 99.0
 
 

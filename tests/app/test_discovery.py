@@ -1,6 +1,5 @@
 """Tests for device discovery: Who-Is, extended discovery, and unconfigured devices."""
 
-import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -116,7 +115,7 @@ class TestDiscover:
             vendor_id=vendor_id,
         )
 
-    def test_discover_returns_discovered_devices(self):
+    async def test_discover_returns_discovered_devices(self):
         app = self._make_app()
         client = BACnetClient(app)
 
@@ -131,68 +130,56 @@ class TestDiscover:
 
         app.register_temporary_handler.side_effect = capture_handler
 
-        async def run():
-            devices = await client.discover(timeout=0.01)
-            assert len(devices) == 2
+        devices = await client.discover(timeout=0.01)
+        assert len(devices) == 2
 
-            assert isinstance(devices[0], DiscoveredDevice)
-            assert devices[0].instance == 100
-            assert devices[0].vendor_id == 42
-            assert devices[0].max_apdu_length == 1476
-            assert devices[0].segmentation_supported == Segmentation.BOTH
-            assert devices[0].address == source1
-            assert devices[0].address_str == "192.168.1.100:47808"
+        assert isinstance(devices[0], DiscoveredDevice)
+        assert devices[0].instance == 100
+        assert devices[0].vendor_id == 42
+        assert devices[0].max_apdu_length == 1476
+        assert devices[0].segmentation_supported == Segmentation.BOTH
+        assert devices[0].address == source1
+        assert devices[0].address_str == "192.168.1.100:47808"
 
-            assert devices[1].instance == 200
-            assert devices[1].vendor_id == 99
-            assert devices[1].address == source2
+        assert devices[1].instance == 200
+        assert devices[1].vendor_id == 99
+        assert devices[1].address == source2
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_discover_with_limits(self):
+    async def test_discover_with_limits(self):
         app = self._make_app()
         client = BACnetClient(app)
 
-        async def run():
-            await client.discover(low_limit=100, high_limit=200, timeout=0.01)
-            app.unconfirmed_request.assert_called_once()
-            call_kwargs = app.unconfirmed_request.call_args.kwargs
-            assert call_kwargs["service_choice"] == UnconfirmedServiceChoice.WHO_IS
-            from bac_py.services.who_is import WhoIsRequest
+        await client.discover(low_limit=100, high_limit=200, timeout=0.01)
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args.kwargs
+        assert call_kwargs["service_choice"] == UnconfirmedServiceChoice.WHO_IS
+        from bac_py.services.who_is import WhoIsRequest
 
-            req = WhoIsRequest.decode(call_kwargs["service_data"])
-            assert req.low_limit == 100
-            assert req.high_limit == 200
+        req = WhoIsRequest.decode(call_kwargs["service_data"])
+        assert req.low_limit == 100
+        assert req.high_limit == 200
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_discover_no_responses(self):
+    async def test_discover_no_responses(self):
         app = self._make_app()
         client = BACnetClient(app)
 
-        async def run():
-            devices = await client.discover(timeout=0.01)
-            assert devices == []
+        devices = await client.discover(timeout=0.01)
+        assert devices == []
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_discover_handler_registered_and_unregistered(self):
+    async def test_discover_handler_registered_and_unregistered(self):
         app = self._make_app()
         client = BACnetClient(app)
 
-        async def run():
-            await client.discover(timeout=0.01)
-            app.register_temporary_handler.assert_called_once()
-            reg_args = app.register_temporary_handler.call_args
-            assert reg_args[0][0] == UnconfirmedServiceChoice.I_AM
+        await client.discover(timeout=0.01)
+        app.register_temporary_handler.assert_called_once()
+        reg_args = app.register_temporary_handler.call_args
+        assert reg_args[0][0] == UnconfirmedServiceChoice.I_AM
 
-            app.unregister_temporary_handler.assert_called_once()
-            unreg_args = app.unregister_temporary_handler.call_args
-            assert unreg_args[0][0] == UnconfirmedServiceChoice.I_AM
+        app.unregister_temporary_handler.assert_called_once()
+        unreg_args = app.unregister_temporary_handler.call_args
+        assert unreg_args[0][0] == UnconfirmedServiceChoice.I_AM
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_discover_drops_malformed_iam(self):
+    async def test_discover_drops_malformed_iam(self):
         app = self._make_app()
         client = BACnetClient(app)
 
@@ -206,14 +193,11 @@ class TestDiscover:
 
         app.register_temporary_handler.side_effect = capture_handler
 
-        async def run():
-            devices = await client.discover(timeout=0.01)
-            assert len(devices) == 1
-            assert devices[0].instance == 100
+        devices = await client.discover(timeout=0.01)
+        assert len(devices) == 1
+        assert devices[0].instance == 100
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_who_is_still_returns_iam_requests(self):
+    async def test_who_is_still_returns_iam_requests(self):
         """Verify the original who_is() method still works and returns IAmRequest."""
         app = self._make_app()
         client = BACnetClient(app)
@@ -226,13 +210,10 @@ class TestDiscover:
 
         app.register_temporary_handler.side_effect = capture_handler
 
-        async def run():
-            responses = await client.who_is(timeout=0.01)
-            assert len(responses) == 1
-            assert isinstance(responses[0], IAmRequest)
-            assert responses[0].object_identifier.instance_number == 100
-
-        asyncio.get_event_loop().run_until_complete(run())
+        responses = await client.who_is(timeout=0.01)
+        assert len(responses) == 1
+        assert isinstance(responses[0], IAmRequest)
+        assert responses[0].object_identifier.instance_number == 100
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +222,7 @@ class TestDiscover:
 
 
 class TestDiscoverExtended:
-    def test_enriches_with_profile_metadata(self):
+    async def test_enriches_with_profile_metadata(self):
         """discover_extended() calls discover + RPM to populate profile fields."""
         app = MagicMock()
         client = BACnetClient(app)
@@ -274,23 +255,20 @@ class TestDiscoverExtended:
                 ]
             )
 
-        async def run():
-            with (
-                patch.object(client, "discover", side_effect=mock_discover),
-                patch.object(client, "read_property_multiple", side_effect=mock_rpm),
-            ):
-                devices = await client.discover_extended(timeout=0.01)
+        with (
+            patch.object(client, "discover", side_effect=mock_discover),
+            patch.object(client, "read_property_multiple", side_effect=mock_rpm),
+        ):
+            devices = await client.discover_extended(timeout=0.01)
 
-            assert len(devices) == 1
-            dev = devices[0]
-            assert dev.instance == 100
-            assert dev.profile_name == "BACnet-HVAC"
-            assert dev.profile_location == "https://example.com/profile"
-            assert dev.tags == [{"name": "floor", "value": "3"}]
+        assert len(devices) == 1
+        dev = devices[0]
+        assert dev.instance == 100
+        assert dev.profile_name == "BACnet-HVAC"
+        assert dev.profile_location == "https://example.com/profile"
+        assert dev.tags == [{"name": "floor", "value": "3"}]
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_gracefully_handles_unsupported_properties(self):
+    async def test_gracefully_handles_unsupported_properties(self):
         """Devices without profile properties return None for those fields."""
         app = MagicMock()
         client = BACnetClient(app)
@@ -332,23 +310,20 @@ class TestDiscoverExtended:
                 ]
             )
 
-        async def run():
-            with (
-                patch.object(client, "discover", side_effect=mock_discover),
-                patch.object(client, "read_property_multiple", side_effect=mock_rpm),
-            ):
-                devices = await client.discover_extended(timeout=0.01)
+        with (
+            patch.object(client, "discover", side_effect=mock_discover),
+            patch.object(client, "read_property_multiple", side_effect=mock_rpm),
+        ):
+            devices = await client.discover_extended(timeout=0.01)
 
-            assert len(devices) == 1
-            dev = devices[0]
-            assert dev.instance == 200
-            assert dev.profile_name is None
-            assert dev.profile_location is None
-            assert dev.tags is None
+        assert len(devices) == 1
+        dev = devices[0]
+        assert dev.instance == 200
+        assert dev.profile_name is None
+        assert dev.profile_location is None
+        assert dev.tags is None
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_handles_rpm_timeout(self):
+    async def test_handles_rpm_timeout(self):
         """If RPM times out, profile fields are None but device is still returned."""
         app = MagicMock()
         client = BACnetClient(app)
@@ -361,17 +336,14 @@ class TestDiscoverExtended:
         async def mock_rpm(address, specs, timeout=None):
             raise TimeoutError("RPM timed out")
 
-        async def run():
-            with (
-                patch.object(client, "discover", side_effect=mock_discover),
-                patch.object(client, "read_property_multiple", side_effect=mock_rpm),
-            ):
-                devices = await client.discover_extended(timeout=0.01)
+        with (
+            patch.object(client, "discover", side_effect=mock_discover),
+            patch.object(client, "read_property_multiple", side_effect=mock_rpm),
+        ):
+            devices = await client.discover_extended(timeout=0.01)
 
-            assert len(devices) == 1
-            assert devices[0].profile_name is None
-
-        asyncio.get_event_loop().run_until_complete(run())
+        assert len(devices) == 1
+        assert devices[0].profile_name is None
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +352,7 @@ class TestDiscoverExtended:
 
 
 class TestTraverseHierarchy:
-    def test_reads_subordinate_list(self):
+    async def test_reads_subordinate_list(self):
         """traverse_hierarchy reads SUBORDINATE_LIST from root."""
         app = MagicMock()
         client = BACnetClient(app)
@@ -395,18 +367,15 @@ class TestTraverseHierarchy:
                 property_value=[ai1, ai2],
             )
 
-        async def run():
-            root = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
-            with patch.object(client, "read_property", side_effect=mock_read_prop):
-                result = await client.traverse_hierarchy(PEER, root)
+        root = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
+        with patch.object(client, "read_property", side_effect=mock_read_prop):
+            result = await client.traverse_hierarchy(PEER, root)
 
-            assert ai1 in result
-            assert ai2 in result
-            assert len(result) == 2
+        assert ai1 in result
+        assert ai2 in result
+        assert len(result) == 2
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_recurses_through_nested_views(self):
+    async def test_recurses_through_nested_views(self):
         """traverse_hierarchy descends into nested Structured View objects."""
         app = MagicMock()
         client = BACnetClient(app)
@@ -435,18 +404,15 @@ class TestTraverseHierarchy:
                 property_value=[],
             )
 
-        async def run():
-            with patch.object(client, "read_property", side_effect=mock_read_prop):
-                result = await client.traverse_hierarchy(PEER, sv1)
+        with patch.object(client, "read_property", side_effect=mock_read_prop):
+            result = await client.traverse_hierarchy(PEER, sv1)
 
-            assert sv2 in result
-            assert ai1 in result
-            assert bi1 in result
-            assert len(result) == 3
+        assert sv2 in result
+        assert ai1 in result
+        assert bi1 in result
+        assert len(result) == 3
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_respects_max_depth(self):
+    async def test_respects_max_depth(self):
         """traverse_hierarchy stops at max_depth."""
         app = MagicMock()
         client = BACnetClient(app)
@@ -467,16 +433,13 @@ class TestTraverseHierarchy:
                 property_value=[ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)],
             )
 
-        async def run():
-            with patch.object(client, "read_property", side_effect=mock_read_prop):
-                result = await client.traverse_hierarchy(PEER, sv1, max_depth=1)
+        with patch.object(client, "read_property", side_effect=mock_read_prop):
+            result = await client.traverse_hierarchy(PEER, sv1, max_depth=1)
 
-            assert sv2 in result
-            assert ObjectIdentifier(ObjectType.ANALOG_INPUT, 1) not in result
+        assert sv2 in result
+        assert ObjectIdentifier(ObjectType.ANALOG_INPUT, 1) not in result
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_handles_empty_subordinate_list(self):
+    async def test_handles_empty_subordinate_list(self):
         """traverse_hierarchy handles Structured View with no subordinates."""
         app = MagicMock()
         client = BACnetClient(app)
@@ -488,16 +451,13 @@ class TestTraverseHierarchy:
                 property_value=[],
             )
 
-        async def run():
-            sv = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
-            with patch.object(client, "read_property", side_effect=mock_read_prop):
-                result = await client.traverse_hierarchy(PEER, sv)
+        sv = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
+        with patch.object(client, "read_property", side_effect=mock_read_prop):
+            result = await client.traverse_hierarchy(PEER, sv)
 
-            assert result == []
+        assert result == []
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_handles_read_error(self):
+    async def test_handles_read_error(self):
         """traverse_hierarchy gracefully handles read failures."""
         from bac_py.services.errors import BACnetError
 
@@ -507,16 +467,13 @@ class TestTraverseHierarchy:
         async def mock_read_prop(address, obj_id, prop_id, timeout=None):
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
 
-        async def run():
-            sv = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
-            with patch.object(client, "read_property", side_effect=mock_read_prop):
-                result = await client.traverse_hierarchy(PEER, sv)
+        sv = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
+        with patch.object(client, "read_property", side_effect=mock_read_prop):
+            result = await client.traverse_hierarchy(PEER, sv)
 
-            assert result == []
+        assert result == []
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_prevents_cycles(self):
+    async def test_prevents_cycles(self):
         """traverse_hierarchy doesn't loop on circular references."""
         app = MagicMock()
         client = BACnetClient(app)
@@ -538,14 +495,11 @@ class TestTraverseHierarchy:
                     property_value=[sv1],
                 )
 
-        async def run():
-            with patch.object(client, "read_property", side_effect=mock_read_prop):
-                result = await client.traverse_hierarchy(PEER, sv1)
+        with patch.object(client, "read_property", side_effect=mock_read_prop):
+            result = await client.traverse_hierarchy(PEER, sv1)
 
-            assert sv2 in result
-            assert sv1 in result
-
-        asyncio.get_event_loop().run_until_complete(run())
+        assert sv2 in result
+        assert sv1 in result
 
 
 # ---------------------------------------------------------------------------

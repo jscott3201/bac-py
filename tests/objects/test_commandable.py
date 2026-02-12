@@ -1,6 +1,5 @@
 """Tests for commandable object behavior: priority arrays and value source tracking."""
 
-import asyncio
 from typing import ClassVar
 
 import pytest
@@ -94,14 +93,11 @@ class TestCommandPriority:
         # Should fall back to relinquish default
         assert obj.read_property(PropertyIdentifier.PRESENT_VALUE) == 0.0
 
-    def test_async_write_defaults_priority_16(self):
+    async def test_async_write_defaults_priority_16(self):
         """async_write_property also defaults to priority 16 for commandable."""
         obj = _CommandableObject(1)
 
-        async def run():
-            await obj.async_write_property(PropertyIdentifier.PRESENT_VALUE, 55.0)
-
-        asyncio.get_event_loop().run_until_complete(run())
+        await obj.async_write_property(PropertyIdentifier.PRESENT_VALUE, 55.0)
         assert obj._priority_array[15] == 55.0
 
 

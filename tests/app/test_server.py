@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -184,7 +183,7 @@ class TestEncodePropertyValue:
 
 
 class TestHandleReadProperty:
-    def test_read_object_name(self):
+    async def test_read_object_name(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -193,16 +192,13 @@ class TestHandleReadProperty:
             property_identifier=PropertyIdentifier.OBJECT_NAME,
         )
 
-        async def run():
-            result = await handlers.handle_read_property(12, request.encode(), SOURCE)
-            ack = ReadPropertyACK.decode(result)
-            assert ack.object_identifier.object_type == ObjectType.DEVICE
-            assert ack.property_identifier == PropertyIdentifier.OBJECT_NAME
-            assert len(ack.property_value) > 0
+        result = await handlers.handle_read_property(12, request.encode(), SOURCE)
+        ack = ReadPropertyACK.decode(result)
+        assert ack.object_identifier.object_type == ObjectType.DEVICE
+        assert ack.property_identifier == PropertyIdentifier.OBJECT_NAME
+        assert len(ack.property_value) > 0
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_read_protocol_version(self):
+    async def test_read_protocol_version(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -211,14 +207,11 @@ class TestHandleReadProperty:
             property_identifier=PropertyIdentifier.PROTOCOL_VERSION,
         )
 
-        async def run():
-            result = await handlers.handle_read_property(12, request.encode(), SOURCE)
-            ack = ReadPropertyACK.decode(result)
-            assert ack.property_identifier == PropertyIdentifier.PROTOCOL_VERSION
+        result = await handlers.handle_read_property(12, request.encode(), SOURCE)
+        ack = ReadPropertyACK.decode(result)
+        assert ack.property_identifier == PropertyIdentifier.PROTOCOL_VERSION
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_read_unknown_object_raises(self):
+    async def test_read_unknown_object_raises(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -227,14 +220,11 @@ class TestHandleReadProperty:
             property_identifier=PropertyIdentifier.PRESENT_VALUE,
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_read_property(12, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_read_property(12, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_read_unknown_property_raises(self):
+    async def test_read_unknown_property_raises(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -244,14 +234,11 @@ class TestHandleReadProperty:
             property_identifier=PropertyIdentifier.PRESENT_VALUE,
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_read_property(12, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.UNKNOWN_PROPERTY
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_read_property(12, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_PROPERTY
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_read_wildcard_device_instance(self):
+    async def test_read_wildcard_device_instance(self):
         """Wildcard instance 4194303 resolves to local device (Clause 15.5.2)."""
         app, db, device = _make_app(device_instance=42)
         handlers = DefaultServerHandlers(app, db, device)
@@ -261,14 +248,11 @@ class TestHandleReadProperty:
             property_identifier=PropertyIdentifier.OBJECT_NAME,
         )
 
-        async def run():
-            result = await handlers.handle_read_property(12, request.encode(), SOURCE)
-            ack = ReadPropertyACK.decode(result)
-            # ACK should contain the actual device instance, not the wildcard
-            assert ack.object_identifier.instance_number == 42
-            assert ack.object_identifier.object_type == ObjectType.DEVICE
-
-        asyncio.get_event_loop().run_until_complete(run())
+        result = await handlers.handle_read_property(12, request.encode(), SOURCE)
+        ack = ReadPropertyACK.decode(result)
+        # ACK should contain the actual device instance, not the wildcard
+        assert ack.object_identifier.instance_number == 42
+        assert ack.object_identifier.object_type == ObjectType.DEVICE
 
 
 # ---------------------------------------------------------------------------
@@ -277,7 +261,7 @@ class TestHandleReadProperty:
 
 
 class TestHandleWriteProperty:
-    def test_write_object_name(self):
+    async def test_write_object_name(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -287,13 +271,10 @@ class TestHandleWriteProperty:
             property_value=b"\x75\x0a\x00new-name!",
         )
 
-        async def run():
-            result = await handlers.handle_write_property(15, request.encode(), SOURCE)
-            assert result is None  # SimpleACK
+        result = await handlers.handle_write_property(15, request.encode(), SOURCE)
+        assert result is None  # SimpleACK
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_write_read_only_raises(self):
+    async def test_write_read_only_raises(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -303,14 +284,11 @@ class TestHandleWriteProperty:
             property_value=b"\xc4\x02\x00\x00\x01",
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_write_property(15, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_write_property(15, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_write_unknown_object_raises(self):
+    async def test_write_unknown_object_raises(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -320,14 +298,11 @@ class TestHandleWriteProperty:
             property_value=b"\x44\x00\x00\x00\x00",
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_write_property(15, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_write_property(15, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_write_wildcard_device_instance(self):
+    async def test_write_wildcard_device_instance(self):
         """Wildcard instance 4194303 resolves to local device (Clause 15.9)."""
         app, db, device = _make_app(device_instance=42)
         handlers = DefaultServerHandlers(app, db, device)
@@ -338,11 +313,8 @@ class TestHandleWriteProperty:
             property_value=b"\x75\x0a\x00new-name!",
         )
 
-        async def run():
-            result = await handlers.handle_write_property(15, request.encode(), SOURCE)
-            assert result is None  # SimpleACK
-
-        asyncio.get_event_loop().run_until_complete(run())
+        result = await handlers.handle_write_property(15, request.encode(), SOURCE)
+        assert result is None  # SimpleACK
 
 
 # ---------------------------------------------------------------------------
@@ -351,79 +323,61 @@ class TestHandleWriteProperty:
 
 
 class TestHandleWhoIs:
-    def test_who_is_no_range_responds(self):
+    async def test_who_is_no_range_responds(self):
         app, db, device = _make_app(device_instance=1234)
         handlers = DefaultServerHandlers(app, db, device)
 
         request = WhoIsRequest()
 
-        async def run():
-            await handlers.handle_who_is(8, request.encode(), SOURCE)
-            app.unconfirmed_request.assert_called_once()
+        await handlers.handle_who_is(8, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_called_once()
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_who_is_in_range_responds(self):
+    async def test_who_is_in_range_responds(self):
         app, db, device = _make_app(device_instance=500)
         handlers = DefaultServerHandlers(app, db, device)
 
         request = WhoIsRequest(low_limit=100, high_limit=1000)
 
-        async def run():
-            await handlers.handle_who_is(8, request.encode(), SOURCE)
-            app.unconfirmed_request.assert_called_once()
+        await handlers.handle_who_is(8, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_called_once()
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_who_is_out_of_range_no_response(self):
+    async def test_who_is_out_of_range_no_response(self):
         app, db, device = _make_app(device_instance=5000)
         handlers = DefaultServerHandlers(app, db, device)
 
         request = WhoIsRequest(low_limit=100, high_limit=1000)
 
-        async def run():
-            await handlers.handle_who_is(8, request.encode(), SOURCE)
-            app.unconfirmed_request.assert_not_called()
+        await handlers.handle_who_is(8, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_not_called()
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_who_is_exact_match(self):
+    async def test_who_is_exact_match(self):
         app, db, device = _make_app(device_instance=42)
         handlers = DefaultServerHandlers(app, db, device)
 
         request = WhoIsRequest(low_limit=42, high_limit=42)
 
-        async def run():
-            await handlers.handle_who_is(8, request.encode(), SOURCE)
-            app.unconfirmed_request.assert_called_once()
+        await handlers.handle_who_is(8, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_called_once()
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_who_is_at_lower_bound(self):
+    async def test_who_is_at_lower_bound(self):
         app, db, device = _make_app(device_instance=100)
         handlers = DefaultServerHandlers(app, db, device)
 
         request = WhoIsRequest(low_limit=100, high_limit=200)
 
-        async def run():
-            await handlers.handle_who_is(8, request.encode(), SOURCE)
-            app.unconfirmed_request.assert_called_once()
+        await handlers.handle_who_is(8, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_called_once()
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_who_is_at_upper_bound(self):
+    async def test_who_is_at_upper_bound(self):
         app, db, device = _make_app(device_instance=200)
         handlers = DefaultServerHandlers(app, db, device)
 
         request = WhoIsRequest(low_limit=100, high_limit=200)
 
-        async def run():
-            await handlers.handle_who_is(8, request.encode(), SOURCE)
-            app.unconfirmed_request.assert_called_once()
+        await handlers.handle_who_is(8, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_called_once()
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_who_is_iam_uses_device_segmentation(self):
+    async def test_who_is_iam_uses_device_segmentation(self):
         """I-Am response segmentation_supported must match device object."""
         from bac_py.services.who_is import IAmRequest
 
@@ -432,17 +386,14 @@ class TestHandleWhoIs:
 
         request = WhoIsRequest()
 
-        async def run():
-            await handlers.handle_who_is(8, request.encode(), SOURCE)
-            call_args = app.unconfirmed_request.call_args
-            service_data = call_args.kwargs.get(
-                "service_data", call_args[1].get("service_data") if len(call_args) > 1 else None
-            )
-            iam = IAmRequest.decode(service_data)
-            # Device defaults to Segmentation.BOTH
-            assert iam.segmentation_supported == Segmentation.BOTH
-
-        asyncio.get_event_loop().run_until_complete(run())
+        await handlers.handle_who_is(8, request.encode(), SOURCE)
+        call_args = app.unconfirmed_request.call_args
+        service_data = call_args.kwargs.get(
+            "service_data", call_args[1].get("service_data") if len(call_args) > 1 else None
+        )
+        iam = IAmRequest.decode(service_data)
+        # Device defaults to Segmentation.BOTH
+        assert iam.segmentation_supported == Segmentation.BOTH
 
 
 # ---------------------------------------------------------------------------
@@ -467,7 +418,7 @@ class TestDefaultServerHandlersRegister:
 
 
 class TestHandleReadPropertyMultiple:
-    def test_rpm_read_multiple_properties(self):
+    async def test_rpm_read_multiple_properties(self):
         from bac_py.services.read_property_multiple import (
             PropertyReference,
             ReadAccessSpecification,
@@ -490,20 +441,17 @@ class TestHandleReadPropertyMultiple:
             ]
         )
 
-        async def run():
-            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
-            ack = ReadPropertyMultipleACK.decode(result)
-            assert len(ack.list_of_read_access_results) == 1
-            res = ack.list_of_read_access_results[0]
-            assert res.object_identifier == ObjectIdentifier(ObjectType.DEVICE, 1)
-            assert len(res.list_of_results) == 2
-            assert res.list_of_results[0].property_value is not None
-            assert res.list_of_results[0].property_access_error is None
-            assert res.list_of_results[1].property_value is not None
+        result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+        ack = ReadPropertyMultipleACK.decode(result)
+        assert len(ack.list_of_read_access_results) == 1
+        res = ack.list_of_read_access_results[0]
+        assert res.object_identifier == ObjectIdentifier(ObjectType.DEVICE, 1)
+        assert len(res.list_of_results) == 2
+        assert res.list_of_results[0].property_value is not None
+        assert res.list_of_results[0].property_access_error is None
+        assert res.list_of_results[1].property_value is not None
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_rpm_per_property_error(self):
+    async def test_rpm_per_property_error(self):
         from bac_py.services.read_property_multiple import (
             PropertyReference,
             ReadAccessSpecification,
@@ -526,21 +474,18 @@ class TestHandleReadPropertyMultiple:
             ]
         )
 
-        async def run():
-            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
-            ack = ReadPropertyMultipleACK.decode(result)
-            res = ack.list_of_read_access_results[0]
-            # Object_Name succeeds
-            assert res.list_of_results[0].property_value is not None
-            assert res.list_of_results[0].property_access_error is None
-            # Present_Value fails (not on Device)
-            assert res.list_of_results[1].property_value is None
-            assert res.list_of_results[1].property_access_error is not None
-            assert res.list_of_results[1].property_access_error[1] == ErrorCode.UNKNOWN_PROPERTY
+        result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+        ack = ReadPropertyMultipleACK.decode(result)
+        res = ack.list_of_read_access_results[0]
+        # Object_Name succeeds
+        assert res.list_of_results[0].property_value is not None
+        assert res.list_of_results[0].property_access_error is None
+        # Present_Value fails (not on Device)
+        assert res.list_of_results[1].property_value is None
+        assert res.list_of_results[1].property_access_error is not None
+        assert res.list_of_results[1].property_access_error[1] == ErrorCode.UNKNOWN_PROPERTY
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_rpm_unknown_object(self):
+    async def test_rpm_unknown_object(self):
         from bac_py.services.read_property_multiple import (
             PropertyReference,
             ReadAccessSpecification,
@@ -562,17 +507,14 @@ class TestHandleReadPropertyMultiple:
             ]
         )
 
-        async def run():
-            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
-            ack = ReadPropertyMultipleACK.decode(result)
-            res = ack.list_of_read_access_results[0]
-            assert len(res.list_of_results) == 1
-            assert res.list_of_results[0].property_access_error is not None
-            assert res.list_of_results[0].property_access_error[1] == ErrorCode.UNKNOWN_OBJECT
+        result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+        ack = ReadPropertyMultipleACK.decode(result)
+        res = ack.list_of_read_access_results[0]
+        assert len(res.list_of_results) == 1
+        assert res.list_of_results[0].property_access_error is not None
+        assert res.list_of_results[0].property_access_error[1] == ErrorCode.UNKNOWN_OBJECT
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_rpm_wildcard_device_instance(self):
+    async def test_rpm_wildcard_device_instance(self):
         from bac_py.services.read_property_multiple import (
             PropertyReference,
             ReadAccessSpecification,
@@ -594,16 +536,13 @@ class TestHandleReadPropertyMultiple:
             ]
         )
 
-        async def run():
-            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
-            ack = ReadPropertyMultipleACK.decode(result)
-            res = ack.list_of_read_access_results[0]
-            assert res.object_identifier.instance_number == 42
-            assert res.list_of_results[0].property_value is not None
+        result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+        ack = ReadPropertyMultipleACK.decode(result)
+        res = ack.list_of_read_access_results[0]
+        assert res.object_identifier.instance_number == 42
+        assert res.list_of_results[0].property_value is not None
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_rpm_multiple_objects(self):
+    async def test_rpm_multiple_objects(self):
         import bac_py.objects  # noqa: F401
         from bac_py.services.read_property_multiple import (
             PropertyReference,
@@ -634,20 +573,17 @@ class TestHandleReadPropertyMultiple:
             ]
         )
 
-        async def run():
-            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
-            ack = ReadPropertyMultipleACK.decode(result)
-            assert len(ack.list_of_read_access_results) == 2
-            assert ack.list_of_read_access_results[0].object_identifier == (
-                ObjectIdentifier(ObjectType.DEVICE, 1)
-            )
-            assert ack.list_of_read_access_results[1].object_identifier == (
-                ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
-            )
+        result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+        ack = ReadPropertyMultipleACK.decode(result)
+        assert len(ack.list_of_read_access_results) == 2
+        assert ack.list_of_read_access_results[0].object_identifier == (
+            ObjectIdentifier(ObjectType.DEVICE, 1)
+        )
+        assert ack.list_of_read_access_results[1].object_identifier == (
+            ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        )
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_rpm_all_properties(self):
+    async def test_rpm_all_properties(self):
         """Property identifier ALL expands to all properties on the object."""
         from bac_py.services.read_property_multiple import (
             PropertyReference,
@@ -670,29 +606,25 @@ class TestHandleReadPropertyMultiple:
             ]
         )
 
-        async def run():
-            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
-            ack = ReadPropertyMultipleACK.decode(result)
-            res = ack.list_of_read_access_results[0]
-            # Should have many properties, not just an error for "ALL"
-            assert len(res.list_of_results) > 5
-            # Verify key properties are present
-            prop_ids = {elem.property_identifier for elem in res.list_of_results}
-            assert PropertyIdentifier.OBJECT_IDENTIFIER in prop_ids
-            assert PropertyIdentifier.OBJECT_NAME in prop_ids
-            assert PropertyIdentifier.OBJECT_TYPE in prop_ids
-            assert PropertyIdentifier.PROTOCOL_VERSION in prop_ids
-            assert PropertyIdentifier.PROPERTY_LIST in prop_ids
-            # All results should be successful (no errors)
-            for elem in res.list_of_results:
-                assert elem.property_value is not None, (
-                    f"Property {elem.property_identifier} returned error "
-                    f"{elem.property_access_error}"
-                )
+        result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+        ack = ReadPropertyMultipleACK.decode(result)
+        res = ack.list_of_read_access_results[0]
+        # Should have many properties, not just an error for "ALL"
+        assert len(res.list_of_results) > 5
+        # Verify key properties are present
+        prop_ids = {elem.property_identifier for elem in res.list_of_results}
+        assert PropertyIdentifier.OBJECT_IDENTIFIER in prop_ids
+        assert PropertyIdentifier.OBJECT_NAME in prop_ids
+        assert PropertyIdentifier.OBJECT_TYPE in prop_ids
+        assert PropertyIdentifier.PROTOCOL_VERSION in prop_ids
+        assert PropertyIdentifier.PROPERTY_LIST in prop_ids
+        # All results should be successful (no errors)
+        for elem in res.list_of_results:
+            assert elem.property_value is not None, (
+                f"Property {elem.property_identifier} returned error {elem.property_access_error}"
+            )
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_rpm_required_properties(self):
+    async def test_rpm_required_properties(self):
         """Property identifier REQUIRED expands to only required properties."""
         from bac_py.services.read_property_multiple import (
             PropertyReference,
@@ -715,21 +647,18 @@ class TestHandleReadPropertyMultiple:
             ]
         )
 
-        async def run():
-            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
-            ack = ReadPropertyMultipleACK.decode(result)
-            res = ack.list_of_read_access_results[0]
-            prop_ids = {elem.property_identifier for elem in res.list_of_results}
-            # Should include required properties
-            assert PropertyIdentifier.OBJECT_IDENTIFIER in prop_ids
-            assert PropertyIdentifier.OBJECT_NAME in prop_ids
-            assert PropertyIdentifier.PROTOCOL_VERSION in prop_ids
-            # Should NOT include optional properties like DESCRIPTION
-            assert PropertyIdentifier.DESCRIPTION not in prop_ids
+        result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+        ack = ReadPropertyMultipleACK.decode(result)
+        res = ack.list_of_read_access_results[0]
+        prop_ids = {elem.property_identifier for elem in res.list_of_results}
+        # Should include required properties
+        assert PropertyIdentifier.OBJECT_IDENTIFIER in prop_ids
+        assert PropertyIdentifier.OBJECT_NAME in prop_ids
+        assert PropertyIdentifier.PROTOCOL_VERSION in prop_ids
+        # Should NOT include optional properties like DESCRIPTION
+        assert PropertyIdentifier.DESCRIPTION not in prop_ids
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_rpm_optional_properties(self):
+    async def test_rpm_optional_properties(self):
         """Property identifier OPTIONAL expands to only optional properties present."""
         from bac_py.services.read_property_multiple import (
             PropertyReference,
@@ -754,20 +683,17 @@ class TestHandleReadPropertyMultiple:
             ]
         )
 
-        async def run():
-            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
-            ack = ReadPropertyMultipleACK.decode(result)
-            res = ack.list_of_read_access_results[0]
-            prop_ids = {elem.property_identifier for elem in res.list_of_results}
-            # DESCRIPTION is optional and present
-            assert PropertyIdentifier.DESCRIPTION in prop_ids
-            # Required properties should NOT be included
-            assert PropertyIdentifier.OBJECT_IDENTIFIER not in prop_ids
-            assert PropertyIdentifier.OBJECT_NAME not in prop_ids
+        result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+        ack = ReadPropertyMultipleACK.decode(result)
+        res = ack.list_of_read_access_results[0]
+        prop_ids = {elem.property_identifier for elem in res.list_of_results}
+        # DESCRIPTION is optional and present
+        assert PropertyIdentifier.DESCRIPTION in prop_ids
+        # Required properties should NOT be included
+        assert PropertyIdentifier.OBJECT_IDENTIFIER not in prop_ids
+        assert PropertyIdentifier.OBJECT_NAME not in prop_ids
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_rpm_all_unknown_object(self):
+    async def test_rpm_all_unknown_object(self):
         """ALL on an unknown object still returns UNKNOWN_OBJECT error."""
         from bac_py.services.read_property_multiple import (
             PropertyReference,
@@ -790,16 +716,13 @@ class TestHandleReadPropertyMultiple:
             ]
         )
 
-        async def run():
-            result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
-            ack = ReadPropertyMultipleACK.decode(result)
-            res = ack.list_of_read_access_results[0]
-            # Should have one error result for the ALL reference
-            assert len(res.list_of_results) == 1
-            assert res.list_of_results[0].property_access_error is not None
-            assert res.list_of_results[0].property_access_error[1] == ErrorCode.UNKNOWN_OBJECT
-
-        asyncio.get_event_loop().run_until_complete(run())
+        result = await handlers.handle_read_property_multiple(14, request.encode(), SOURCE)
+        ack = ReadPropertyMultipleACK.decode(result)
+        res = ack.list_of_read_access_results[0]
+        # Should have one error result for the ALL reference
+        assert len(res.list_of_results) == 1
+        assert res.list_of_results[0].property_access_error is not None
+        assert res.list_of_results[0].property_access_error[1] == ErrorCode.UNKNOWN_OBJECT
 
 
 # ---------------------------------------------------------------------------
@@ -808,7 +731,7 @@ class TestHandleReadPropertyMultiple:
 
 
 class TestHandleWritePropertyMultiple:
-    def test_wpm_write_success(self):
+    async def test_wpm_write_success(self):
         from bac_py.services.common import BACnetPropertyValue
         from bac_py.services.write_property_multiple import (
             WriteAccessSpecification,
@@ -832,13 +755,10 @@ class TestHandleWritePropertyMultiple:
             ]
         )
 
-        async def run():
-            result = await handlers.handle_write_property_multiple(16, request.encode(), SOURCE)
-            assert result is None  # SimpleACK
+        result = await handlers.handle_write_property_multiple(16, request.encode(), SOURCE)
+        assert result is None  # SimpleACK
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_wpm_unknown_object_raises(self):
+    async def test_wpm_unknown_object_raises(self):
         from bac_py.services.common import BACnetPropertyValue
         from bac_py.services.write_property_multiple import (
             WriteAccessSpecification,
@@ -862,14 +782,11 @@ class TestHandleWritePropertyMultiple:
             ]
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_write_property_multiple(16, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_write_property_multiple(16, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_wpm_read_only_raises(self):
+    async def test_wpm_read_only_raises(self):
         from bac_py.services.common import BACnetPropertyValue
         from bac_py.services.write_property_multiple import (
             WriteAccessSpecification,
@@ -893,12 +810,9 @@ class TestHandleWritePropertyMultiple:
             ]
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_write_property_multiple(16, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
-
-        asyncio.get_event_loop().run_until_complete(run())
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_write_property_multiple(16, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
 
 
 # ---------------------------------------------------------------------------
@@ -907,7 +821,7 @@ class TestHandleWritePropertyMultiple:
 
 
 class TestHandleReadRange:
-    def test_read_range_full_list(self):
+    async def test_read_range_full_list(self):
         from bac_py.services.read_range import (
             ReadRangeACK,
             ReadRangeRequest,
@@ -922,17 +836,14 @@ class TestHandleReadRange:
             property_identifier=PropertyIdentifier.OBJECT_LIST,
         )
 
-        async def run():
-            result = await handlers.handle_read_range(26, request.encode(), SOURCE)
-            ack = ReadRangeACK.decode(result)
-            assert ack.object_identifier == ObjectIdentifier(ObjectType.DEVICE, 1)
-            assert ack.result_flags.first_item is True
-            assert ack.result_flags.last_item is True
-            assert ack.result_flags.more_items is False
+        result = await handlers.handle_read_range(26, request.encode(), SOURCE)
+        ack = ReadRangeACK.decode(result)
+        assert ack.object_identifier == ObjectIdentifier(ObjectType.DEVICE, 1)
+        assert ack.result_flags.first_item is True
+        assert ack.result_flags.last_item is True
+        assert ack.result_flags.more_items is False
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_read_range_by_position(self):
+    async def test_read_range_by_position(self):
         import bac_py.objects  # noqa: F401
         from bac_py.services.read_range import (
             RangeByPosition,
@@ -951,17 +862,14 @@ class TestHandleReadRange:
             range=RangeByPosition(reference_index=2, count=2),
         )
 
-        async def run():
-            result = await handlers.handle_read_range(26, request.encode(), SOURCE)
-            ack = ReadRangeACK.decode(result)
-            assert ack.item_count == 2
-            assert ack.result_flags.first_item is False
-            assert ack.result_flags.last_item is False
-            assert ack.result_flags.more_items is True
+        result = await handlers.handle_read_range(26, request.encode(), SOURCE)
+        ack = ReadRangeACK.decode(result)
+        assert ack.item_count == 2
+        assert ack.result_flags.first_item is False
+        assert ack.result_flags.last_item is False
+        assert ack.result_flags.more_items is True
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_read_range_unknown_object_raises(self):
+    async def test_read_range_unknown_object_raises(self):
         from bac_py.services.read_range import ReadRangeRequest
 
         app, db, device = _make_app()
@@ -972,12 +880,9 @@ class TestHandleReadRange:
             property_identifier=PropertyIdentifier.OBJECT_LIST,
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_read_range(26, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
-
-        asyncio.get_event_loop().run_until_complete(run())
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_read_range(26, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
 
 
 # ---------------------------------------------------------------------------
@@ -986,7 +891,7 @@ class TestHandleReadRange:
 
 
 class TestHandleDeviceCommunicationControl:
-    def test_dcc_returns_simple_ack(self):
+    async def test_dcc_returns_simple_ack(self):
         from bac_py.services.device_mgmt import DeviceCommunicationControlRequest
         from bac_py.types.enums import EnableDisable
 
@@ -997,15 +902,10 @@ class TestHandleDeviceCommunicationControl:
             enable_disable=EnableDisable.ENABLE,
         )
 
-        async def run():
-            result = await handlers.handle_device_communication_control(
-                17, request.encode(), SOURCE
-            )
-            assert result is None
+        result = await handlers.handle_device_communication_control(17, request.encode(), SOURCE)
+        assert result is None
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_dcc_with_duration_and_password(self):
+    async def test_dcc_with_duration_and_password(self):
         from bac_py.services.device_mgmt import DeviceCommunicationControlRequest
         from bac_py.types.enums import EnableDisable
 
@@ -1019,13 +919,8 @@ class TestHandleDeviceCommunicationControl:
             password="secret",
         )
 
-        async def run():
-            result = await handlers.handle_device_communication_control(
-                17, request.encode(), SOURCE
-            )
-            assert result is None
-
-        asyncio.get_event_loop().run_until_complete(run())
+        result = await handlers.handle_device_communication_control(17, request.encode(), SOURCE)
+        assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -1034,7 +929,7 @@ class TestHandleDeviceCommunicationControl:
 
 
 class TestHandleReinitializeDevice:
-    def test_reinitialize_returns_simple_ack(self):
+    async def test_reinitialize_returns_simple_ack(self):
         from bac_py.services.device_mgmt import ReinitializeDeviceRequest
         from bac_py.types.enums import ReinitializedState
 
@@ -1045,13 +940,10 @@ class TestHandleReinitializeDevice:
             reinitialized_state=ReinitializedState.COLDSTART,
         )
 
-        async def run():
-            result = await handlers.handle_reinitialize_device(20, request.encode(), SOURCE)
-            assert result is None
+        result = await handlers.handle_reinitialize_device(20, request.encode(), SOURCE)
+        assert result is None
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_reinitialize_warmstart(self):
+    async def test_reinitialize_warmstart(self):
         from bac_py.services.device_mgmt import ReinitializeDeviceRequest
         from bac_py.types.enums import ReinitializedState
 
@@ -1064,11 +956,8 @@ class TestHandleReinitializeDevice:
             password="mypass",
         )
 
-        async def run():
-            result = await handlers.handle_reinitialize_device(20, request.encode(), SOURCE)
-            assert result is None
-
-        asyncio.get_event_loop().run_until_complete(run())
+        result = await handlers.handle_reinitialize_device(20, request.encode(), SOURCE)
+        assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -1077,7 +966,7 @@ class TestHandleReinitializeDevice:
 
 
 class TestHandleTimeSynchronization:
-    def test_time_sync_processes(self):
+    async def test_time_sync_processes(self):
         from bac_py.services.device_mgmt import TimeSynchronizationRequest
         from bac_py.types.primitives import BACnetDate, BACnetTime
 
@@ -1089,13 +978,10 @@ class TestHandleTimeSynchronization:
             time=BACnetTime(10, 30, 0, 0),
         )
 
-        async def run():
-            result = await handlers.handle_time_synchronization(6, request.encode(), SOURCE)
-            assert result is None
+        result = await handlers.handle_time_synchronization(6, request.encode(), SOURCE)
+        assert result is None
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_utc_time_sync_processes(self):
+    async def test_utc_time_sync_processes(self):
         from bac_py.services.device_mgmt import UTCTimeSynchronizationRequest
         from bac_py.types.primitives import BACnetDate, BACnetTime
 
@@ -1107,11 +993,8 @@ class TestHandleTimeSynchronization:
             time=BACnetTime(18, 30, 0, 0),
         )
 
-        async def run():
-            result = await handlers.handle_utc_time_synchronization(9, request.encode(), SOURCE)
-            assert result is None
-
-        asyncio.get_event_loop().run_until_complete(run())
+        result = await handlers.handle_utc_time_synchronization(9, request.encode(), SOURCE)
+        assert result is None
 
 
 # ---------------------------------------------------------------------------
@@ -1120,7 +1003,7 @@ class TestHandleTimeSynchronization:
 
 
 class TestHandleAtomicReadFile:
-    def test_stream_read(self):
+    async def test_stream_read(self):
         from bac_py.objects.file import FileObject
         from bac_py.services.file_access import (
             AtomicReadFileACK,
@@ -1144,16 +1027,13 @@ class TestHandleAtomicReadFile:
             ),
         )
 
-        async def run():
-            result = await handlers.handle_atomic_read_file(6, request.encode(), SOURCE)
-            ack = AtomicReadFileACK.decode(result)
-            assert ack.end_of_file is True
-            assert isinstance(ack.access_method, StreamReadACK)
-            assert ack.access_method.file_data == b"Hello BACnet"
+        result = await handlers.handle_atomic_read_file(6, request.encode(), SOURCE)
+        ack = AtomicReadFileACK.decode(result)
+        assert ack.end_of_file is True
+        assert isinstance(ack.access_method, StreamReadACK)
+        assert ack.access_method.file_data == b"Hello BACnet"
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_record_read(self):
+    async def test_record_read(self):
         from bac_py.objects.file import FileObject
         from bac_py.services.file_access import (
             AtomicReadFileACK,
@@ -1177,16 +1057,13 @@ class TestHandleAtomicReadFile:
             ),
         )
 
-        async def run():
-            result = await handlers.handle_atomic_read_file(6, request.encode(), SOURCE)
-            ack = AtomicReadFileACK.decode(result)
-            assert ack.end_of_file is True
-            assert isinstance(ack.access_method, RecordReadACK)
-            assert ack.access_method.file_record_data == [b"rec1", b"rec2"]
+        result = await handlers.handle_atomic_read_file(6, request.encode(), SOURCE)
+        ack = AtomicReadFileACK.decode(result)
+        assert ack.end_of_file is True
+        assert isinstance(ack.access_method, RecordReadACK)
+        assert ack.access_method.file_record_data == [b"rec1", b"rec2"]
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_unknown_object_raises(self):
+    async def test_unknown_object_raises(self):
         from bac_py.services.file_access import AtomicReadFileRequest, StreamReadAccess
 
         app, db, device = _make_app()
@@ -1200,14 +1077,11 @@ class TestHandleAtomicReadFile:
             ),
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_atomic_read_file(6, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_atomic_read_file(6, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_non_file_object_raises(self):
+    async def test_non_file_object_raises(self):
         from bac_py.services.file_access import AtomicReadFileRequest, StreamReadAccess
 
         app, db, device = _make_app()
@@ -1221,12 +1095,9 @@ class TestHandleAtomicReadFile:
             ),
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_atomic_read_file(6, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.INCONSISTENT_OBJECT_TYPE
-
-        asyncio.get_event_loop().run_until_complete(run())
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_atomic_read_file(6, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.INCONSISTENT_OBJECT_TYPE
 
 
 # ---------------------------------------------------------------------------
@@ -1235,7 +1106,7 @@ class TestHandleAtomicReadFile:
 
 
 class TestHandleAtomicWriteFile:
-    def test_stream_write(self):
+    async def test_stream_write(self):
         from bac_py.objects.file import FileObject
         from bac_py.services.file_access import (
             AtomicWriteFileACK,
@@ -1257,17 +1128,14 @@ class TestHandleAtomicWriteFile:
             ),
         )
 
-        async def run():
-            result = await handlers.handle_atomic_write_file(7, request.encode(), SOURCE)
-            ack = AtomicWriteFileACK.decode(result)
-            assert ack.is_stream is True
-            assert ack.file_start == 0
-            data, _ = f.read_stream(0, 100)
-            assert data == b"Hello"
+        result = await handlers.handle_atomic_write_file(7, request.encode(), SOURCE)
+        ack = AtomicWriteFileACK.decode(result)
+        assert ack.is_stream is True
+        assert ack.file_start == 0
+        data, _ = f.read_stream(0, 100)
+        assert data == b"Hello"
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_stream_append(self):
+    async def test_stream_append(self):
         from bac_py.objects.file import FileObject
         from bac_py.services.file_access import (
             AtomicWriteFileACK,
@@ -1290,16 +1158,13 @@ class TestHandleAtomicWriteFile:
             ),
         )
 
-        async def run():
-            result = await handlers.handle_atomic_write_file(7, request.encode(), SOURCE)
-            ack = AtomicWriteFileACK.decode(result)
-            assert ack.file_start == 6
-            data, _ = f.read_stream(0, 100)
-            assert data == b"Hello World"
+        result = await handlers.handle_atomic_write_file(7, request.encode(), SOURCE)
+        ack = AtomicWriteFileACK.decode(result)
+        assert ack.file_start == 6
+        data, _ = f.read_stream(0, 100)
+        assert data == b"Hello World"
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_record_write(self):
+    async def test_record_write(self):
         from bac_py.objects.file import FileObject
         from bac_py.services.file_access import (
             AtomicWriteFileACK,
@@ -1322,15 +1187,12 @@ class TestHandleAtomicWriteFile:
             ),
         )
 
-        async def run():
-            result = await handlers.handle_atomic_write_file(7, request.encode(), SOURCE)
-            ack = AtomicWriteFileACK.decode(result)
-            assert ack.is_stream is False
-            assert ack.file_start == 0
-            records, _ = f.read_records(0, 10)
-            assert records == [b"rec1", b"rec2"]
-
-        asyncio.get_event_loop().run_until_complete(run())
+        result = await handlers.handle_atomic_write_file(7, request.encode(), SOURCE)
+        ack = AtomicWriteFileACK.decode(result)
+        assert ack.is_stream is False
+        assert ack.file_start == 0
+        records, _ = f.read_records(0, 10)
+        assert records == [b"rec1", b"rec2"]
 
 
 # ---------------------------------------------------------------------------
@@ -1339,7 +1201,7 @@ class TestHandleAtomicWriteFile:
 
 
 class TestHandleCreateObject:
-    def test_create_by_type(self):
+    async def test_create_by_type(self):
         import bac_py.objects  # noqa: F401
         from bac_py.encoding.primitives import decode_object_identifier
         from bac_py.encoding.tags import decode_tag
@@ -1351,18 +1213,15 @@ class TestHandleCreateObject:
 
         request = CreateObjectRequest(object_type=ObjectType.ANALOG_INPUT)
 
-        async def run():
-            result = await handlers.handle_create_object(10, request.encode(), SOURCE)
-            tag, offset = decode_tag(result, 0)
-            obj_type, instance = decode_object_identifier(result[offset : offset + tag.length])
-            assert obj_type == ObjectType.ANALOG_INPUT
-            assert instance == 1
-            oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
-            assert db.get(oid) is not None
+        result = await handlers.handle_create_object(10, request.encode(), SOURCE)
+        tag, offset = decode_tag(result, 0)
+        obj_type, instance = decode_object_identifier(result[offset : offset + tag.length])
+        assert obj_type == ObjectType.ANALOG_INPUT
+        assert instance == 1
+        oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        assert db.get(oid) is not None
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_create_by_identifier(self):
+    async def test_create_by_identifier(self):
         import bac_py.objects  # noqa: F401
         from bac_py.encoding.primitives import decode_object_identifier
         from bac_py.encoding.tags import decode_tag
@@ -1376,16 +1235,13 @@ class TestHandleCreateObject:
             object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 42),
         )
 
-        async def run():
-            result = await handlers.handle_create_object(10, request.encode(), SOURCE)
-            tag, offset = decode_tag(result, 0)
-            obj_type, instance = decode_object_identifier(result[offset : offset + tag.length])
-            assert obj_type == ObjectType.ANALOG_INPUT
-            assert instance == 42
+        result = await handlers.handle_create_object(10, request.encode(), SOURCE)
+        tag, offset = decode_tag(result, 0)
+        obj_type, instance = decode_object_identifier(result[offset : offset + tag.length])
+        assert obj_type == ObjectType.ANALOG_INPUT
+        assert instance == 42
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_create_duplicate_raises(self):
+    async def test_create_duplicate_raises(self):
         import bac_py.objects  # noqa: F401
 
         app, db, device = _make_app()
@@ -1399,14 +1255,11 @@ class TestHandleCreateObject:
             object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_create_object(10, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.OBJECT_IDENTIFIER_ALREADY_EXISTS
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_create_object(10, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.OBJECT_IDENTIFIER_ALREADY_EXISTS
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_create_unsupported_type_raises(self):
+    async def test_create_unsupported_type_raises(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -1414,12 +1267,9 @@ class TestHandleCreateObject:
 
         request = CreateObjectRequest(object_type=ObjectType.NETWORK_SECURITY)
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_create_object(10, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.UNSUPPORTED_OBJECT_TYPE
-
-        asyncio.get_event_loop().run_until_complete(run())
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_create_object(10, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNSUPPORTED_OBJECT_TYPE
 
 
 # ---------------------------------------------------------------------------
@@ -1428,7 +1278,7 @@ class TestHandleCreateObject:
 
 
 class TestHandleDeleteObject:
-    def test_delete_object(self):
+    async def test_delete_object(self):
         import bac_py.objects  # noqa: F401
 
         app, db, device = _make_app()
@@ -1442,14 +1292,11 @@ class TestHandleDeleteObject:
             object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
         )
 
-        async def run():
-            result = await handlers.handle_delete_object(11, request.encode(), SOURCE)
-            assert result is None
-            assert db.get(ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)) is None
+        result = await handlers.handle_delete_object(11, request.encode(), SOURCE)
+        assert result is None
+        assert db.get(ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)) is None
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_delete_device_raises(self):
+    async def test_delete_device_raises(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -1459,14 +1306,11 @@ class TestHandleDeleteObject:
             object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_delete_object(11, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.OBJECT_DELETION_NOT_PERMITTED
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_delete_object(11, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.OBJECT_DELETION_NOT_PERMITTED
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_delete_unknown_object_raises(self):
+    async def test_delete_unknown_object_raises(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -1476,12 +1320,9 @@ class TestHandleDeleteObject:
             object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 999),
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_delete_object(11, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
-
-        asyncio.get_event_loop().run_until_complete(run())
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_delete_object(11, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
 
 
 # ---------------------------------------------------------------------------
@@ -1490,7 +1331,7 @@ class TestHandleDeleteObject:
 
 
 class TestHandleListElement:
-    def test_add_list_element_unknown_object_raises(self):
+    async def test_add_list_element_unknown_object_raises(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -1500,14 +1341,11 @@ class TestHandleListElement:
             list_of_elements=b"\xc4\x00\x00\x00\x01",
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_add_list_element(8, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_add_list_element(8, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_add_list_element_unknown_property_raises(self):
+    async def test_add_list_element_unknown_property_raises(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -1517,14 +1355,11 @@ class TestHandleListElement:
             list_of_elements=b"\xc4\x00\x00\x00\x01",
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_add_list_element(8, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.UNKNOWN_PROPERTY
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_add_list_element(8, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_PROPERTY
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_add_list_element_read_only_raises(self):
+    async def test_add_list_element_read_only_raises(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -1534,14 +1369,11 @@ class TestHandleListElement:
             list_of_elements=b"\xc4\x00\x00\x00\x01",
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_add_list_element(8, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_add_list_element(8, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_remove_list_element_unknown_object_raises(self):
+    async def test_remove_list_element_unknown_object_raises(self):
         app, db, device = _make_app()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -1551,12 +1383,9 @@ class TestHandleListElement:
             list_of_elements=b"\xc4\x00\x00\x00\x01",
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_remove_list_element(9, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
-
-        asyncio.get_event_loop().run_until_complete(run())
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_remove_list_element(9, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
 
 
 # ---------------------------------------------------------------------------
@@ -1565,7 +1394,7 @@ class TestHandleListElement:
 
 
 class TestHandleWhoHas:
-    def test_who_has_by_id_found(self):
+    async def test_who_has_by_id_found(self):
         import bac_py.objects  # noqa: F401
 
         app, db, device = _make_app(device_instance=100)
@@ -1579,13 +1408,10 @@ class TestHandleWhoHas:
             object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
         )
 
-        async def run():
-            await handlers.handle_who_has(7, request.encode(), SOURCE)
-            app.unconfirmed_request.assert_called_once()
+        await handlers.handle_who_has(7, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_called_once()
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_who_has_by_name_found(self):
+    async def test_who_has_by_name_found(self):
         import bac_py.objects  # noqa: F401
 
         app, db, device = _make_app(device_instance=100)
@@ -1597,13 +1423,10 @@ class TestHandleWhoHas:
 
         request = WhoHasRequest(object_name="AI-1")
 
-        async def run():
-            await handlers.handle_who_has(7, request.encode(), SOURCE)
-            app.unconfirmed_request.assert_called_once()
+        await handlers.handle_who_has(7, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_called_once()
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_who_has_not_found(self):
+    async def test_who_has_not_found(self):
         app, db, device = _make_app(device_instance=100)
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -1613,13 +1436,10 @@ class TestHandleWhoHas:
             object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 999),
         )
 
-        async def run():
-            await handlers.handle_who_has(7, request.encode(), SOURCE)
-            app.unconfirmed_request.assert_not_called()
+        await handlers.handle_who_has(7, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_not_called()
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_who_has_out_of_range(self):
+    async def test_who_has_out_of_range(self):
         import bac_py.objects  # noqa: F401
 
         app, db, device = _make_app(device_instance=5000)
@@ -1635,13 +1455,10 @@ class TestHandleWhoHas:
             high_limit=100,
         )
 
-        async def run():
-            await handlers.handle_who_has(7, request.encode(), SOURCE)
-            app.unconfirmed_request.assert_not_called()
+        await handlers.handle_who_has(7, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_not_called()
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_who_has_i_have_response(self):
+    async def test_who_has_i_have_response(self):
         import bac_py.objects  # noqa: F401
         from bac_py.services.who_has import IHaveRequest, WhoHasRequest
 
@@ -1654,18 +1471,15 @@ class TestHandleWhoHas:
             object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
         )
 
-        async def run():
-            await handlers.handle_who_has(7, request.encode(), SOURCE)
-            call_args = app.unconfirmed_request.call_args
-            service_data = call_args.kwargs.get(
-                "service_data", call_args[1].get("service_data") if len(call_args) > 1 else None
-            )
-            ihave = IHaveRequest.decode(service_data)
-            assert ihave.device_identifier == ObjectIdentifier(ObjectType.DEVICE, 100)
-            assert ihave.object_identifier == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
-            assert ihave.object_name == "AI-1"
-
-        asyncio.get_event_loop().run_until_complete(run())
+        await handlers.handle_who_has(7, request.encode(), SOURCE)
+        call_args = app.unconfirmed_request.call_args
+        service_data = call_args.kwargs.get(
+            "service_data", call_args[1].get("service_data") if len(call_args) > 1 else None
+        )
+        ihave = IHaveRequest.decode(service_data)
+        assert ihave.device_identifier == ObjectIdentifier(ObjectType.DEVICE, 100)
+        assert ihave.object_identifier == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        assert ihave.object_name == "AI-1"
 
 
 # ---------------------------------------------------------------------------
@@ -2163,7 +1977,7 @@ class TestClientAlarmMethods:
 
 
 class TestAddListElement:
-    def test_add_elements_to_existing_list(self):
+    async def test_add_elements_to_existing_list(self):
         """Test adding elements to an existing list property."""
         app, db, device = _make_app_with_list_prop()
         handlers = DefaultServerHandlers(app, db, device)
@@ -2179,21 +1993,19 @@ class TestAddListElement:
             list_of_elements=elements,
         )
 
-        async def run():
-            result = await handlers.handle_add_list_element(
-                ConfirmedServiceChoice.ADD_LIST_ELEMENT,
-                request.encode(),
-                SOURCE,
-            )
-            assert result is None  # SimpleACK
+        result = await handlers.handle_add_list_element(
+            ConfirmedServiceChoice.ADD_LIST_ELEMENT,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None  # SimpleACK
 
-        asyncio.get_event_loop().run_until_complete(run())
         prop = device._properties[_LIST_PROP]
         assert 30 in prop
         assert 40 in prop
         assert len(prop) == 4
 
-    def test_add_to_none_creates_list(self):
+    async def test_add_to_none_creates_list(self):
         """Test adding to a property that is None but has list datatype."""
         app, db, device = _make_app_with_list_prop()
         handlers = DefaultServerHandlers(app, db, device)
@@ -2206,19 +2018,17 @@ class TestAddListElement:
             list_of_elements=elements,
         )
 
-        async def run():
-            result = await handlers.handle_add_list_element(
-                ConfirmedServiceChoice.ADD_LIST_ELEMENT,
-                request.encode(),
-                SOURCE,
-            )
-            assert result is None
+        result = await handlers.handle_add_list_element(
+            ConfirmedServiceChoice.ADD_LIST_ELEMENT,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
 
-        asyncio.get_event_loop().run_until_complete(run())
         prop = device._properties[_LIST_PROP]
         assert prop == [42]
 
-    def test_add_to_unknown_object_raises(self):
+    async def test_add_to_unknown_object_raises(self):
         app, db, device = _make_app_with_list_prop()
         handlers = DefaultServerHandlers(app, db, device)
 
@@ -2229,18 +2039,15 @@ class TestAddListElement:
             list_of_elements=elements,
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_add_list_element(
-                    ConfirmedServiceChoice.ADD_LIST_ELEMENT,
-                    request.encode(),
-                    SOURCE,
-                )
-            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_add_list_element(
+                ConfirmedServiceChoice.ADD_LIST_ELEMENT,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_add_to_read_only_property_raises(self):
+    async def test_add_to_read_only_property_raises(self):
         """Test that adding to a read-only list property raises WRITE_ACCESS_DENIED."""
         app, db, device = _make_app_with_list_prop()
         handlers = DefaultServerHandlers(app, db, device)
@@ -2253,18 +2060,15 @@ class TestAddListElement:
             list_of_elements=elements,
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_add_list_element(
-                    ConfirmedServiceChoice.ADD_LIST_ELEMENT,
-                    request.encode(),
-                    SOURCE,
-                )
-            assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_add_list_element(
+                ConfirmedServiceChoice.ADD_LIST_ELEMENT,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_add_to_non_list_property_raises(self):
+    async def test_add_to_non_list_property_raises(self):
         """Test that adding to a non-list property raises PROPERTY_IS_NOT_A_LIST."""
         app, db, device = _make_app_with_list_prop()
         handlers = DefaultServerHandlers(app, db, device)
@@ -2277,16 +2081,13 @@ class TestAddListElement:
             list_of_elements=elements,
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_add_list_element(
-                    ConfirmedServiceChoice.ADD_LIST_ELEMENT,
-                    request.encode(),
-                    SOURCE,
-                )
-            assert exc_info.value.error_code == ErrorCode.PROPERTY_IS_NOT_A_LIST
-
-        asyncio.get_event_loop().run_until_complete(run())
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_add_list_element(
+                ConfirmedServiceChoice.ADD_LIST_ELEMENT,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.PROPERTY_IS_NOT_A_LIST
 
 
 # ---------------------------------------------------------------------------
@@ -2295,7 +2096,7 @@ class TestAddListElement:
 
 
 class TestRemoveListElement:
-    def test_remove_existing_elements(self):
+    async def test_remove_existing_elements(self):
         """Test removing elements from a list property."""
         app, db, device = _make_app_with_list_prop()
         handlers = DefaultServerHandlers(app, db, device)
@@ -2309,19 +2110,17 @@ class TestRemoveListElement:
             list_of_elements=elements,
         )
 
-        async def run():
-            result = await handlers.handle_remove_list_element(
-                ConfirmedServiceChoice.REMOVE_LIST_ELEMENT,
-                request.encode(),
-                SOURCE,
-            )
-            assert result is None  # SimpleACK
+        result = await handlers.handle_remove_list_element(
+            ConfirmedServiceChoice.REMOVE_LIST_ELEMENT,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None  # SimpleACK
 
-        asyncio.get_event_loop().run_until_complete(run())
         prop = device._properties[_LIST_PROP]
         assert prop == [10, 30]
 
-    def test_remove_nonexistent_elements_silently_ignored(self):
+    async def test_remove_nonexistent_elements_silently_ignored(self):
         """Test that removing non-matching elements does not raise."""
         app, db, device = _make_app_with_list_prop()
         handlers = DefaultServerHandlers(app, db, device)
@@ -2336,20 +2135,18 @@ class TestRemoveListElement:
             list_of_elements=elements,
         )
 
-        async def run():
-            result = await handlers.handle_remove_list_element(
-                ConfirmedServiceChoice.REMOVE_LIST_ELEMENT,
-                request.encode(),
-                SOURCE,
-            )
-            assert result is None
+        result = await handlers.handle_remove_list_element(
+            ConfirmedServiceChoice.REMOVE_LIST_ELEMENT,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
 
-        asyncio.get_event_loop().run_until_complete(run())
         # Original list unchanged
         prop = device._properties[_LIST_PROP]
         assert prop == [10, 20]
 
-    def test_remove_from_non_list_raises(self):
+    async def test_remove_from_non_list_raises(self):
         """Test removing from a non-list property raises error."""
         app, db, device = _make_app_with_list_prop()
         handlers = DefaultServerHandlers(app, db, device)
@@ -2362,18 +2159,15 @@ class TestRemoveListElement:
             list_of_elements=elements,
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_remove_list_element(
-                    ConfirmedServiceChoice.REMOVE_LIST_ELEMENT,
-                    request.encode(),
-                    SOURCE,
-                )
-            assert exc_info.value.error_code == ErrorCode.PROPERTY_IS_NOT_A_LIST
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_remove_list_element(
+                ConfirmedServiceChoice.REMOVE_LIST_ELEMENT,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.PROPERTY_IS_NOT_A_LIST
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_remove_from_read_only_raises(self):
+    async def test_remove_from_read_only_raises(self):
         """Test removing from a read-only list property raises WRITE_ACCESS_DENIED."""
         app, db, device = _make_app_with_list_prop()
         handlers = DefaultServerHandlers(app, db, device)
@@ -2385,13 +2179,10 @@ class TestRemoveListElement:
             list_of_elements=elements,
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_remove_list_element(
-                    ConfirmedServiceChoice.REMOVE_LIST_ELEMENT,
-                    request.encode(),
-                    SOURCE,
-                )
-            assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
-
-        asyncio.get_event_loop().run_until_complete(run())
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_remove_list_element(
+                ConfirmedServiceChoice.REMOVE_LIST_ELEMENT,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED

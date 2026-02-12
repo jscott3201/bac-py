@@ -554,30 +554,26 @@ class TestCOVMultipleSubscribers:
 class TestCOVLifecycle:
     """Tests for subscription lifecycle (expiry, indefinite)."""
 
-    def test_subscription_expires(self):
+    async def test_subscription_expires(self):
         """Subscription should be removed after lifetime expires."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
 
-        async def run():
-            _app, db, cov = _make_cov_manager()
-            av = AnalogValueObject(1)
-            db.add(av)
-            obj_id = av.object_identifier
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=obj_id,
+            issue_confirmed_notifications=False,
+            lifetime=1,  # 1 second
+        )
+        cov.subscribe(SUBSCRIBER, request, db)
+        assert len(cov.get_active_subscriptions(obj_id)) == 1
 
-            request = SubscribeCOVRequest(
-                subscriber_process_identifier=42,
-                monitored_object_identifier=obj_id,
-                issue_confirmed_notifications=False,
-                lifetime=1,  # 1 second
-            )
-            cov.subscribe(SUBSCRIBER, request, db)
-            assert len(cov.get_active_subscriptions(obj_id)) == 1
+        # Wait for expiry
+        await asyncio.sleep(1.1)
 
-            # Wait for expiry
-            await asyncio.sleep(1.1)
-
-            assert len(cov.get_active_subscriptions(obj_id)) == 0
-
-        asyncio.get_event_loop().run_until_complete(run())
+        assert len(cov.get_active_subscriptions(obj_id)) == 0
 
     def test_indefinite_subscription_persists(self):
         """Subscription with no lifetime should persist."""
@@ -639,34 +635,31 @@ class TestCOVNotificationContent:
         assert PropertyIdentifier.PRESENT_VALUE in prop_ids
         assert PropertyIdentifier.STATUS_FLAGS in prop_ids
 
-    def test_notification_time_remaining(self):
+    async def test_notification_time_remaining(self):
         """COV notification should include valid time_remaining."""
         from bac_py.services.cov import COVNotificationRequest
 
-        async def run():
-            app, db, cov = _make_cov_manager()
-            av = AnalogValueObject(1)
-            db.add(av)
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
 
-            request = SubscribeCOVRequest(
-                subscriber_process_identifier=42,
-                monitored_object_identifier=av.object_identifier,
-                issue_confirmed_notifications=False,
-                lifetime=600,
-            )
-            _subscribe_and_reset(app, cov, SUBSCRIBER, request, db)
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=av.object_identifier,
+            issue_confirmed_notifications=False,
+            lifetime=600,
+        )
+        _subscribe_and_reset(app, cov, SUBSCRIBER, request, db)
 
-            av.write_property(PropertyIdentifier.PRESENT_VALUE, 10.0)
-            cov.check_and_notify(av, PropertyIdentifier.PRESENT_VALUE)
+        av.write_property(PropertyIdentifier.PRESENT_VALUE, 10.0)
+        cov.check_and_notify(av, PropertyIdentifier.PRESENT_VALUE)
 
-            call_kwargs = app.unconfirmed_request.call_args
-            service_data = call_kwargs.kwargs["service_data"]
-            notification = COVNotificationRequest.decode(service_data)
+        call_kwargs = app.unconfirmed_request.call_args
+        service_data = call_kwargs.kwargs["service_data"]
+        notification = COVNotificationRequest.decode(service_data)
 
-            # time_remaining should be close to 600 (just started)
-            assert 595 <= notification.time_remaining <= 600
-
-        asyncio.get_event_loop().run_until_complete(run())
+        # time_remaining should be close to 600 (just started)
+        assert 595 <= notification.time_remaining <= 600
 
     def test_notification_time_remaining_zero_for_indefinite(self):
         """Indefinite subscription should have time_remaining=0."""
@@ -775,7 +768,7 @@ class TestServerSubscribeCOVHandler:
         handlers = DefaultServerHandlers(app, db, device)
         return app, db, device, cov, handlers
 
-    def test_subscribe_returns_simple_ack(self):
+    async def test_subscribe_returns_simple_ack(self):
         """SubscribeCOV should return None (SimpleACK) on success."""
         _app, db, _device, cov, handlers = self._make_server()
         av = AnalogValueObject(1)
@@ -788,17 +781,14 @@ class TestServerSubscribeCOVHandler:
             lifetime=None,
         )
 
-        async def run():
-            result = await handlers.handle_subscribe_cov(5, request.encode(), SUBSCRIBER)
-            assert result is None  # SimpleACK
-
-        asyncio.get_event_loop().run_until_complete(run())
+        result = await handlers.handle_subscribe_cov(5, request.encode(), SUBSCRIBER)
+        assert result is None  # SimpleACK
 
         # Verify subscription was created
         subs = cov.get_active_subscriptions(av.object_identifier)
         assert len(subs) == 1
 
-    def test_subscribe_unknown_object_returns_error(self):
+    async def test_subscribe_unknown_object_returns_error(self):
         """SubscribeCOV for unknown object should raise BACnetError."""
         _app, _db, _device, _cov, handlers = self._make_server()
 
@@ -810,14 +800,11 @@ class TestServerSubscribeCOVHandler:
             lifetime=None,
         )
 
-        async def run():
-            with pytest.raises(BACnetError) as exc_info:
-                await handlers.handle_subscribe_cov(5, request.encode(), SUBSCRIBER)
-            assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_subscribe_cov(5, request.encode(), SUBSCRIBER)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_subscribe_lifetime_without_confirmed_rejects(self):
+    async def test_subscribe_lifetime_without_confirmed_rejects(self):
         """Per Clause 13.14.1.1.4, lifetime requires issue_confirmed_notifications."""
         _app, db, _device, _cov, handlers = self._make_server()
         av = AnalogValueObject(1)
@@ -831,13 +818,10 @@ class TestServerSubscribeCOVHandler:
             lifetime=300,
         )
 
-        async def run():
-            with pytest.raises(BACnetRejectError):
-                await handlers.handle_subscribe_cov(5, request.encode(), SUBSCRIBER)
+        with pytest.raises(BACnetRejectError):
+            await handlers.handle_subscribe_cov(5, request.encode(), SUBSCRIBER)
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_cancellation_returns_simple_ack(self):
+    async def test_cancellation_returns_simple_ack(self):
         """Cancellation request should return SimpleACK and remove subscription."""
         _app, db, _device, cov, handlers = self._make_server()
         av = AnalogValueObject(1)
@@ -851,22 +835,19 @@ class TestServerSubscribeCOVHandler:
             lifetime=None,
         )
 
-        async def run():
-            await handlers.handle_subscribe_cov(5, sub_req.encode(), SUBSCRIBER)
-            assert len(cov.get_active_subscriptions(av.object_identifier)) == 1
+        await handlers.handle_subscribe_cov(5, sub_req.encode(), SUBSCRIBER)
+        assert len(cov.get_active_subscriptions(av.object_identifier)) == 1
 
-            # Send cancellation (no confirmed/lifetime fields)
-            cancel_req = SubscribeCOVRequest(
-                subscriber_process_identifier=42,
-                monitored_object_identifier=av.object_identifier,
-            )
-            result = await handlers.handle_subscribe_cov(5, cancel_req.encode(), SUBSCRIBER)
-            assert result is None
-            assert len(cov.get_active_subscriptions(av.object_identifier)) == 0
+        # Send cancellation (no confirmed/lifetime fields)
+        cancel_req = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=av.object_identifier,
+        )
+        result = await handlers.handle_subscribe_cov(5, cancel_req.encode(), SUBSCRIBER)
+        assert result is None
+        assert len(cov.get_active_subscriptions(av.object_identifier)) == 0
 
-        asyncio.get_event_loop().run_until_complete(run())
-
-    def test_write_triggers_cov_notification(self):
+    async def test_write_triggers_cov_notification(self):
         """WriteProperty should trigger COV notification after successful write."""
         app, db, _device, _cov, handlers = self._make_server()
         av = AnalogValueObject(1)
@@ -880,22 +861,19 @@ class TestServerSubscribeCOVHandler:
             lifetime=None,
         )
 
-        async def run():
-            await handlers.handle_subscribe_cov(5, sub_req.encode(), SUBSCRIBER)
-            app.unconfirmed_request.reset_mock()
+        await handlers.handle_subscribe_cov(5, sub_req.encode(), SUBSCRIBER)
+        app.unconfirmed_request.reset_mock()
 
-            # Write a property value
-            from bac_py.encoding.primitives import encode_application_real
-            from bac_py.services.write_property import WritePropertyRequest
+        # Write a property value
+        from bac_py.encoding.primitives import encode_application_real
+        from bac_py.services.write_property import WritePropertyRequest
 
-            wp_request = WritePropertyRequest(
-                object_identifier=av.object_identifier,
-                property_identifier=PropertyIdentifier.PRESENT_VALUE,
-                property_value=encode_application_real(42.0),
-            )
-            await handlers.handle_write_property(15, wp_request.encode(), SUBSCRIBER)
+        wp_request = WritePropertyRequest(
+            object_identifier=av.object_identifier,
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            property_value=encode_application_real(42.0),
+        )
+        await handlers.handle_write_property(15, wp_request.encode(), SUBSCRIBER)
 
-            # COV notification should have been sent
-            app.unconfirmed_request.assert_called_once()
-
-        asyncio.get_event_loop().run_until_complete(run())
+        # COV notification should have been sent
+        app.unconfirmed_request.assert_called_once()

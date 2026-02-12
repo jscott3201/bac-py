@@ -380,12 +380,13 @@ class BACnetApplication:
         if self._stop_event:
             self._stop_event.set()
 
-        # Cancel all background tasks
-        for task in self._background_tasks:
+        # Cancel all background tasks (copy to avoid mutation during iteration)
+        tasks = list(self._background_tasks)
+        for task in tasks:
             task.cancel()
-        if self._background_tasks:
-            await asyncio.gather(*self._background_tasks, return_exceptions=True)
-            self._background_tasks.clear()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._background_tasks.clear()
 
         if self._router:
             await self._router.stop()

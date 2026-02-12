@@ -1188,8 +1188,7 @@ class BACnetClient:
             expected_count=expected_count,
         )
 
-        enriched: list[DiscoveredDevice] = []
-        for dev in devices:
+        async def _enrich_device(dev: DiscoveredDevice) -> DiscoveredDevice:
             profile_name: str | None = None
             profile_location: str | None = None
             tags: list[dict[str, Any]] | None = None
@@ -1221,20 +1220,21 @@ class BACnetClient:
             except (BACnetError, BACnetTimeoutError, TimeoutError):
                 pass
 
-            enriched.append(
-                DiscoveredDevice(
-                    address=dev.address,
-                    instance=dev.instance,
-                    vendor_id=dev.vendor_id,
-                    max_apdu_length=dev.max_apdu_length,
-                    segmentation_supported=dev.segmentation_supported,
-                    profile_name=profile_name,
-                    profile_location=profile_location,
-                    tags=tags,
-                )
+            return DiscoveredDevice(
+                address=dev.address,
+                instance=dev.instance,
+                vendor_id=dev.vendor_id,
+                max_apdu_length=dev.max_apdu_length,
+                segmentation_supported=dev.segmentation_supported,
+                profile_name=profile_name,
+                profile_location=profile_location,
+                tags=tags,
             )
 
-        return enriched
+        enriched = await asyncio.gather(
+            *(_enrich_device(dev) for dev in devices),
+        )
+        return list(enriched)
 
     async def traverse_hierarchy(
         self,

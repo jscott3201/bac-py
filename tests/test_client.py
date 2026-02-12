@@ -1,6 +1,5 @@
 """Tests for the unified Client class."""
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -40,63 +39,54 @@ class TestClientLifecycle:
         with pytest.raises(RuntimeError, match="Client not started"):
             _ = client.app
 
-    def test_method_before_start_raises(self):
+    async def test_method_before_start_raises(self):
         client = Client()
         with pytest.raises(RuntimeError, match="Client not started"):
-            asyncio.get_event_loop().run_until_complete(client.read("192.168.1.100", "ai,1", "pv"))
+            await client.read("192.168.1.100", "ai,1", "pv")
 
     @patch("bac_py.client.BACnetApplication")
-    def test_context_manager_lifecycle(self, mock_app_cls):
+    async def test_context_manager_lifecycle(self, mock_app_cls):
         mock_app = MagicMock()
         mock_app.start = AsyncMock()
         mock_app.stop = AsyncMock()
         mock_app_cls.return_value = mock_app
 
-        async def run():
-            async with Client() as client:
-                assert client._app is mock_app
-                assert client._client is not None
-                mock_app.start.assert_called_once()
-            mock_app.stop.assert_called_once()
-            assert client._app is None
-            assert client._client is None
-
-        asyncio.get_event_loop().run_until_complete(run())
+        async with Client() as client:
+            assert client._app is mock_app
+            assert client._client is not None
+            mock_app.start.assert_called_once()
+        mock_app.stop.assert_called_once()
+        assert client._app is None
+        assert client._client is None
 
     @patch("bac_py.client.BACnetApplication")
-    def test_app_property_after_start(self, mock_app_cls):
+    async def test_app_property_after_start(self, mock_app_cls):
         mock_app = MagicMock()
         mock_app.start = AsyncMock()
         mock_app.stop = AsyncMock()
         mock_app_cls.return_value = mock_app
 
-        async def run():
-            async with Client() as client:
-                assert client.app is mock_app
-
-        asyncio.get_event_loop().run_until_complete(run())
+        async with Client() as client:
+            assert client.app is mock_app
 
     @patch("bac_py.client.BACnetApplication")
-    def test_stop_on_exception(self, mock_app_cls):
+    async def test_stop_on_exception(self, mock_app_cls):
         mock_app = MagicMock()
         mock_app.start = AsyncMock()
         mock_app.stop = AsyncMock()
         mock_app_cls.return_value = mock_app
 
-        async def run():
-            with pytest.raises(ValueError, match="boom"):
-                async with Client():
-                    raise ValueError("boom")
-            mock_app.stop.assert_called_once()
-
-        asyncio.get_event_loop().run_until_complete(run())
+        with pytest.raises(ValueError, match="boom"):
+            async with Client():
+                raise ValueError("boom")
+        mock_app.stop.assert_called_once()
 
 
 class TestClientDelegation:
     """Test that Client methods delegate to BACnetClient."""
 
     @patch("bac_py.client.BACnetApplication")
-    def test_read_delegates(self, mock_app_cls):
+    async def test_read_delegates(self, mock_app_cls):
         mock_app = MagicMock()
         mock_app.start = AsyncMock()
         mock_app.stop = AsyncMock()
@@ -109,31 +99,25 @@ class TestClientDelegation:
         )
         mock_app.confirmed_request = AsyncMock(return_value=ack.encode())
 
-        async def run():
-            async with Client() as client:
-                result = await client.read("192.168.1.100", "ai,1", "pv")
-                assert isinstance(result, float)
-                assert result == pytest.approx(72.5)
-
-        asyncio.get_event_loop().run_until_complete(run())
+        async with Client() as client:
+            result = await client.read("192.168.1.100", "ai,1", "pv")
+            assert isinstance(result, float)
+            assert result == pytest.approx(72.5)
 
     @patch("bac_py.client.BACnetApplication")
-    def test_write_delegates(self, mock_app_cls):
+    async def test_write_delegates(self, mock_app_cls):
         mock_app = MagicMock()
         mock_app.start = AsyncMock()
         mock_app.stop = AsyncMock()
         mock_app.confirmed_request = AsyncMock(return_value=b"")
         mock_app_cls.return_value = mock_app
 
-        async def run():
-            async with Client() as client:
-                await client.write("192.168.1.100", "av,1", "pv", 72.5, priority=8)
-                mock_app.confirmed_request.assert_called_once()
-
-        asyncio.get_event_loop().run_until_complete(run())
+        async with Client() as client:
+            await client.write("192.168.1.100", "av,1", "pv", 72.5, priority=8)
+            mock_app.confirmed_request.assert_called_once()
 
     @patch("bac_py.client.BACnetApplication")
-    def test_read_multiple_delegates(self, mock_app_cls):
+    async def test_read_multiple_delegates(self, mock_app_cls):
         from bac_py.services.read_property_multiple import (
             ReadAccessResult,
             ReadPropertyMultipleACK,
@@ -164,15 +148,12 @@ class TestClientDelegation:
         )
         mock_app.confirmed_request = AsyncMock(return_value=ack.encode())
 
-        async def run():
-            async with Client() as client:
-                result = await client.read_multiple(
-                    "192.168.1.100",
-                    {"ai,1": ["pv", "name"]},
-                )
-                assert "analog-input,1" in result
-                props = result["analog-input,1"]
-                assert props["present-value"] == pytest.approx(72.5)
-                assert props["object-name"] == "Zone Temp"
-
-        asyncio.get_event_loop().run_until_complete(run())
+        async with Client() as client:
+            result = await client.read_multiple(
+                "192.168.1.100",
+                {"ai,1": ["pv", "name"]},
+            )
+            assert "analog-input,1" in result
+            props = result["analog-input,1"]
+            assert props["present-value"] == pytest.approx(72.5)
+            assert props["object-name"] == "Zone Temp"

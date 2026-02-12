@@ -1,4 +1,3 @@
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -101,16 +100,13 @@ class TestBACnetApplication:
         assert app._router is None
         assert app._transports == []
 
-    def test_confirmed_request_before_start_raises(self):
+    async def test_confirmed_request_before_start_raises(self):
         cfg = DeviceConfig(instance_number=1)
         app = BACnetApplication(cfg)
         dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
 
-        async def run():
-            with pytest.raises(RuntimeError, match="not started"):
-                await app.confirmed_request(dest, 12, b"\x01")
-
-        asyncio.get_event_loop().run_until_complete(run())
+        with pytest.raises(RuntimeError, match="not started"):
+            await app.confirmed_request(dest, 12, b"\x01")
 
     def test_unconfirmed_request_before_start_raises(self):
         cfg = DeviceConfig(instance_number=1)
