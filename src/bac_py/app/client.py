@@ -106,6 +106,7 @@ from bac_py.services.write_property_multiple import (
 )
 from bac_py.types.enums import (
     AcknowledgmentFilter,
+    BackupAndRestoreState,
     ConfirmedServiceChoice,
     EnableDisable,
     EventState,
@@ -175,6 +176,83 @@ class DiscoveredDevice:
 
     def __repr__(self) -> str:
         return f"DiscoveredDevice(instance={self.instance}, address='{self.address_str}')"
+
+
+@dataclass(frozen=True, slots=True)
+class UnconfiguredDevice:
+    """An unconfigured device discovered via Who-Am-I (Clause 19.7).
+
+    Returned by :meth:`BACnetClient.discover_unconfigured`.
+    """
+
+    address: BACnetAddress
+    """Network address the Who-Am-I was received from."""
+
+    vendor_id: int
+    """Vendor identifier."""
+
+    model_name: str
+    """Model name string."""
+
+    serial_number: str
+    """Serial number string."""
+
+
+@dataclass(frozen=True, slots=True)
+class DeviceAssignmentEntry:
+    """A mapping from (vendor_id, serial_number) to a device identity.
+
+    Used by :class:`DeviceAssignmentTable` for auto-responding to
+    Who-Am-I with You-Are.
+    """
+
+    vendor_id: int
+    serial_number: str
+    device_identifier: ObjectIdentifier
+    device_mac_address: bytes
+    device_network_number: int | None = None
+
+
+class DeviceAssignmentTable:
+    """Supervisor-side table for automatic device identity assignment.
+
+    When a Who-Am-I is received, the table looks up the device by
+    (vendor_id, serial_number) and provides the You-Are response data.
+    """
+
+    def __init__(self) -> None:
+        self._entries: dict[tuple[int, str], DeviceAssignmentEntry] = {}
+
+    def add(self, entry: DeviceAssignmentEntry) -> None:
+        """Add or update an assignment entry."""
+        self._entries[(entry.vendor_id, entry.serial_number)] = entry
+
+    def remove(self, vendor_id: int, serial_number: str) -> None:
+        """Remove an assignment entry."""
+        self._entries.pop((vendor_id, serial_number), None)
+
+    def lookup(
+        self, vendor_id: int, serial_number: str
+    ) -> DeviceAssignmentEntry | None:
+        """Look up assignment for a device."""
+        return self._entries.get((vendor_id, serial_number))
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+
+@dataclass(frozen=True, slots=True)
+class BackupData:
+    """Data from a backup of a remote BACnet device (Clause 19.1).
+
+    Contains the configuration files downloaded during a backup procedure.
+    """
+
+    device_instance: int
+    """Device instance number of the backed-up device."""
+
+    configuration_files: list[tuple[ObjectIdentifier, bytes]]
+    """List of (file_object_id, file_data) tuples."""
 
 
 def decode_cov_values(notification: COVNotificationRequest) -> dict[str, object]:
@@ -2149,6 +2227,49 @@ class BACnetClient:
             service_data=request.encode(),
         )
 
+    # --- Unconfigured device discovery (Clause 19.7) ---
+
+    async def discover_unconfigured(
+        self,
+        destination: BACnetAddress = GLOBAL_BROADCAST,
+        timeout: float = 5.0,
+    ) -> list[UnconfiguredDevice]:
+        """Listen for unconfigured devices broadcasting Who-Am-I.
+
+        Registers a temporary handler for Who-Am-I messages and collects
+        responses for the specified duration.
+
+        :param destination: Not used for listening, included for API consistency.
+        :param timeout: Seconds to listen for Who-Am-I messages.
+        :returns: List of :class:`UnconfiguredDevice` discovered.
+        """
+        results: list[UnconfiguredDevice] = []
+
+        def _on_who_am_i(service_data: bytes, source: BACnetAddress) -> None:
+            try:
+                req = WhoAmIRequest.decode(service_data)
+                results.append(
+                    UnconfiguredDevice(
+                        address=source,
+                        vendor_id=req.vendor_id,
+                        model_name=req.model_name,
+                        serial_number=req.serial_number,
+                    )
+                )
+            except (ValueError, IndexError):
+                pass
+
+        self._app.register_temporary_handler(
+            UnconfirmedServiceChoice.WHO_AM_I, _on_who_am_i,
+        )
+        try:
+            await asyncio.sleep(timeout)
+        finally:
+            self._app.unregister_temporary_handler(
+                UnconfirmedServiceChoice.WHO_AM_I, _on_who_am_i,
+            )
+        return results
+
     # --- Virtual terminal ---
 
     async def vt_open(
@@ -2302,3 +2423,190 @@ class BACnetClient:
                 service_choice=UnconfirmedServiceChoice.UNCONFIRMED_AUDIT_NOTIFICATION,
                 service_data=request.encode(),
             )
+
+    # --- Backup and Restore (Clause 19.1) ---
+
+    async def backup_device(
+        self,
+        address: BACnetAddress,
+        password: str | None = None,
+        poll_interval: float = 1.0,
+        timeout: float | None = None,
+    ) -> BackupData:
+        """Perform a full backup of a remote BACnet device (Clause 19.1).
+
+        Executes the backup procedure:
+        1. ReinitializeDevice START_BACKUP
+        2. Poll BACKUP_AND_RESTORE_STATE until ready
+        3. Read CONFIGURATION_FILES list
+        4. Download each file via AtomicReadFile
+        5. ReinitializeDevice END_BACKUP
+
+        :param address: Target device address.
+        :param password: Optional password for ReinitializeDevice.
+        :param poll_interval: Seconds between state polls.
+        :param timeout: Optional overall timeout in seconds.
+        :returns: :class:`BackupData` with downloaded configuration files.
+        :raises BACnetError: On Error-PDU or invalid state transition.
+        :raises BACnetTimeoutError: On timeout.
+        """
+        # Step 1: Start backup
+        await self.reinitialize_device(
+            address, ReinitializedState.START_BACKUP, password=password, timeout=timeout,
+        )
+
+        # Step 2: Poll until preparing phase completes
+        device_oid = await self._discover_device_oid(address, timeout=timeout)
+        await self._poll_backup_restore_state(
+            address, device_oid,
+            target_states=(
+                BackupAndRestoreState.PERFORMING_A_BACKUP,
+                BackupAndRestoreState.PREPARING_FOR_BACKUP,
+            ),
+            poll_interval=poll_interval,
+            timeout=timeout,
+        )
+
+        # Step 3: Read configuration files list
+        ack = await self.read_property(
+            address, device_oid, PropertyIdentifier.CONFIGURATION_FILES,
+            timeout=timeout,
+        )
+        config_file_ids: list[ObjectIdentifier] = []
+        if isinstance(ack.property_value, list):
+            for v in ack.property_value:
+                if isinstance(v, ObjectIdentifier):
+                    config_file_ids.append(v)
+        elif isinstance(ack.property_value, ObjectIdentifier):
+            config_file_ids.append(ack.property_value)
+
+        # Step 4: Download each file
+        file_contents: list[tuple[ObjectIdentifier, bytes]] = []
+        for file_oid in config_file_ids:
+            data = await self._download_file(address, file_oid, timeout=timeout)
+            file_contents.append((file_oid, data))
+
+        # Step 5: End backup
+        await self.reinitialize_device(
+            address, ReinitializedState.END_BACKUP, password=password, timeout=timeout,
+        )
+
+        return BackupData(
+            device_instance=device_oid.instance_number,
+            configuration_files=file_contents,
+        )
+
+    async def restore_device(
+        self,
+        address: BACnetAddress,
+        backup_data: BackupData,
+        password: str | None = None,
+        poll_interval: float = 1.0,
+        timeout: float | None = None,
+    ) -> None:
+        """Perform a full restore of a remote BACnet device (Clause 19.1).
+
+        Executes the restore procedure:
+        1. ReinitializeDevice START_RESTORE
+        2. Poll BACKUP_AND_RESTORE_STATE until ready
+        3. Upload each config file via AtomicWriteFile
+        4. ReinitializeDevice END_RESTORE
+
+        :param address: Target device address.
+        :param backup_data: :class:`BackupData` from a previous backup.
+        :param password: Optional password for ReinitializeDevice.
+        :param poll_interval: Seconds between state polls.
+        :param timeout: Optional overall timeout in seconds.
+        :raises BACnetError: On Error-PDU or invalid state transition.
+        :raises BACnetTimeoutError: On timeout.
+        """
+        # Step 1: Start restore
+        await self.reinitialize_device(
+            address, ReinitializedState.START_RESTORE, password=password, timeout=timeout,
+        )
+
+        # Step 2: Poll until ready for download
+        device_oid = await self._discover_device_oid(address, timeout=timeout)
+        await self._poll_backup_restore_state(
+            address, device_oid,
+            target_states=(
+                BackupAndRestoreState.PERFORMING_A_RESTORE,
+                BackupAndRestoreState.PREPARING_FOR_RESTORE,
+            ),
+            poll_interval=poll_interval,
+            timeout=timeout,
+        )
+
+        # Step 3: Upload configuration files
+        for file_oid, file_data in backup_data.configuration_files:
+            await self.atomic_write_file(
+                address, file_oid, StreamWriteAccess(0, file_data), timeout=timeout,
+            )
+
+        # Step 4: End restore
+        await self.reinitialize_device(
+            address, ReinitializedState.END_RESTORE, password=password, timeout=timeout,
+        )
+
+    async def _discover_device_oid(
+        self,
+        address: BACnetAddress,
+        timeout: float | None = None,
+    ) -> ObjectIdentifier:
+        """Read the device's Object_Identifier to determine its instance."""
+        ack = await self.read_property(
+            address,
+            ObjectIdentifier(ObjectType.DEVICE, 4194303),  # wildcard
+            PropertyIdentifier.OBJECT_IDENTIFIER,
+            timeout=timeout,
+        )
+        if isinstance(ack.property_value, ObjectIdentifier):
+            return ack.property_value
+        return ObjectIdentifier(ObjectType.DEVICE, 4194303)
+
+    async def _poll_backup_restore_state(
+        self,
+        address: BACnetAddress,
+        device_oid: ObjectIdentifier,
+        target_states: tuple[BackupAndRestoreState, ...],
+        poll_interval: float = 1.0,
+        timeout: float | None = None,
+    ) -> BackupAndRestoreState:
+        """Poll BACKUP_AND_RESTORE_STATE until it reaches a target state."""
+        while True:
+            ack = await self.read_property(
+                address, device_oid,
+                PropertyIdentifier.BACKUP_AND_RESTORE_STATE,
+                timeout=timeout,
+            )
+            raw_state = ack.property_value
+            if isinstance(raw_state, int):
+                state = BackupAndRestoreState(raw_state)
+                if state in target_states:
+                    return state
+            await asyncio.sleep(poll_interval)
+
+    async def _download_file(
+        self,
+        address: BACnetAddress,
+        file_oid: ObjectIdentifier,
+        chunk_size: int = 1024,
+        timeout: float | None = None,
+    ) -> bytes:
+        """Download an entire file via AtomicReadFile stream access."""
+        from bac_py.services.file_access import StreamReadACK
+
+        buf = bytearray()
+        file_offset = 0
+        while True:
+            ack = await self.atomic_read_file(
+                address, file_oid, StreamReadAccess(file_offset, chunk_size),
+                timeout=timeout,
+            )
+            access = ack.access_method
+            assert isinstance(access, StreamReadACK)
+            buf.extend(access.file_data)
+            if ack.end_of_file:
+                break
+            file_offset += len(access.file_data)
+        return bytes(buf)

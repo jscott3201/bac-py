@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Iterator
 
 from bac_py.services.errors import BACnetError
-from bac_py.types.constructed import StatusFlags
+from bac_py.types.constructed import BACnetValueSource, StatusFlags
 from bac_py.types.enums import (
     ErrorClass,
     ErrorCode,
@@ -175,6 +175,30 @@ def commandable_properties(
             int,
             PropertyAccess.READ_ONLY,
             required=required,
+        ),
+        PropertyIdentifier.VALUE_SOURCE: PropertyDefinition(
+            PropertyIdentifier.VALUE_SOURCE,
+            BACnetValueSource,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.VALUE_SOURCE_ARRAY: PropertyDefinition(
+            PropertyIdentifier.VALUE_SOURCE_ARRAY,
+            list,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.LAST_COMMAND_TIME: PropertyDefinition(
+            PropertyIdentifier.LAST_COMMAND_TIME,
+            object,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.COMMAND_TIME_ARRAY: PropertyDefinition(
+            PropertyIdentifier.COMMAND_TIME_ARRAY,
+            list,
+            PropertyAccess.READ_ONLY,
+            required=False,
         ),
     }
 
@@ -345,6 +369,14 @@ class BACnetObject:
         self._priority_array = [None] * 16
         self._properties[PropertyIdentifier.PRIORITY_ARRAY] = self._priority_array
         self._set_default(PropertyIdentifier.RELINQUISH_DEFAULT, relinquish_default)
+        # Value Source tracking (Clause 19.5, new in 2020)
+        none_src = BACnetValueSource.none_source()
+        self._value_source_array: list[BACnetValueSource] = [none_src] * 16
+        self._command_time_array: list[object | None] = [None] * 16
+        self._properties[PropertyIdentifier.VALUE_SOURCE] = none_src
+        self._properties[PropertyIdentifier.VALUE_SOURCE_ARRAY] = self._value_source_array
+        self._properties[PropertyIdentifier.LAST_COMMAND_TIME] = None
+        self._properties[PropertyIdentifier.COMMAND_TIME_ARRAY] = self._command_time_array
 
     @staticmethod
     def _coerce_value(prop_def: PropertyDefinition, value: Any) -> Any:
@@ -596,6 +628,7 @@ class BACnetObject:
         prop_id: PropertyIdentifier,
         value: Any,
         priority: int,
+        value_source: BACnetValueSource | None = None,
     ) -> None:
         """Write to a commandable property using the priority array.
 
@@ -607,6 +640,7 @@ class BACnetObject:
         :param prop_id: The commandable property identifier to write.
         :param value: The value to write, or ``None`` to relinquish.
         :param priority: Priority level (1-16).
+        :param value_source: Optional source info for the write (Clause 19.5).
         :raises BACnetError: If *priority* is out of range or reserved.
         """
         if priority < 1 or priority > 16:
@@ -620,17 +654,49 @@ class BACnetObject:
         if self._priority_array is None:
             self._priority_array = [None] * 16
 
+        idx = priority - 1
+
         if value is None:
-            self._priority_array[priority - 1] = None
+            self._priority_array[idx] = None
         else:
-            self._priority_array[priority - 1] = value
+            self._priority_array[idx] = value
+
+        # Update Value Source tracking (Clause 19.5)
+        if hasattr(self, "_value_source_array"):
+            src = value_source or BACnetValueSource.none_source()
+            if value is None:
+                self._value_source_array[idx] = BACnetValueSource.none_source()
+                self._command_time_array[idx] = None
+            else:
+                self._value_source_array[idx] = src
+                self._command_time_array[idx] = None  # timestamp set by caller
 
         # Present Value = highest priority non-None value, or relinquish default
-        for pv in self._priority_array:
+        winning_priority = None
+        for i, pv in enumerate(self._priority_array):
             if pv is not None:
                 self._properties[prop_id] = pv
-                return
-        self._properties[prop_id] = self._properties.get(PropertyIdentifier.RELINQUISH_DEFAULT)
+                winning_priority = i
+                break
+        else:
+            self._properties[prop_id] = self._properties.get(
+                PropertyIdentifier.RELINQUISH_DEFAULT
+            )
+
+        # Update current value source from winning priority slot
+        if hasattr(self, "_value_source_array"):
+            if winning_priority is not None:
+                self._properties[PropertyIdentifier.VALUE_SOURCE] = (
+                    self._value_source_array[winning_priority]
+                )
+                self._properties[PropertyIdentifier.LAST_COMMAND_TIME] = (
+                    self._command_time_array[winning_priority]
+                )
+            else:
+                self._properties[PropertyIdentifier.VALUE_SOURCE] = (
+                    BACnetValueSource.none_source()
+                )
+                self._properties[PropertyIdentifier.LAST_COMMAND_TIME] = None
 
     def _write_array_element(
         self,

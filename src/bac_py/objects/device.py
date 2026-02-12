@@ -13,6 +13,7 @@ from bac_py.objects.base import (
 )
 from bac_py.services.errors import BACnetError
 from bac_py.types.enums import (
+    BackupAndRestoreState,
     DeviceStatus,
     ErrorClass,
     ErrorCode,
@@ -162,6 +163,50 @@ class DeviceObject(BACnetObject):
         PropertyIdentifier.ACTIVE_COV_SUBSCRIPTIONS: PropertyDefinition(
             PropertyIdentifier.ACTIVE_COV_SUBSCRIPTIONS,
             list,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.BACKUP_AND_RESTORE_STATE: PropertyDefinition(
+            PropertyIdentifier.BACKUP_AND_RESTORE_STATE,
+            BackupAndRestoreState,
+            PropertyAccess.READ_ONLY,
+            required=False,
+            default=BackupAndRestoreState.IDLE,
+        ),
+        PropertyIdentifier.CONFIGURATION_FILES: PropertyDefinition(
+            PropertyIdentifier.CONFIGURATION_FILES,
+            list,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.LAST_RESTORE_TIME: PropertyDefinition(
+            PropertyIdentifier.LAST_RESTORE_TIME,
+            object,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.BACKUP_FAILURE_TIMEOUT: PropertyDefinition(
+            PropertyIdentifier.BACKUP_FAILURE_TIMEOUT,
+            int,
+            PropertyAccess.READ_WRITE,
+            required=False,
+            default=300,
+        ),
+        PropertyIdentifier.BACKUP_PREPARATION_TIME: PropertyDefinition(
+            PropertyIdentifier.BACKUP_PREPARATION_TIME,
+            int,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.RESTORE_PREPARATION_TIME: PropertyDefinition(
+            PropertyIdentifier.RESTORE_PREPARATION_TIME,
+            int,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.RESTORE_COMPLETION_TIME: PropertyDefinition(
+            PropertyIdentifier.RESTORE_COMPLETION_TIME,
+            int,
             PropertyAccess.READ_ONLY,
             required=False,
         ),

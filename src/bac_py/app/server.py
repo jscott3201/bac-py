@@ -103,7 +103,9 @@ from bac_py.types.constructed import BACnetTimeStamp
 from bac_py.types.enums import (
     AcknowledgmentFilter,
     AuditOperation,
+    BackupAndRestoreState,
     ConfirmedServiceChoice,
+    DeviceStatus,
     ErrorClass,
     ErrorCode,
     EventState,
@@ -111,6 +113,7 @@ from bac_py.types.enums import (
     NotifyType,
     ObjectType,
     PropertyIdentifier,
+    ReinitializedState,
     RejectReason,
     UnconfirmedServiceChoice,
 )
@@ -939,17 +942,101 @@ class DefaultServerHandlers:
         data: bytes,
         source: BACnetAddress,
     ) -> bytes | None:
-        """Handle ReinitializeDevice-Request per Clause 16.4.
+        """Handle ReinitializeDevice-Request per Clause 16.4 & 19.1.
 
-        Logs the reinitialize request. Does not actually restart
-        the device in this implementation.
+        Manages backup/restore state transitions on the Device object
+        per Clause 19.1:
+
+        - ``START_BACKUP`` → ``system_status=BACKUP_IN_PROGRESS``
+        - ``END_BACKUP`` → ``system_status=OPERATIONAL``
+        - ``START_RESTORE`` → ``system_status=DOWNLOAD_IN_PROGRESS``
+        - ``END_RESTORE`` → ``system_status=OPERATIONAL``
+        - ``ABORT_RESTORE`` → ``system_status=OPERATIONAL``
 
         :returns: ``None`` (SimpleACK response).
-        :raises BACnetError: If the password does not match (Clause 16.4.3.4).
+        :raises BACnetError: If the password does not match or the
+            state transition is invalid.
         """
         request = ReinitializeDeviceRequest.decode(data)
 
         self._validate_password(request.password)
+
+        device = self._device
+        state = request.reinitialized_state
+
+        if state in (
+            ReinitializedState.START_BACKUP,
+            ReinitializedState.END_BACKUP,
+            ReinitializedState.START_RESTORE,
+            ReinitializedState.END_RESTORE,
+            ReinitializedState.ABORT_RESTORE,
+        ):
+            br_state = device._properties.get(
+                PropertyIdentifier.BACKUP_AND_RESTORE_STATE,
+                BackupAndRestoreState.IDLE,
+            )
+
+            if state == ReinitializedState.START_BACKUP:
+                if br_state != BackupAndRestoreState.IDLE:
+                    raise BACnetError(ErrorClass.DEVICE, ErrorCode.OTHER)
+                device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
+                    DeviceStatus.BACKUP_IN_PROGRESS
+                )
+                device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+                    BackupAndRestoreState.PREPARING_FOR_BACKUP
+                )
+
+            elif state == ReinitializedState.END_BACKUP:
+                if br_state not in (
+                    BackupAndRestoreState.PREPARING_FOR_BACKUP,
+                    BackupAndRestoreState.PERFORMING_A_BACKUP,
+                ):
+                    raise BACnetError(ErrorClass.DEVICE, ErrorCode.OTHER)
+                device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
+                    DeviceStatus.OPERATIONAL
+                )
+                device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+                    BackupAndRestoreState.IDLE
+                )
+
+            elif state == ReinitializedState.START_RESTORE:
+                if br_state != BackupAndRestoreState.IDLE:
+                    raise BACnetError(ErrorClass.DEVICE, ErrorCode.OTHER)
+                device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
+                    DeviceStatus.DOWNLOAD_IN_PROGRESS
+                )
+                device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+                    BackupAndRestoreState.PREPARING_FOR_RESTORE
+                )
+
+            elif state == ReinitializedState.END_RESTORE:
+                if br_state not in (
+                    BackupAndRestoreState.PREPARING_FOR_RESTORE,
+                    BackupAndRestoreState.PERFORMING_A_RESTORE,
+                ):
+                    raise BACnetError(ErrorClass.DEVICE, ErrorCode.OTHER)
+                device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
+                    DeviceStatus.OPERATIONAL
+                )
+                device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+                    BackupAndRestoreState.IDLE
+                )
+                device._properties[PropertyIdentifier.LAST_RESTORE_TIME] = (
+                    BACnetTimeStamp(choice=1, value=0)
+                )
+
+            elif state == ReinitializedState.ABORT_RESTORE:
+                if br_state not in (
+                    BackupAndRestoreState.PREPARING_FOR_RESTORE,
+                    BackupAndRestoreState.PERFORMING_A_RESTORE,
+                ):
+                    raise BACnetError(ErrorClass.DEVICE, ErrorCode.OTHER)
+                device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
+                    DeviceStatus.OPERATIONAL
+                )
+                device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+                    BackupAndRestoreState.IDLE
+                )
 
         logger.info(
             "ReinitializeDevice from %s: state=%s",

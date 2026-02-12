@@ -1155,3 +1155,144 @@ class BACnetShedLevel:
 
     amount: float | None = None
     """Shed amount in engineering units."""
+
+
+@dataclass(frozen=True, slots=True)
+class BACnetDeviceObjectReference:
+    """BACnet DeviceObjectReference (Clause 21).
+
+    ``SEQUENCE { deviceIdentifier [0] OPTIONAL, objectIdentifier [1] }``
+    """
+
+    object_identifier: ObjectIdentifier
+    """The referenced object."""
+
+    device_identifier: ObjectIdentifier | None = None
+    """Optional device hosting the object (None = local device)."""
+
+    def encode(self) -> bytes:
+        """Encode to context-tagged wire format."""
+        from bac_py.encoding.primitives import encode_context_object_id
+
+        buf = bytearray()
+        if self.device_identifier is not None:
+            buf.extend(encode_context_object_id(0, self.device_identifier))
+        buf.extend(encode_context_object_id(1, self.object_identifier))
+        return bytes(buf)
+
+    @classmethod
+    def decode(cls, data: memoryview | bytes, offset: int = 0) -> tuple[BACnetDeviceObjectReference, int]:
+        """Decode from context-tagged wire format."""
+        from bac_py.encoding.primitives import decode_object_identifier
+        from bac_py.encoding.tags import TagClass, decode_tag
+        from bac_py.types.enums import ObjectType
+
+        if isinstance(data, bytes):
+            data = memoryview(data)
+
+        device_identifier = None
+        tag, new_offset = decode_tag(data, offset)
+
+        if tag.cls == TagClass.CONTEXT and tag.number == 0:
+            obj_type, instance = decode_object_identifier(data[new_offset : new_offset + tag.length])
+            device_identifier = ObjectIdentifier(ObjectType(obj_type), instance)
+            new_offset += tag.length
+            tag, new_offset = decode_tag(data, new_offset)
+
+        # [1] objectIdentifier
+        obj_type, instance = decode_object_identifier(data[new_offset : new_offset + tag.length])
+        object_identifier = ObjectIdentifier(ObjectType(obj_type), instance)
+        new_offset += tag.length
+
+        return cls(object_identifier=object_identifier, device_identifier=device_identifier), new_offset
+
+
+@dataclass(frozen=True, slots=True)
+class BACnetValueSource:
+    """BACnet ValueSource CHOICE type (Clause 19.5, new in 2020).
+
+    ``CHOICE { none [0] NULL, object [1] BACnetDeviceObjectReference, address [2] BACnetAddress }``
+
+    Tracks the source of the last write to a commandable property.
+    """
+
+    choice: int = 0
+    """Discriminator: 0 = none, 1 = object, 2 = address."""
+
+    value: None | BACnetDeviceObjectReference | bytes = None
+    """The typed value: None for choice 0, DeviceObjectReference for 1, raw address bytes for 2."""
+
+    @classmethod
+    def none_source(cls) -> BACnetValueSource:
+        """Create a ValueSource indicating no source."""
+        return cls(choice=0, value=None)
+
+    @classmethod
+    def from_object(cls, ref: BACnetDeviceObjectReference) -> BACnetValueSource:
+        """Create a ValueSource from a device/object reference."""
+        return cls(choice=1, value=ref)
+
+    @classmethod
+    def from_address(cls, address: bytes) -> BACnetValueSource:
+        """Create a ValueSource from a raw BACnet address."""
+        return cls(choice=2, value=address)
+
+    def encode(self) -> bytes:
+        """Encode to context-tagged wire format."""
+        from bac_py.encoding.primitives import encode_context_octet_string
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        if self.choice == 0:
+            # [0] NULL -- context-tagged with length 0
+            return encode_opening_tag(0) + encode_closing_tag(0)
+
+        if self.choice == 1:
+            # [1] BACnetDeviceObjectReference -- constructed
+            assert isinstance(self.value, BACnetDeviceObjectReference)
+            buf = encode_opening_tag(1)
+            buf += self.value.encode()
+            buf += encode_closing_tag(1)
+            return buf
+
+        if self.choice == 2:
+            # [2] BACnetAddress -- as octet string
+            assert isinstance(self.value, bytes)
+            return encode_context_octet_string(2, self.value)
+
+        msg = f"Invalid BACnetValueSource choice: {self.choice}"
+        raise ValueError(msg)
+
+    @classmethod
+    def decode(cls, data: memoryview | bytes, offset: int = 0) -> tuple[BACnetValueSource, int]:
+        """Decode from context-tagged wire format."""
+        from bac_py.encoding.tags import TagClass, decode_tag
+
+        if isinstance(data, bytes):
+            data = memoryview(data)
+
+        tag, new_offset = decode_tag(data, offset)
+
+        if tag.cls != TagClass.CONTEXT:
+            msg = f"Expected context tag for BACnetValueSource, got {tag}"
+            raise ValueError(msg)
+
+        if tag.number == 0:
+            # [0] NULL -- opening+closing
+            if tag.is_opening:
+                _closing, new_offset = decode_tag(data, new_offset)
+            return cls.none_source(), new_offset
+
+        if tag.number == 1:
+            # [1] BACnetDeviceObjectReference -- constructed
+            assert tag.is_opening
+            ref, new_offset = BACnetDeviceObjectReference.decode(data, new_offset)
+            _closing, new_offset = decode_tag(data, new_offset)
+            return cls.from_object(ref), new_offset
+
+        if tag.number == 2:
+            # [2] BACnetAddress as octet string
+            addr = bytes(data[new_offset : new_offset + tag.length])
+            return cls.from_address(addr), new_offset + tag.length
+
+        msg = f"Invalid BACnetValueSource choice tag: {tag.number}"
+        raise ValueError(msg)

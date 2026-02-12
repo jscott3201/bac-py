@@ -787,6 +787,7 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
         BACnetDateTime,
         BACnetDestination,
         BACnetDeviceObjectPropertyReference,
+        BACnetDeviceObjectReference,
         BACnetLogRecord,
         BACnetObjectPropertyReference,
         BACnetPrescale,
@@ -797,6 +798,7 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
         BACnetScale,
         BACnetSpecialEvent,
         BACnetTimeValue,
+        BACnetValueSource,
         BACnetWeekNDay,
         StatusFlags,
     )
@@ -896,6 +898,12 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
 
     if isinstance(value, BACnetCOVSubscription):
         return _encode_cov_subscription(value)
+
+    if isinstance(value, BACnetValueSource):
+        return value.encode()
+
+    if isinstance(value, BACnetDeviceObjectReference):
+        return value.encode()
 
     if isinstance(value, BACnetPriorityValue):
         if value.value is None:

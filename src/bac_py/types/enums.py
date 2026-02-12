@@ -462,6 +462,10 @@ class PropertyIdentifier(IntEnum):
     STATE_CHANGE_VALUES = 396
 
     CURRENT_COMMAND_PRIORITY = 431
+    LAST_COMMAND_TIME = 432
+    VALUE_SOURCE = 433
+    VALUE_SOURCE_ARRAY = 434
+    COMMAND_TIME_ARRAY = 435
 
     # Lift / Escalator properties (Clause 12.58-12.60)
     CAR_ASSIGNED_DIRECTION = 500
@@ -1100,6 +1104,16 @@ class DeviceStatus(IntEnum):
     DOWNLOAD_IN_PROGRESS = 3
     NON_OPERATIONAL = 4
     BACKUP_IN_PROGRESS = 5
+
+
+class BackupAndRestoreState(IntEnum):
+    """BACnetBackupAndRestoreState values (Clause 19.1)."""
+
+    IDLE = 0
+    PREPARING_FOR_BACKUP = 1
+    PREPARING_FOR_RESTORE = 2
+    PERFORMING_A_BACKUP = 3
+    PERFORMING_A_RESTORE = 4
 
 
 class EventType(IntEnum):
