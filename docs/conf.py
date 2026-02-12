@@ -13,7 +13,7 @@ from bac_py import __version__
 
 project = "bac-py"
 author = "bac-py contributors"
-copyright = "2025, bac-py contributors"
+copyright = "2025-2026, bac-py contributors"
 
 version = __version__
 release = version

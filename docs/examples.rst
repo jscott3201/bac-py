@@ -613,6 +613,78 @@ Configure bac-py as a BACnet router between multiple IP networks. See
    )
 
 
+.. _docker-testing-example:
+
+Docker Integration Testing
+--------------------------
+
+Docker-based tests exercise real BACnet/IP communication over actual UDP
+sockets between separate application instances. The test infrastructure is
+under ``docker/`` and requires Docker and Docker Compose.
+
+Build and run all scenarios:
+
+.. code-block:: bash
+
+   # Build the Alpine-based Docker image
+   make docker-build
+
+   # Run all four integration scenarios
+   make docker-test
+
+Run individual scenarios:
+
+.. code-block:: bash
+
+   make docker-test-client    # Client/server: read, write, discover, RPM, WPM
+   make docker-test-bbmd      # BBMD: foreign device registration + forwarding
+   make docker-test-router    # Router: cross-network discovery and reads
+   make docker-test-stress    # Stress: concurrent and sequential throughput
+
+Run the standalone stress test with JSON output:
+
+.. code-block:: bash
+
+   make docker-stress
+
+   # Output:
+   # {
+   #   "config": {"num_clients": 10, "requests_per_client": 500},
+   #   "results": {
+   #     "throughput_rps": 1250.3,
+   #     "latency_ms": {"p50": 3.2, "p95": 8.1, "p99": 15.4},
+   #     "error_rate": 0.0
+   #   }
+   # }
+
+The Docker Compose file defines three isolated bridge networks
+(``bacnet-main``, ``bacnet-secondary``, ``bacnet-foreign``) and uses
+profiles to run scenarios independently. Each server container exposes
+sample objects (AnalogInput, AnalogOutput, AnalogValue, BinaryInput,
+BinaryValue) and registers ``DefaultServerHandlers``.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 20 40
+
+   * - Scenario
+     - What it tests
+   * - Client/Server
+     - ReadProperty, WriteProperty, RPM, WPM, Who-Is, discover, object list
+   * - BBMD
+     - Foreign device registration, BDT/FDT reads, cross-subnet forwarding
+   * - Router
+     - Who-Is-Router, cross-network discovery, cross-network reads
+   * - Stress
+     - 10 concurrent clients, 100 sequential reads, throughput measurement
+
+Clean up Docker resources:
+
+.. code-block:: bash
+
+   make docker-clean
+
+
 .. _protocol-level-api:
 
 Protocol-Level API

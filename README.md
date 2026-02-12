@@ -1,7 +1,7 @@
 # bac-py
 
 Asynchronous BACnet/IP protocol library for Python 3.13+, implementing
-ASHRAE Standard 135-2016.
+ASHRAE Standard 135-2020.
 
 bac-py provides client and server capabilities for BACnet/IP networks with a
 clean, layered architecture. It is built on native `asyncio` with zero required
@@ -22,13 +22,20 @@ async with Client(instance_number=999) as client:
 - **Async-first** design using native `asyncio`
 - **Zero dependencies** for the core library (optional `orjson` for JSON serialization)
 - **Complete object model** -- Device, Analog/Binary/MultiState I/O/Value, File, Schedule, TrendLog, and more
-- **All standard services** -- property access, discovery, COV, device management, file access, object management, private transfer
+- **All standard services** -- property access, discovery, COV, event notification, device management, file access, object management, audit logging, private transfer
 - **Segmentation** -- automatic segmented request/response handling (Clause 5.2)
 - **Network routing** -- multi-port router with dynamic routing tables (Clause 6)
 - **BBMD** -- broadcast management device and foreign device registration
 - **Priority array** -- 16-level command prioritization for commandable objects
+- **Event reporting** -- all 18 event algorithms, intrinsic reporting, NotificationClass routing
+- **Audit logging** -- automatic audit records for write/create/delete operations (new in 2020)
+- **Scheduling** -- weekly and exception schedules with calendar-aware evaluation
+- **Trend logging** -- polled, COV, and triggered acquisition with circular buffer management
+- **BACnet/IPv6** -- full Annex U transport with VMAC addressing and multicast
 - **Smart encoding** -- property-aware type coercion for writes (int to Real for analog, Enumerated for binary, etc.)
+- **JSON serialization** -- `to_dict()`/`from_dict()` on all data types, optional `orjson` backend
 - **Type-safe** -- enums, frozen dataclasses, and comprehensive type hints throughout
+- **Docker integration tests** -- real UDP communication between containers for client/server, BBMD, router, and stress scenarios
 
 ## Installation
 
@@ -267,7 +274,9 @@ config = DeviceConfig(
 
 ```text
 src/bac_py/
-  app/            High-level application, client API, server handlers, TSM
+  app/            High-level application, client API, server handlers, TSM,
+                  event engine, schedule engine, trendlog engine, audit manager
+  conformance/    BIBB declarations and PICS generation
   encoding/       ASN.1/BER tag-length-value encoding and APDU codec
   network/        Addressing, NPDU network layer, multi-port router
   objects/        BACnet object model (Device, Analog, Binary, MultiState, ...)
@@ -298,23 +307,33 @@ src/bac_py/
 ### Supported Object Types
 
 Device, Analog Input/Output/Value, Binary Input/Output/Value, Multi-State
-Input/Output/Value, Accumulator, Calendar, Channel, Event Enrollment, File,
-Life Safety Point/Zone, Loop, Network Port, Notification Class, Program,
-Schedule, Trend Log, and generic value types (BitString, CharacterString,
-Date, DateTime, Integer, LargeAnalog, OctetString, PositiveInteger, Time,
-and pattern variants).
+Input/Output/Value, Accumulator, Calendar, Channel, Command, Event Enrollment,
+File, Life Safety Point/Zone, Loop, Network Port, Notification Class,
+Notification Forwarder, Program, Schedule, Trend Log, Trend Log Multiple,
+Audit Reporter, Audit Log, Access Door/Point/Zone/Credential/Rights,
+Credential Data Input, Timer, Staging, Load Control, Lighting Output,
+Elevator, Escalator Group, Lift, Alert Enrollment, Event Log, Averaging,
+Pulse Converter, Group, Global Group, Structured View, and generic value types
+(BitString, CharacterString, Date, DateTime, Integer, LargeAnalog, OctetString,
+PositiveInteger, Time, and pattern variants).
 
 ### Supported Services
 
 **Confirmed:** ReadProperty, WriteProperty, ReadPropertyMultiple,
 WritePropertyMultiple, ReadRange, CreateObject, DeleteObject,
 AddListElement, RemoveListElement, AtomicReadFile, AtomicWriteFile,
-SubscribeCOV, DeviceCommunicationControl, ReinitializeDevice,
+SubscribeCOV, ConfirmedEventNotification, AcknowledgeAlarm,
+GetAlarmSummary, GetEnrollmentSummary, GetEventInformation,
+ConfirmedTextMessage, ConfirmedAuditNotification *(2020)*,
+AuditLogQuery *(2020)*, VT-Open, VT-Close, VT-Data,
+DeviceCommunicationControl, ReinitializeDevice,
 ConfirmedPrivateTransfer.
 
-**Unconfirmed:** Who-Is/I-Am, Who-Has/I-Have, TimeSynchronization,
-UTCTimeSynchronization, UnconfirmedCOVNotification,
-UnconfirmedPrivateTransfer.
+**Unconfirmed:** Who-Is/I-Am, Who-Has/I-Have,
+TimeSynchronization/UTCTimeSynchronization, UnconfirmedCOVNotification,
+UnconfirmedEventNotification, UnconfirmedTextMessage,
+UnconfirmedAuditNotification *(2020)*, Who-Am-I/You-Are *(2020)*,
+WriteGroup, UnconfirmedPrivateTransfer.
 
 ### Error Handling
 
@@ -400,7 +419,7 @@ from bac_py.encoding.primitives import (
 ## Testing
 
 ```bash
-# Run the test suite
+# Run the unit test suite (3,795 tests)
 make test
 
 # With coverage
@@ -422,10 +441,46 @@ make docs
 make check
 ```
 
+### Docker Integration Tests
+
+Docker-based tests exercise real BACnet/IP communication over actual UDP sockets
+between separate application instances running in containers:
+
+```bash
+# Build the Docker image (Alpine + uv + orjson)
+make docker-build
+
+# Run all integration scenarios
+make docker-test
+
+# Individual scenarios
+make docker-test-client    # Client/server: read, write, discover, RPM, WPM
+make docker-test-bbmd      # BBMD: foreign device registration + forwarding
+make docker-test-router    # Router: cross-network discovery and reads
+make docker-test-stress    # Stress: concurrent and sequential throughput
+
+# Full stress test with JSON throughput report
+make docker-stress
+
+# Cleanup
+make docker-clean
+```
+
+The Docker infrastructure is under `docker/` and uses Docker Compose with
+separate bridge networks to simulate realistic BACnet/IP topologies:
+
+| Scenario       | What it tests                                            |
+| -------------- | -------------------------------------------------------- |
+| Client/Server  | ReadProperty, WriteProperty, RPM, WPM, Who-Is, discover |
+| BBMD           | Foreign device registration, BDT/FDT reads, forwarding  |
+| Router         | Who-Is-Router, cross-network discovery and reads         |
+| Stress         | 10 concurrent clients, 100 sequential reads, throughput  |
+
 ## Requirements
 
 - Python >= 3.13
 - No runtime dependencies (optional: `orjson` for JSON serialization)
+- Docker and Docker Compose for integration tests (optional)
 
 ## License
 

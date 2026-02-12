@@ -420,6 +420,34 @@ Optional JSON serialization for BACnet values (install with
 Uses ``orjson`` for performance when available.
 
 
+.. _docker-integration-testing:
+
+Docker Integration Testing
+--------------------------
+
+Docker-based tests exercise real BACnet/IP communication over actual UDP
+sockets between separate application instances running in containers. The
+infrastructure lives under ``docker/`` and uses Docker Compose with isolated
+bridge networks to simulate realistic BACnet/IP topologies.
+
+Four scenarios are provided:
+
+- **Client/Server** -- ReadProperty, WriteProperty, ReadPropertyMultiple,
+  WritePropertyMultiple, Who-Is discovery, and object list enumeration over
+  real UDP between a server and client container.
+- **BBMD** -- Foreign device registration, BDT/FDT table reads, and
+  cross-subnet forwarding through a BBMD container.
+- **Router** -- Who-Is-Router-To-Network discovery, cross-network device
+  discovery, and cross-network property reads through a router container
+  bridging two Docker networks.
+- **Stress** -- Concurrent client reads (10 parallel clients) and rapid
+  sequential reads (100 in a row) for throughput validation. A standalone
+  stress runner produces structured JSON reports with latency percentiles.
+
+Run with ``make docker-test`` (all scenarios) or individual targets like
+``make docker-test-client``. See :ref:`docker-testing-example` for details.
+
+
 .. _architecture:
 
 Architecture
