@@ -126,7 +126,7 @@ class TestObjectType:
         assert ObjectType.LIFT == 59
 
     def test_member_count(self) -> None:
-        assert len(ObjectType) == 60
+        assert len(ObjectType) == 63
 
 
 # ---------------------------------------------------------------------------

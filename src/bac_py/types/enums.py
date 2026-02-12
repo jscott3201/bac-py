@@ -60,7 +60,7 @@ class ObjectType(IntEnum):
     ACCESS_USER = 35
     ACCESS_ZONE = 36
     CREDENTIAL_DATA_INPUT = 37
-    NETWORK_SECURITY = 38
+    NETWORK_SECURITY = 38  # Deprecated in 2020 (Clause 24 deleted)
     BITSTRING_VALUE = 39
     CHARACTERSTRING_VALUE = 40
     DATEPATTERN_VALUE = 41
@@ -82,6 +82,9 @@ class ObjectType(IntEnum):
     ELEVATOR_GROUP = 57
     ESCALATOR = 58
     LIFT = 59
+    STAGING = 60  # New in 2020
+    AUDIT_REPORTER = 61  # New in 2020
+    AUDIT_LOG = 62  # New in 2020
 
 
 class PropertyIdentifier(IntEnum):
@@ -449,7 +452,62 @@ class PropertyIdentifier(IntEnum):
     EGRESS_ACTIVE = 386
     FAULT_HIGH_LIMIT = 388
     FAULT_LOW_LIMIT = 389
+
+    # Timer properties (Clause 12.57, new in 2016/2020)
+    TIMER_STATE = 397
+    TIMER_RUNNING = 398
+    LAST_STATE_CHANGE = 395
+    INITIAL_TIMEOUT = 394
+    DEFAULT_TIMEOUT = 393
+    STATE_CHANGE_VALUES = 396
+
     CURRENT_COMMAND_PRIORITY = 431
+
+    # Lift / Escalator properties (Clause 12.58-12.60)
+    CAR_ASSIGNED_DIRECTION = 500
+    CAR_DOOR_COMMAND = 501
+    CAR_DOOR_STATUS = 502
+    CAR_DOOR_TEXT = 503
+    CAR_DOOR_ZONE = 504
+    CAR_DRIVE_STATUS = 505
+    CAR_LOAD = 506
+    CAR_LOAD_UNITS = 507
+    CAR_MODE = 508
+    CAR_MOVING_DIRECTION = 509
+    CAR_POSITION = 510
+    ELEVATOR_GROUP = 511
+    ENERGY_METER = 512
+    ENERGY_METER_REF = 513
+    ESCALATOR_MODE = 514
+    FAULT_SIGNALS = 515
+    FLOOR_TEXT = 516
+    GROUP_ID = 517
+    GROUP_MODE = 519
+    HIGHER_DECK = 520
+    INSTALLATION_ID = 521
+    LANDING_CALLS = 522
+    LANDING_CALL_CONTROL = 523
+    LANDING_DOOR_STATUS = 524
+    LOWER_DECK = 525
+    MACHINE_ROOM_ID = 526
+    MAKING_CAR_CALL = 527
+    NEXT_STOPPING_FLOOR = 528
+    OPERATION_DIRECTION = 529
+    PASSENGER_ALARM = 530
+    POWER_MODE = 531
+    REGISTERED_CAR_CALL = 532
+
+    # Staging properties (Clause 12.62, new in 2020)
+    STAGING_STATE = 540
+    TARGET_OBJECT = 541
+    TARGET_PROPERTY = 542
+    STAGING_TIMEOUT = 543
+
+    # Audit properties (Clauses 12.63-12.64, new in 2020)
+    AUDIT_LEVEL = 550
+    AUDITABLE_OPERATIONS = 551
+    AUDIT_NOTIFICATION_RECIPIENT = 552
+    MONITORED_OBJECTS = 553
 
     # NetworkPort properties (Clause 12.56, added in revision 17+)
     NETWORK_TYPE = 441
@@ -1296,3 +1354,242 @@ class VTClass(IntEnum):
     DEC_VT220 = 4
     HP_700_94 = 5
     IBM_3130 = 6
+
+
+class NodeType(IntEnum):
+    """BACnet node type for Structured View (Clause 12.29)."""
+
+    UNKNOWN = 0
+    SYSTEM = 1
+    NETWORK = 2
+    DEVICE = 3
+    ORGANIZATIONAL = 4
+    AREA = 5
+    EQUIPMENT = 6
+    POINT = 7
+    COLLECTION = 8
+    PROPERTY = 9
+    FUNCTIONAL = 10
+    OTHER = 11
+    SUBSYSTEM = 12
+    BUILDING = 13
+    FLOOR = 14
+    SECTION = 15
+    MODULE = 16
+    TREE = 17
+    MEMBER = 18
+    PROTOCOL = 19
+    ROOM = 20
+    ZONE = 21
+
+
+class ShedState(IntEnum):
+    """BACnet shed state for Load Control (Clause 12.28)."""
+
+    SHED_INACTIVE = 0
+    SHED_REQUEST_PENDING = 1
+    SHED_COMPLIANT = 2
+    SHED_NON_COMPLIANT = 3
+
+
+class DoorAlarmState(IntEnum):
+    """BACnet door alarm state (Clause 12.26)."""
+
+    NORMAL = 0
+    ALARM = 1
+    DOOR_OPEN_TOO_LONG = 2
+    FORCED_OPEN = 3
+    TAMPER = 4
+    DOOR_FAULT = 5
+    LOCK_FAULT = 6
+    FREE_ACCESS = 7
+    EGRESS_OPEN = 8
+
+
+class DoorStatus(IntEnum):
+    """BACnet door status (Clause 12.26)."""
+
+    CLOSED = 0
+    OPENED = 1
+    UNKNOWN = 2
+
+
+class LockStatus(IntEnum):
+    """BACnet lock status (Clause 12.26)."""
+
+    LOCKED = 0
+    UNLOCKED = 1
+    LOCK_FAULT = 2
+    UNUSED = 3
+    UNKNOWN = 4
+
+
+class DoorSecuredStatus(IntEnum):
+    """BACnet secured status for Access Door (Clause 12.26)."""
+
+    SECURED = 0
+    UNSECURED = 1
+    UNKNOWN = 2
+
+
+class LightingOperation(IntEnum):
+    """BACnet lighting operation (Clause 12.54)."""
+
+    NONE = 0
+    FADE_TO = 1
+    RAMP_TO = 2
+    STEP_UP = 3
+    STEP_DOWN = 4
+    STEP_ON = 5
+    STEP_OFF = 6
+    WARN = 7
+    WARN_OFF = 8
+    WARN_RELINQUISH = 9
+    STOP = 10
+
+
+class LightingInProgress(IntEnum):
+    """BACnet lighting in-progress state (Clause 12.54)."""
+
+    IDLE = 0
+    FADE_ACTIVE = 1
+    RAMP_ACTIVE = 2
+    NOT_CONTROLLED = 3
+    OTHER = 4
+
+
+class AccessEvent(IntEnum):
+    """BACnet access event (Clause 12.33)."""
+
+    NONE = 0
+    GRANTED = 1
+    MUSTER = 2
+    PASSBACK_DETECTED = 3
+    DURESS = 4
+    TRACE = 5
+    LOCKOUT_MAX_ATTEMPTS = 6
+    LOCKOUT_OTHER = 7
+    LOCKOUT_RELINQUISHED = 8
+    LOCKED_BY_HIGHER_PRIORITY = 9
+    OUT_OF_SERVICE = 10
+    OUT_OF_SERVICE_RELINQUISHED = 11
+    ACCOMPANIMENT_BY = 12
+    AUTHENTICATION_FACTOR_READ = 13
+    AUTHORIZATION_DELAYED = 14
+    VERIFICATION_REQUIRED = 15
+    NO_ENTRY_AFTER_GRANT = 16
+    DENIED_DENY_ALL = 128
+    DENIED_UNKNOWN_CREDENTIAL = 129
+    DENIED_AUTHENTICATION_UNAVAILABLE = 130
+    DENIED_AUTHENTICATION_FACTOR_TIMEOUT = 131
+    DENIED_INCORRECT_AUTHENTICATION = 132
+    DENIED_OTHER = 133
+
+
+class AccessCredentialDisable(IntEnum):
+    """BACnet access credential disable reason (Clause 12.35)."""
+
+    NONE = 0
+    DISABLE = 1
+    DISABLE_MANUAL = 2
+    DISABLE_LOCKOUT = 3
+
+
+class AccessUserType(IntEnum):
+    """BACnet access user type (Clause 12.35)."""
+
+    ASSET = 0
+    GROUP = 1
+    PERSON = 2
+
+
+class AuthorizationMode(IntEnum):
+    """BACnet authorization mode (Clause 12.31)."""
+
+    AUTHORIZE = 0
+    GRANT_ACTIVE = 1
+    DENY_ALL = 2
+    VERIFICATION_REQUIRED = 3
+    AUTHORIZATION_DELAYED = 4
+    NONE = 5
+
+
+class AccessPassbackMode(IntEnum):
+    """BACnet access passback mode (Clause 12.32)."""
+
+    PASSBACK_OFF = 0
+    HARD_PASSBACK = 1
+    SOFT_PASSBACK = 2
+
+
+class EscalatorMode(IntEnum):
+    """BACnet escalator operating mode (Clause 12.60)."""
+
+    UNKNOWN = 0
+    STOP = 1
+    UP = 2
+    DOWN = 3
+    INSPECTION = 4
+    OUT_OF_SERVICE = 5
+
+
+class EscalatorFault(IntEnum):
+    """BACnet escalator fault signals (Clause 12.60)."""
+
+    CONTROLLER_FAULT = 0
+    DRIVE_AND_MOTOR_FAULT = 1
+    MECHANICAL_COMPONENT_FAULT = 2
+    OVERSPEED_FAULT = 3
+    POWER_SUPPLY_FAULT = 4
+    SAFETY_DEVICE_FAULT = 5
+    CONTROLLER_SUPPLY_FAULT = 6
+    DRIVE_TEMPERATURE_EXCEEDED = 7
+    COMB_PLATE_FAULT = 8
+
+
+class LiftCarDirection(IntEnum):
+    """BACnet lift car travel direction (Clause 12.59)."""
+
+    UNKNOWN = 0
+    NONE = 1
+    STOPPED = 2
+    UP = 3
+    DOWN = 4
+    UP_AND_DOWN = 5
+
+
+class LiftGroupMode(IntEnum):
+    """BACnet lift group operating mode (Clause 12.58)."""
+
+    UNKNOWN = 0
+    NORMAL = 1
+    DOWN_PEAK = 2
+    TWO_WAY = 3
+    FOUR_WAY = 4
+    EMERGENCY = 5
+    UP_PEAK = 6
+
+
+class LiftCarDoorStatus(IntEnum):
+    """BACnet lift car door status (Clause 12.59)."""
+
+    UNKNOWN = 0
+    NONE = 1
+    CLOSING = 2
+    CLOSED = 3
+    OPENING = 4
+    OPENED = 5
+    SAFETY_LOCKED = 6
+    LIMITED_OPENED = 7
+
+
+class StagingState(IntEnum):
+    """BACnet staging state (Clause 12.62, new in 2020)."""
+
+    NOT_STAGED = 0
+    STAGING = 1
+    STAGED = 2
+    COMMITTING = 3
+    COMMITTED = 4
+    ABANDONING = 5
+    ABANDONED = 6

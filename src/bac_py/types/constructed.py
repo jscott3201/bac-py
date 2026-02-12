@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from bac_py.types.primitives import BACnetDate, BACnetTime, BitString, ObjectIdentifier
+
+if TYPE_CHECKING:
+    from bac_py.types.enums import LightingOperation
 
 
 @dataclass(frozen=True, slots=True)
@@ -1109,3 +1112,46 @@ class BACnetPriorityArray:
             16 entries.
         """
         return cls(slots=tuple(BACnetPriorityValue.from_dict(s) for s in data["slots"]))
+
+
+@dataclass(frozen=True, slots=True)
+class BACnetLightingCommand:
+    """BACnet lighting command (Clause 12.54).
+
+    Used to control lighting output objects with fade/ramp/step operations.
+    """
+
+    operation: LightingOperation
+    """The lighting operation to perform."""
+
+    target_level: float | None = None
+    """Target lighting level (0.0--100.0 percent)."""
+
+    ramp_rate: float | None = None
+    """Ramp rate in percent per second."""
+
+    step_increment: float | None = None
+    """Step increment in percent."""
+
+    fade_time: int | None = None
+    """Fade time in milliseconds."""
+
+    priority: int | None = None
+    """Priority for the lighting command (1--16)."""
+
+
+@dataclass(frozen=True, slots=True)
+class BACnetShedLevel:
+    """BACnet shed level CHOICE type for Load Control (Clause 12.28).
+
+    Exactly one of ``percent``, ``level``, or ``amount`` must be set.
+    """
+
+    percent: int | None = None
+    """Shed as a percentage (0--100)."""
+
+    level: int | None = None
+    """Shed level enumeration index."""
+
+    amount: float | None = None
+    """Shed amount in engineering units."""

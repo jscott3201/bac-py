@@ -1254,7 +1254,7 @@ class TestHandleCreateObject:
 
         from bac_py.services.object_mgmt import CreateObjectRequest
 
-        request = CreateObjectRequest(object_type=ObjectType.ELEVATOR_GROUP)
+        request = CreateObjectRequest(object_type=ObjectType.NETWORK_SECURITY)
 
         async def run():
             with pytest.raises(BACnetError) as exc_info:
