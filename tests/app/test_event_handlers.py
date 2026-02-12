@@ -28,11 +28,11 @@ from bac_py.services.alarm_summary import (
     GetEventInformationACK,
     GetEventInformationRequest,
 )
+from bac_py.services.errors import BACnetError
 from bac_py.services.event_notification import (
     AcknowledgeAlarmRequest,
     EventNotificationRequest,
 )
-from bac_py.services.errors import BACnetError
 from bac_py.types.constructed import BACnetTimeStamp
 from bac_py.types.enums import (
     AcknowledgmentFilter,

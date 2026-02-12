@@ -7,7 +7,7 @@ AuditQueryByTarget, AuditQueryBySource.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Self
+from typing import Any, Self
 
 from bac_py.encoding.primitives import (
     decode_character_string,
@@ -390,6 +390,95 @@ class BACnetAuditNotification:
             result_error_code=result_error_code,
         )
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-serializable dictionary.
+
+        Optional fields are omitted when ``None``.
+
+        :returns: Dictionary with audit notification fields.
+        """
+        result: dict[str, Any] = {
+            "operation": int(self.operation),
+        }
+        if self.source_device is not None:
+            result["source_device"] = self.source_device.to_dict()
+        if self.source_object is not None:
+            result["source_object"] = self.source_object.to_dict()
+        if self.source_comment is not None:
+            result["source_comment"] = self.source_comment
+        if self.target_comment is not None:
+            result["target_comment"] = self.target_comment
+        if self.invoke_id is not None:
+            result["invoke_id"] = self.invoke_id
+        if self.source_user_id is not None:
+            result["source_user_id"] = self.source_user_id
+        if self.source_user_role is not None:
+            result["source_user_role"] = self.source_user_role
+        if self.target_device is not None:
+            result["target_device"] = self.target_device.to_dict()
+        if self.target_object is not None:
+            result["target_object"] = self.target_object.to_dict()
+        if self.target_property is not None:
+            result["target_property"] = self.target_property
+        if self.target_array_index is not None:
+            result["target_array_index"] = self.target_array_index
+        if self.target_priority is not None:
+            result["target_priority"] = self.target_priority
+        if self.target_value is not None:
+            result["target_value"] = self.target_value.hex()
+        if self.current_value is not None:
+            result["current_value"] = self.current_value.hex()
+        if self.result_error_class is not None:
+            result["result_error_class"] = self.result_error_class
+        if self.result_error_code is not None:
+            result["result_error_code"] = self.result_error_code
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BACnetAuditNotification:
+        """Reconstruct from a JSON-friendly dictionary.
+
+        :param data: Dictionary with audit notification fields.
+        :returns: Decoded :class:`BACnetAuditNotification` instance.
+        """
+        source_device = None
+        if "source_device" in data:
+            source_device = ObjectIdentifier.from_dict(data["source_device"])
+        source_object = None
+        if "source_object" in data:
+            source_object = ObjectIdentifier.from_dict(data["source_object"])
+        target_device = None
+        if "target_device" in data:
+            target_device = ObjectIdentifier.from_dict(data["target_device"])
+        target_object = None
+        if "target_object" in data:
+            target_object = ObjectIdentifier.from_dict(data["target_object"])
+        target_value = None
+        if "target_value" in data:
+            target_value = bytes.fromhex(data["target_value"])
+        current_value = None
+        if "current_value" in data:
+            current_value = bytes.fromhex(data["current_value"])
+        return cls(
+            operation=AuditOperation(data["operation"]),
+            source_device=source_device,
+            source_object=source_object,
+            source_comment=data.get("source_comment"),
+            target_comment=data.get("target_comment"),
+            invoke_id=data.get("invoke_id"),
+            source_user_id=data.get("source_user_id"),
+            source_user_role=data.get("source_user_role"),
+            target_device=target_device,
+            target_object=target_object,
+            target_property=data.get("target_property"),
+            target_array_index=data.get("target_array_index"),
+            target_priority=data.get("target_priority"),
+            target_value=target_value,
+            current_value=current_value,
+            result_error_class=data.get("result_error_class"),
+            result_error_code=data.get("result_error_code"),
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class BACnetAuditLogRecord:
@@ -442,6 +531,28 @@ class BACnetAuditLogRecord:
 
         notification = BACnetAuditNotification.decode(data[inner_start:inner_end])
         return cls(sequence_number=sequence_number, notification=notification)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-serializable dictionary.
+
+        :returns: Dictionary with ``"sequence_number"`` and ``"notification"`` keys.
+        """
+        return {
+            "sequence_number": self.sequence_number,
+            "notification": self.notification.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BACnetAuditLogRecord:
+        """Reconstruct from a JSON-friendly dictionary.
+
+        :param data: Dictionary with ``"sequence_number"`` and ``"notification"`` keys.
+        :returns: Decoded :class:`BACnetAuditLogRecord` instance.
+        """
+        return cls(
+            sequence_number=data["sequence_number"],
+            notification=BACnetAuditNotification.from_dict(data["notification"]),
+        )
 
 
 @dataclass(frozen=True, slots=True)

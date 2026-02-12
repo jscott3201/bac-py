@@ -14,14 +14,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import pytest
-
-from bac_py.app.cov import COVManager, PropertySubscription
+from bac_py.app.cov import COVManager
 from bac_py.encoding.primitives import encode_application_real, encode_application_unsigned
 from bac_py.network.address import BACnetAddress
-from bac_py.objects.analog import AnalogInputObject, AnalogValueObject
+from bac_py.objects.analog import AnalogValueObject
 from bac_py.objects.base import ObjectDatabase
-from bac_py.objects.binary import BinaryValueObject
 from bac_py.services.cov import (
     BACnetPropertyReference,
     COVNotificationMultipleRequest,

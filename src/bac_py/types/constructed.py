@@ -1206,6 +1206,35 @@ class BACnetDeviceObjectReference:
 
         return cls(object_identifier=object_identifier, device_identifier=device_identifier), new_offset
 
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-serializable dictionary.
+
+        :returns: Dictionary with ``"object_identifier"`` and optionally
+            ``"device_identifier"`` keys.
+        """
+        result: dict[str, Any] = {
+            "object_identifier": self.object_identifier.to_dict(),
+        }
+        if self.device_identifier is not None:
+            result["device_identifier"] = self.device_identifier.to_dict()
+        return result
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BACnetDeviceObjectReference:
+        """Reconstruct from a JSON-friendly dictionary.
+
+        :param data: Dictionary with ``"object_identifier"`` and optionally
+            ``"device_identifier"`` keys.
+        :returns: Decoded :class:`BACnetDeviceObjectReference` instance.
+        """
+        device_id = None
+        if "device_identifier" in data:
+            device_id = ObjectIdentifier.from_dict(data["device_identifier"])
+        return cls(
+            object_identifier=ObjectIdentifier.from_dict(data["object_identifier"]),
+            device_identifier=device_id,
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class BACnetValueSource:
@@ -1295,4 +1324,39 @@ class BACnetValueSource:
             return cls.from_address(addr), new_offset + tag.length
 
         msg = f"Invalid BACnetValueSource choice tag: {tag.number}"
+        raise ValueError(msg)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-serializable dictionary.
+
+        :returns: Dictionary with ``"choice"`` (``"none"``, ``"object"``,
+            or ``"address"``) and ``"value"`` keys.
+        """
+        if self.choice == 0:
+            return {"choice": "none", "value": None}
+        if self.choice == 1:
+            assert isinstance(self.value, BACnetDeviceObjectReference)
+            return {"choice": "object", "value": self.value.to_dict()}
+        if self.choice == 2:
+            assert isinstance(self.value, bytes)
+            return {"choice": "address", "value": self.value.hex()}
+        msg = f"Invalid BACnetValueSource choice: {self.choice}"
+        raise ValueError(msg)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BACnetValueSource:
+        """Reconstruct from a JSON-friendly dictionary.
+
+        :param data: Dictionary with ``"choice"`` and ``"value"`` keys.
+        :returns: Decoded :class:`BACnetValueSource` instance.
+        :raises ValueError: If the choice value is not recognized.
+        """
+        choice_str = data["choice"]
+        if choice_str == "none":
+            return cls.none_source()
+        if choice_str == "object":
+            return cls.from_object(BACnetDeviceObjectReference.from_dict(data["value"]))
+        if choice_str == "address":
+            return cls.from_address(bytes.fromhex(data["value"]))
+        msg = f"Invalid BACnetValueSource choice: {choice_str}"
         raise ValueError(msg)

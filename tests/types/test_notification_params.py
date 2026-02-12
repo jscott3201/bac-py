@@ -5,6 +5,8 @@ reserved tag handling, and EventNotificationRequest integration
 for every variant defined in ASHRAE 135-2020 Clause 13.3.
 """
 
+from typing import ClassVar
+
 import pytest
 
 from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
@@ -986,7 +988,7 @@ class TestRawNotificationParameters:
     def test_reserved_tag_7(self):
         raw_content = b"\x91\x03"  # app-tagged enumerated, value 3
         wire = encode_opening_tag(7) + raw_content + encode_closing_tag(7)
-        decoded, offset = decode_notification_parameters(memoryview(wire))
+        decoded, _offset = decode_notification_parameters(memoryview(wire))
         assert isinstance(decoded, RawNotificationParameters)
         assert decoded.tag_number == 7
         assert decoded.raw_data == raw_content
@@ -994,7 +996,7 @@ class TestRawNotificationParameters:
     def test_reserved_tag_12(self):
         raw_content = b"\x21\x01"  # app-tagged unsigned, value 1
         wire = encode_opening_tag(12) + raw_content + encode_closing_tag(12)
-        decoded, offset = decode_notification_parameters(memoryview(wire))
+        decoded, _offset = decode_notification_parameters(memoryview(wire))
         assert isinstance(decoded, RawNotificationParameters)
         assert decoded.tag_number == 12
 
@@ -1002,7 +1004,7 @@ class TestRawNotificationParameters:
         raw_content = b"\x21\x05"  # valid app-tagged unsigned
         raw = RawNotificationParameters(tag_number=6, raw_data=raw_content)
         encoded = raw.encode()
-        decoded, offset = decode_notification_parameters(memoryview(encoded))
+        decoded, _offset = decode_notification_parameters(memoryview(encoded))
         assert isinstance(decoded, RawNotificationParameters)
         assert decoded.tag_number == 6
         assert decoded.raw_data == raw_content
@@ -1017,7 +1019,7 @@ class TestRawNotificationParameters:
 
     def test_reserved_tag_empty_content(self):
         wire = encode_opening_tag(6) + encode_closing_tag(6)
-        decoded, offset = decode_notification_parameters(memoryview(wire))
+        decoded, _offset = decode_notification_parameters(memoryview(wire))
         assert isinstance(decoded, RawNotificationParameters)
         assert decoded.tag_number == 6
         assert decoded.raw_data == b""
@@ -1029,11 +1031,12 @@ class TestRawNotificationParameters:
 
 
 class TestFactoryDispatch:
-    """Verify that decode_notification_parameters returns the correct subclass
-    for each known EventType / tag number.
+    """Verify decode_notification_parameters returns the correct subclass.
+
+    Checks each known EventType / tag number.
     """
 
-    DISPATCH_TABLE = [
+    DISPATCH_TABLE: ClassVar[list[tuple[type, int]]] = [
         (ChangeOfBitstring, 0),
         (ChangeOfState, 1),
         (ChangeOfValue, 2),
@@ -1074,7 +1077,7 @@ class TestFactoryDispatch:
 class TestNotificationParametersFromDict:
     """Verify notification_parameters_from_dict dispatches to correct variant."""
 
-    TYPE_MAP = {
+    TYPE_MAP: ClassVar[dict[str, type]] = {
         "change-of-bitstring": ChangeOfBitstring,
         "change-of-state": ChangeOfState,
         "change-of-value": ChangeOfValue,
