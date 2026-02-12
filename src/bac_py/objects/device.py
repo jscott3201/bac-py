@@ -1,4 +1,4 @@
-"""BACnet Device object per ASHRAE 135-2016 Clause 12.11."""
+"""BACnet Device object per ASHRAE 135-2020 Clause 12.11."""
 
 from __future__ import annotations
 
@@ -208,6 +208,24 @@ class DeviceObject(BACnetObject):
             PropertyIdentifier.RESTORE_COMPLETION_TIME,
             int,
             PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.PROFILE_NAME: PropertyDefinition(
+            PropertyIdentifier.PROFILE_NAME,
+            str,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.PROFILE_LOCATION: PropertyDefinition(
+            PropertyIdentifier.PROFILE_LOCATION,
+            str,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.TAGS: PropertyDefinition(
+            PropertyIdentifier.TAGS,
+            list,
+            PropertyAccess.READ_WRITE,
             required=False,
         ),
     }

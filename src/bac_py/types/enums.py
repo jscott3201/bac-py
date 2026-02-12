@@ -555,6 +555,9 @@ class PropertyIdentifier(IntEnum):
     IPV6_DHCP_SERVER = 445
     IPV6_ZONE_INDEX = 446
     VIRTUAL_MAC_ADDRESS_TABLE = 447
+    PROFILE_LOCATION = 484
+    TAGS = 486
+
     PROTOCOL_LEVEL = 482
 
 

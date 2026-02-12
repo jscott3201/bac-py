@@ -1,10 +1,108 @@
-"""Tests for Value Source tracking on commandable objects (Clause 19.5)."""
+"""Tests for commandable object behavior: priority arrays and value source tracking."""
+
+import asyncio
+from typing import ClassVar
+
+import pytest
 
 from bac_py.objects.analog import AnalogOutputObject
+from bac_py.objects.base import BACnetObject, PropertyAccess, PropertyDefinition
 from bac_py.objects.binary import BinaryOutputObject
+from bac_py.services.errors import BACnetError
 from bac_py.types.constructed import BACnetDeviceObjectReference, BACnetValueSource
-from bac_py.types.enums import ObjectType, PropertyIdentifier
+from bac_py.types.enums import ErrorClass, ErrorCode, ObjectType, PropertyIdentifier
 from bac_py.types.primitives import ObjectIdentifier
+
+
+class _CommandableObject(BACnetObject):
+    """Test object with commandable Present Value."""
+
+    OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.ANALOG_OUTPUT
+    PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
+        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
+            PropertyIdentifier.OBJECT_IDENTIFIER,
+            ObjectIdentifier,
+            PropertyAccess.READ_ONLY,
+            required=True,
+        ),
+        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
+            PropertyIdentifier.OBJECT_TYPE,
+            ObjectType,
+            PropertyAccess.READ_ONLY,
+            required=True,
+        ),
+        PropertyIdentifier.PRESENT_VALUE: PropertyDefinition(
+            PropertyIdentifier.PRESENT_VALUE,
+            float,
+            PropertyAccess.READ_WRITE,
+            required=True,
+            default=0.0,
+        ),
+        PropertyIdentifier.RELINQUISH_DEFAULT: PropertyDefinition(
+            PropertyIdentifier.RELINQUISH_DEFAULT,
+            float,
+            PropertyAccess.READ_WRITE,
+            required=False,
+            default=0.0,
+        ),
+    }
+
+    def __init__(self, instance_number: int, **kwargs):
+        super().__init__(instance_number, **kwargs)
+        self._priority_array = [None] * 16
+
+
+class TestCommandPriority:
+    def test_write_defaults_to_priority_16(self):
+        """Commandable writes without explicit priority default to 16 (Clause 19.2)."""
+        obj = _CommandableObject(1)
+        obj.write_property(PropertyIdentifier.PRESENT_VALUE, 42.0)
+        assert obj._priority_array[15] == 42.0  # priority 16 = index 15
+        assert obj.read_property(PropertyIdentifier.PRESENT_VALUE) == 42.0
+
+    def test_write_with_explicit_priority(self):
+        obj = _CommandableObject(1)
+        obj.write_property(PropertyIdentifier.PRESENT_VALUE, 99.0, priority=8)
+        assert obj._priority_array[7] == 99.0  # priority 8 = index 7
+        assert obj.read_property(PropertyIdentifier.PRESENT_VALUE) == 99.0
+
+    def test_higher_priority_wins(self):
+        obj = _CommandableObject(1)
+        obj.write_property(PropertyIdentifier.PRESENT_VALUE, 10.0, priority=16)
+        obj.write_property(PropertyIdentifier.PRESENT_VALUE, 20.0, priority=8)
+        assert obj.read_property(PropertyIdentifier.PRESENT_VALUE) == 20.0
+
+    def test_priority_out_of_range_error(self):
+        """Priority out of range must use SERVICES/PARAMETER_OUT_OF_RANGE."""
+        obj = _CommandableObject(1)
+        with pytest.raises(BACnetError) as exc_info:
+            obj.write_property(PropertyIdentifier.PRESENT_VALUE, 1.0, priority=0)
+        assert exc_info.value.error_class == ErrorClass.SERVICES
+        assert exc_info.value.error_code == ErrorCode.PARAMETER_OUT_OF_RANGE
+
+    def test_priority_17_out_of_range(self):
+        obj = _CommandableObject(1)
+        with pytest.raises(BACnetError) as exc_info:
+            obj.write_property(PropertyIdentifier.PRESENT_VALUE, 1.0, priority=17)
+        assert exc_info.value.error_class == ErrorClass.SERVICES
+        assert exc_info.value.error_code == ErrorCode.PARAMETER_OUT_OF_RANGE
+
+    def test_relinquish_via_none(self):
+        obj = _CommandableObject(1)
+        obj.write_property(PropertyIdentifier.PRESENT_VALUE, 42.0, priority=8)
+        obj.write_property(PropertyIdentifier.PRESENT_VALUE, None, priority=8)
+        # Should fall back to relinquish default
+        assert obj.read_property(PropertyIdentifier.PRESENT_VALUE) == 0.0
+
+    def test_async_write_defaults_priority_16(self):
+        """async_write_property also defaults to priority 16 for commandable."""
+        obj = _CommandableObject(1)
+
+        async def run():
+            await obj.async_write_property(PropertyIdentifier.PRESENT_VALUE, 55.0)
+
+        asyncio.get_event_loop().run_until_complete(run())
+        assert obj._priority_array[15] == 55.0
 
 
 class TestValueSourceInitialization:

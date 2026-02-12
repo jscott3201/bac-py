@@ -184,6 +184,40 @@ for discovering existing routers on the network.
    )
 
 
+.. _extended-discovery:
+
+Extended Discovery
+------------------
+
+Extended discovery *(Annex X)* enriches standard Who-Is / I-Am device
+discovery with profile metadata. After discovering devices on the network,
+:meth:`~bac_py.app.client.BACnetClient.discover_extended` reads each
+device's ``Profile_Name``, ``Profile_Location``, and ``Tags`` properties
+via ReadPropertyMultiple to populate the returned
+:class:`~bac_py.app.client.DiscoveredDevice` with classification metadata.
+Devices that do not support these optional properties gracefully return
+``None`` for the missing fields.
+
+.. code-block:: python
+
+   devices = await client.discover_extended(timeout=3.0)
+   for dev in devices:
+       print(dev.instance, dev.profile_name, dev.tags)
+
+Hierarchy traversal via
+:meth:`~bac_py.app.client.BACnetClient.traverse_hierarchy` reads
+``Subordinate_List`` from Structured View objects and recursively descends
+to collect all object identifiers in a device's object hierarchy:
+
+.. code-block:: python
+
+   from bac_py.types.primitives import ObjectIdentifier
+   from bac_py.types.enums import ObjectType
+
+   root = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
+   all_objects = await client.traverse_hierarchy(device_addr, root)
+
+
 .. _bacnet-ipv6:
 
 BACnet/IPv6
@@ -298,6 +332,40 @@ polling, COV, or triggered acquisition modes. Configurable buffer sizes and
 circular buffer management.
 
 See :ref:`trend-logging-example` for a usage example.
+
+
+.. _time-series-exchange:
+
+Time Series Data Exchange
+-------------------------
+
+Standardized export and import of trend log data *(Annex AA)* in JSON and
+CSV formats via :class:`~bac_py.encoding.time_series.TimeSeriesExporter`
+and :class:`~bac_py.encoding.time_series.TimeSeriesImporter`.
+
+.. code-block:: python
+
+   from bac_py.encoding.time_series import TimeSeriesExporter, TimeSeriesImporter
+
+   # Export to JSON
+   json_str = TimeSeriesExporter.to_json(
+       log_records,
+       metadata={"object_name": "Zone Temp Log"},
+       pretty=True,
+   )
+
+   # Export to CSV
+   csv_str = TimeSeriesExporter.to_csv(log_records)
+
+   # Import from JSON
+   records, metadata = TimeSeriesImporter.from_json(json_str)
+
+   # Import from CSV
+   records = TimeSeriesImporter.from_csv(csv_str)
+
+The JSON format uses the ``bacnet-time-series-v1`` schema with optional
+metadata. CSV uses ISO 8601 timestamps with BACnet wildcard support
+(``*`` for unspecified fields).
 
 
 .. _audit-logging:

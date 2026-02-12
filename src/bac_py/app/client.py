@@ -1,4 +1,4 @@
-"""High-level BACnet client API per ASHRAE 135-2016."""
+"""High-level BACnet client API per ASHRAE 135-2020."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import contextlib
 import enum
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from bac_py.encoding.primitives import (
     decode_all_application_values,
@@ -168,6 +168,15 @@ class DiscoveredDevice:
 
     segmentation_supported: Segmentation
     """Segmentation support level."""
+
+    profile_name: str | None = None
+    """Profile name from extended discovery (Annex X), or ``None``."""
+
+    profile_location: str | None = None
+    """Profile location from extended discovery (Annex X), or ``None``."""
+
+    tags: list[dict[str, Any]] | None = None
+    """Tags from extended discovery (Annex X), or ``None``."""
 
     @property
     def address_str(self) -> str:
@@ -1144,6 +1153,151 @@ class BACnetClient:
             timeout=timeout,
             expected_count=expected_count,
         )
+
+    async def discover_extended(
+        self,
+        low_limit: int | None = None,
+        high_limit: int | None = None,
+        destination: BACnetAddress = GLOBAL_BROADCAST,
+        timeout: float = 3.0,
+        expected_count: int | None = None,
+        enrich_timeout: float = 5.0,
+    ) -> list[DiscoveredDevice]:
+        """Discover devices and enrich with profile metadata (Annex X).
+
+        Calls :meth:`discover` to get the initial device list, then for
+        each device reads ``PROFILE_NAME``, ``PROFILE_LOCATION``, and
+        ``TAGS`` via ReadPropertyMultiple to populate extended fields.
+
+        :param low_limit: Optional lower bound of device instance range.
+        :param high_limit: Optional upper bound of device instance range.
+        :param destination: Broadcast address (default: global broadcast).
+        :param timeout: Seconds to wait for Who-Is responses.
+        :param expected_count: Return early once this many devices respond.
+        :param enrich_timeout: Per-device timeout for RPM enrichment.
+        :returns: List of :class:`DiscoveredDevice` with profile metadata.
+        """
+        from bac_py.services.errors import BACnetError, BACnetTimeoutError
+        from bac_py.services.read_property_multiple import PropertyReference
+
+        devices = await self.discover(
+            low_limit=low_limit,
+            high_limit=high_limit,
+            destination=destination,
+            timeout=timeout,
+            expected_count=expected_count,
+        )
+
+        enriched: list[DiscoveredDevice] = []
+        for dev in devices:
+            profile_name: str | None = None
+            profile_location: str | None = None
+            tags: list[dict[str, Any]] | None = None
+
+            try:
+                spec = ReadAccessSpecification(
+                    object_identifier=ObjectIdentifier(ObjectType.DEVICE, dev.instance),
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.PROFILE_NAME),
+                        PropertyReference(PropertyIdentifier.PROFILE_LOCATION),
+                        PropertyReference(PropertyIdentifier.TAGS),
+                    ],
+                )
+                ack = await self.read_property_multiple(
+                    dev.address, [spec], timeout=enrich_timeout
+                )
+                for result in ack.list_of_read_access_results:
+                    for elem in result.list_of_results:
+                        if elem.property_access_error is not None:
+                            continue
+                        pid = elem.property_identifier
+                        val = elem.property_value
+                        if pid == PropertyIdentifier.PROFILE_NAME:
+                            profile_name = val if isinstance(val, str) else None
+                        elif pid == PropertyIdentifier.PROFILE_LOCATION:
+                            profile_location = val if isinstance(val, str) else None
+                        elif pid == PropertyIdentifier.TAGS and isinstance(val, list):
+                            tags = val
+            except (BACnetError, BACnetTimeoutError, TimeoutError):
+                pass
+
+            enriched.append(
+                DiscoveredDevice(
+                    address=dev.address,
+                    instance=dev.instance,
+                    vendor_id=dev.vendor_id,
+                    max_apdu_length=dev.max_apdu_length,
+                    segmentation_supported=dev.segmentation_supported,
+                    profile_name=profile_name,
+                    profile_location=profile_location,
+                    tags=tags,
+                )
+            )
+
+        return enriched
+
+    async def traverse_hierarchy(
+        self,
+        address: BACnetAddress,
+        root: ObjectIdentifier,
+        *,
+        max_depth: int = 10,
+        timeout: float | None = None,
+    ) -> list[ObjectIdentifier]:
+        """Traverse a Structured View hierarchy via subordinate lists.
+
+        Reads ``SUBORDINATE_LIST`` from the *root* Structured View object,
+        then recursively descends into any subordinate Structured View
+        objects up to *max_depth* levels.
+
+        :param address: Target device address.
+        :param root: Root Structured View object identifier.
+        :param max_depth: Maximum recursion depth (prevents cycles).
+        :param timeout: Optional per-request timeout in seconds.
+        :returns: Flat list of all discovered :class:`ObjectIdentifier`
+            values, including Structured View objects themselves.
+        """
+        result: list[ObjectIdentifier] = []
+        await self._traverse_hierarchy_recursive(address, root, max_depth, timeout, result, set())
+        return result
+
+    async def _traverse_hierarchy_recursive(
+        self,
+        address: BACnetAddress,
+        node: ObjectIdentifier,
+        depth: int,
+        timeout: float | None,
+        result: list[ObjectIdentifier],
+        visited: set[tuple[int, int]],
+    ) -> None:
+        """Recursive helper for :meth:`traverse_hierarchy`."""
+        from bac_py.services.errors import BACnetError, BACnetTimeoutError
+
+        key = (node.object_type, node.instance_number)
+        if key in visited or depth <= 0:
+            return
+        visited.add(key)
+
+        try:
+            ack = await self.read_property(
+                address,
+                node,
+                PropertyIdentifier.SUBORDINATE_LIST,
+                timeout=timeout,
+            )
+            subordinates = ack.property_value
+            if not isinstance(subordinates, list):
+                return
+        except (BACnetError, BACnetTimeoutError, TimeoutError):
+            return
+
+        for sub in subordinates:
+            if isinstance(sub, ObjectIdentifier):
+                result.append(sub)
+                if sub.object_type == ObjectType.STRUCTURED_VIEW:
+                    await self._traverse_hierarchy_recursive(
+                        address, sub, depth - 1, timeout, result, visited
+                    )
 
     async def subscribe_cov(
         self,
