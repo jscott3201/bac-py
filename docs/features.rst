@@ -41,6 +41,19 @@ common operations. See :doc:`getting-started` for a walkthrough.
   (see :ref:`smart-encoding`)
 - **Async context manager** -- ``async with Client(...) as client:`` handles
   startup and shutdown
+- **Alarm management** -- ``get_alarm_summary()``, ``get_event_information()``,
+  ``acknowledge_alarm()`` with string arguments
+- **Extended discovery** -- ``discover_extended()`` enriches Who-Is results
+  with Annex X profile metadata
+- **Text messaging** -- ``send_text_message()`` with confirmed/unconfirmed mode
+- **Backup/restore** -- ``backup()`` and ``restore()`` handle the full
+  Clause 19.1 procedure
+- **Audit log queries** -- ``query_audit_log()`` with string addressing
+- **Property-level COV** -- ``subscribe_cov_property()`` for monitoring
+  specific properties
+- **Top-level server exports** -- ``BACnetApplication``, ``DefaultServerHandlers``,
+  ``DeviceObject``, ``RouterConfig``, ``RouterPortConfig`` importable
+  directly from ``bac_py``
 
 
 .. _smart-encoding:

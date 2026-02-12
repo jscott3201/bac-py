@@ -172,10 +172,8 @@ async with Client(instance_number=999) as client:
 ### Serve Objects on the Network
 
 ```python
-from bac_py.app.application import BACnetApplication, DeviceConfig
-from bac_py.app.server import DefaultServerHandlers
+from bac_py import BACnetApplication, DefaultServerHandlers, DeviceConfig, DeviceObject
 from bac_py.objects.analog import AnalogInputObject
-from bac_py.objects.device import DeviceObject
 from bac_py.types.enums import EngineeringUnits
 
 
@@ -353,15 +351,20 @@ from bac_py.services.errors import (
 
 The [`examples/`](examples/) directory contains runnable scripts:
 
-| File                    | Description                                    |
-| ----------------------- | ---------------------------------------------- |
-| `read_value.py`         | Read properties with short aliases             |
-| `write_value.py`        | Write values with auto-encoding and priority   |
-| `read_multiple.py`      | Read multiple properties from multiple objects |
-| `discover_devices.py`   | Discover devices with Who-Is broadcast         |
-| `monitor_cov.py`        | Subscribe to COV and decode notifications      |
-| `router_discovery.py`   | Discover routers and remote networks           |
-| `foreign_device.py`     | Register as foreign device via BBMD            |
+| File                      | Description                                    |
+| ------------------------- | ---------------------------------------------- |
+| `read_value.py`           | Read properties with short aliases             |
+| `write_value.py`          | Write values with auto-encoding and priority   |
+| `read_multiple.py`        | Read multiple properties from multiple objects |
+| `write_multiple.py`       | Write multiple properties in a single request  |
+| `discover_devices.py`     | Discover devices with Who-Is broadcast         |
+| `extended_discovery.py`   | Extended discovery with profile metadata       |
+| `monitor_cov.py`          | Subscribe to COV and decode notifications      |
+| `alarm_management.py`     | Alarm summary, event info, and acknowledgment  |
+| `text_message.py`         | Send confirmed/unconfirmed text messages       |
+| `backup_restore.py`       | Backup and restore device configuration        |
+| `router_discovery.py`     | Discover routers and remote networks           |
+| `foreign_device.py`       | Register as foreign device via BBMD            |
 
 ## Protocol-Level API
 
@@ -419,7 +422,7 @@ from bac_py.encoding.primitives import (
 ## Testing
 
 ```bash
-# Run the unit test suite (3,795 tests)
+# Run the unit test suite (3,839 tests)
 make test
 
 # With coverage

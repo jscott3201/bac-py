@@ -193,6 +193,22 @@ objects from a remote device:
        print(f"  {obj_id.object_type.name},{obj_id.instance_number}")
 
 
+Extended discovery
+^^^^^^^^^^^^^^^^^^
+
+:meth:`~bac_py.client.Client.discover_extended` enriches standard discovery
+with Annex X profile metadata (``Profile_Name``, ``Profile_Location``,
+``Tags``):
+
+.. code-block:: python
+
+   devices = await client.discover_extended(timeout=3.0, enrich_timeout=5.0)
+   for dev in devices:
+       print(f"  Device {dev.instance}: profile={dev.profile_name}")
+       if dev.tags:
+           print(f"    tags: {dev.tags}")
+
+
 .. _cov-subscriptions:
 
 COV Subscriptions
@@ -231,6 +247,117 @@ property changes on a remote device:
 
 :func:`~bac_py.app.client.decode_cov_values` converts the raw notification
 into a dictionary of property names to decoded Python values.
+
+Property-level COV subscriptions
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+:meth:`~bac_py.client.Client.subscribe_cov_property` monitors a specific
+property rather than the default COV properties for the object type:
+
+.. code-block:: python
+
+   await client.subscribe_cov_property(
+       "192.168.1.100", "ai,1", "pv",
+       process_id=2,
+       cov_increment=0.5,  # notify when value changes by 0.5
+       lifetime=3600,
+   )
+
+
+.. _alarm-management:
+
+Alarm Management
+-----------------
+
+Get alarm summaries, query event information, and acknowledge alarms using
+string-based addressing:
+
+.. code-block:: python
+
+   import datetime
+   from bac_py import Client
+   from bac_py.types.constructed import BACnetTimeStamp
+   from bac_py.types.enums import EventState
+   from bac_py.types.primitives import BACnetTime
+
+   async with Client(instance_number=999) as client:
+       addr = "192.168.1.100"
+
+       # Get a summary of all active alarms
+       alarm_summary = await client.get_alarm_summary(addr)
+       for entry in alarm_summary.list_of_alarm_summaries:
+           print(f"  {entry.object_identifier}: {entry.alarm_state}")
+
+       # Get detailed event information (supports pagination)
+       event_info = await client.get_event_information(addr)
+       for summary in event_info.list_of_event_summaries:
+           print(f"  {summary.object_identifier}: {summary.event_state}")
+
+       # Acknowledge an alarm (string object identifier)
+       now = datetime.datetime.now(tz=datetime.UTC)
+       ts = BACnetTimeStamp(choice=0, value=BACnetTime(now.hour, now.minute, now.second, 0))
+       await client.acknowledge_alarm(
+           addr,
+           acknowledging_process_identifier=1,
+           event_object_identifier="ai,1",
+           event_state_acknowledged=EventState.OFFNORMAL,
+           time_stamp=ts,
+           acknowledgment_source="operator",
+           time_of_acknowledgment=ts,
+       )
+
+
+.. _text-messaging:
+
+Text Messaging
+--------------
+
+Send confirmed (reliable) or unconfirmed (fire-and-forget) text messages:
+
+.. code-block:: python
+
+   from bac_py import Client
+   from bac_py.types.enums import MessagePriority
+
+   async with Client(instance_number=999) as client:
+       # Confirmed text message (waits for acknowledgment)
+       await client.send_text_message("192.168.1.100", "Maintenance at 2pm")
+
+       # Urgent confirmed message
+       await client.send_text_message(
+           "192.168.1.100", "High temperature alarm!",
+           message_priority=MessagePriority.URGENT,
+       )
+
+       # Unconfirmed broadcast message
+       await client.send_text_message(
+           "192.168.1.255", "System restart in 5 minutes",
+           confirmed=False,
+       )
+
+
+.. _backup-restore:
+
+Backup and Restore
+------------------
+
+Back up and restore a remote device's configuration using the high-level API:
+
+.. code-block:: python
+
+   from bac_py import Client
+
+   async with Client(instance_number=999) as client:
+       # Backup: downloads all configuration files
+       backup_data = await client.backup("192.168.1.100", password="admin")
+       print(f"Downloaded {len(backup_data.configuration_files)} file(s)")
+
+       # Restore: uploads configuration files back
+       await client.restore("192.168.1.100", backup_data, password="admin")
+
+The backup/restore procedure follows Clause 19.1: ReinitializeDevice to
+enter backup/restore mode, poll state until ready, transfer files via
+AtomicReadFile/AtomicWriteFile, and ReinitializeDevice to finish.
 
 
 .. _foreign-device-registration:
@@ -313,10 +440,8 @@ uses :class:`~bac_py.app.application.BACnetApplication` and
 .. code-block:: python
 
    import asyncio
-   from bac_py.app.application import BACnetApplication, DeviceConfig
-   from bac_py.app.server import DefaultServerHandlers
+   from bac_py import BACnetApplication, DefaultServerHandlers, DeviceConfig, DeviceObject
    from bac_py.objects.analog import AnalogInputObject
-   from bac_py.objects.device import DeviceObject
    from bac_py.types.enums import EngineeringUnits
 
    async def serve():

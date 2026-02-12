@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING
 
 from bac_py.app.application import BACnetApplication, DeviceConfig, ForeignDeviceStatus
 from bac_py.app.client import (
+    BackupData,
     BACnetClient,
     BDTEntryInfo,
     DiscoveredDevice,
@@ -32,6 +33,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from bac_py.network.address import BACnetAddress
+    from bac_py.services.alarm_summary import (
+        GetAlarmSummaryACK,
+        GetEnrollmentSummaryACK,
+        GetEventInformationACK,
+    )
+    from bac_py.services.audit import AuditLogQueryACK
     from bac_py.services.cov import COVNotificationRequest
     from bac_py.services.file_access import (
         AtomicReadFileACK,
@@ -56,8 +63,14 @@ if TYPE_CHECKING:
     from bac_py.services.who_has import IHaveRequest
     from bac_py.services.who_is import IAmRequest
     from bac_py.services.write_property_multiple import WriteAccessSpecification
+    from bac_py.types.audit_types import AuditQueryBySource, AuditQueryByTarget
+    from bac_py.types.constructed import BACnetTimeStamp
     from bac_py.types.enums import (
+        AcknowledgmentFilter,
         EnableDisable,
+        EventState,
+        EventType,
+        MessagePriority,
         ObjectType,
         PropertyIdentifier,
         ReinitializedState,
@@ -276,6 +289,377 @@ class Client:
             timeout=timeout,
         )
 
+    # --- Discovery ---
+
+    async def discover_extended(
+        self,
+        low_limit: int | None = None,
+        high_limit: int | None = None,
+        destination: str | BACnetAddress | None = None,
+        timeout: float = 3.0,
+        expected_count: int | None = None,
+        enrich_timeout: float = 5.0,
+    ) -> list[DiscoveredDevice]:
+        """Discover devices and enrich with profile metadata (Annex X).
+
+        Like :meth:`discover`, but also reads ``Profile_Name``,
+        ``Profile_Location``, and ``Tags`` from each device.
+
+        :param low_limit: Optional lower bound of device instance range.
+        :param high_limit: Optional upper bound of device instance range.
+        :param destination: Broadcast address. Accepts an IP string
+            (e.g. ``"192.168.1.255"``), a :class:`BACnetAddress`,
+            or ``None`` for global broadcast.
+        :param timeout: Seconds to wait for Who-Is responses.
+        :param expected_count: Return early once this many devices respond.
+        :param enrich_timeout: Per-device timeout for RPM enrichment.
+        :returns: List of :class:`DiscoveredDevice` with profile metadata.
+        """
+        from bac_py.network.address import GLOBAL_BROADCAST, parse_address
+
+        client = self._require_client()
+        dest = (
+            parse_address(destination)
+            if isinstance(destination, str)
+            else (destination if destination is not None else GLOBAL_BROADCAST)
+        )
+        return await client.discover_extended(
+            low_limit=low_limit,
+            high_limit=high_limit,
+            destination=dest,
+            timeout=timeout,
+            expected_count=expected_count,
+            enrich_timeout=enrich_timeout,
+        )
+
+    # --- Alarm management ---
+
+    async def get_alarm_summary(
+        self,
+        address: str | BACnetAddress,
+        timeout: float | None = None,
+    ) -> GetAlarmSummaryACK:
+        """Get a summary of active alarms from a device.
+
+        :param address: Target device address (IP string or
+            :class:`BACnetAddress`).
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`GetAlarmSummaryACK` with alarm entries.
+        """
+        from bac_py.network.address import parse_address
+
+        client = self._require_client()
+        addr = parse_address(address) if isinstance(address, str) else address
+        return await client.get_alarm_summary(addr, timeout=timeout)
+
+    async def get_enrollment_summary(
+        self,
+        address: str | BACnetAddress,
+        acknowledgment_filter: AcknowledgmentFilter,
+        event_state_filter: EventState | None = None,
+        event_type_filter: EventType | None = None,
+        priority_min: int | None = None,
+        priority_max: int | None = None,
+        notification_class_filter: int | None = None,
+        timeout: float | None = None,
+    ) -> GetEnrollmentSummaryACK:
+        """Get a filtered summary of event enrollments from a device.
+
+        :param address: Target device address (IP string or
+            :class:`BACnetAddress`).
+        :param acknowledgment_filter: Filter by acknowledgment state.
+        :param event_state_filter: Optional filter by event state.
+        :param event_type_filter: Optional filter by event type.
+        :param priority_min: Optional minimum priority (0--255).
+        :param priority_max: Optional maximum priority (0--255).
+        :param notification_class_filter: Optional notification class filter.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`GetEnrollmentSummaryACK`.
+        """
+        from bac_py.network.address import parse_address
+
+        client = self._require_client()
+        addr = parse_address(address) if isinstance(address, str) else address
+        return await client.get_enrollment_summary(
+            addr,
+            acknowledgment_filter,
+            event_state_filter=event_state_filter,
+            event_type_filter=event_type_filter,
+            priority_min=priority_min,
+            priority_max=priority_max,
+            notification_class_filter=notification_class_filter,
+            timeout=timeout,
+        )
+
+    async def get_event_information(
+        self,
+        address: str | BACnetAddress,
+        last_received_object_identifier: (
+            str | tuple[str | ObjectType | int, int] | ObjectIdentifier | None
+        ) = None,
+        timeout: float | None = None,
+    ) -> GetEventInformationACK:
+        """Get event state information from a device.
+
+        :param address: Target device address (IP string or
+            :class:`BACnetAddress`).
+        :param last_received_object_identifier: Optional object identifier
+            for pagination (e.g. ``"ai,1"``). Pass the last object from a
+            previous response when ``more_events`` is ``True``.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`GetEventInformationACK` with event summaries.
+        """
+        from bac_py.network.address import parse_address
+        from bac_py.types.parsing import parse_object_identifier
+
+        client = self._require_client()
+        addr = parse_address(address) if isinstance(address, str) else address
+        last_oid = (
+            parse_object_identifier(last_received_object_identifier)
+            if last_received_object_identifier is not None
+            else None
+        )
+        return await client.get_event_information(
+            addr, last_received_object_identifier=last_oid, timeout=timeout
+        )
+
+    async def acknowledge_alarm(
+        self,
+        address: str | BACnetAddress,
+        acknowledging_process_identifier: int,
+        event_object_identifier: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
+        event_state_acknowledged: EventState,
+        time_stamp: BACnetTimeStamp,
+        acknowledgment_source: str,
+        time_of_acknowledgment: BACnetTimeStamp,
+        timeout: float | None = None,
+    ) -> None:
+        """Acknowledge an alarm on a remote device.
+
+        :param address: Target device address (IP string or
+            :class:`BACnetAddress`).
+        :param acknowledging_process_identifier: Process ID of the acknowledger.
+        :param event_object_identifier: Object whose event is being
+            acknowledged (e.g. ``"ai,1"``).
+        :param event_state_acknowledged: Event state being acknowledged.
+        :param time_stamp: Time stamp of the event being acknowledged.
+        :param acknowledgment_source: Character string identifying the source.
+        :param time_of_acknowledgment: Time stamp of the acknowledgment.
+        :param timeout: Optional caller-level timeout in seconds.
+        """
+        from bac_py.network.address import parse_address
+        from bac_py.types.parsing import parse_object_identifier
+
+        client = self._require_client()
+        addr = parse_address(address) if isinstance(address, str) else address
+        obj_id = parse_object_identifier(event_object_identifier)
+        await client.acknowledge_alarm(
+            addr,
+            acknowledging_process_identifier,
+            obj_id,
+            event_state_acknowledged,
+            time_stamp,
+            acknowledgment_source,
+            time_of_acknowledgment,
+            timeout=timeout,
+        )
+
+    # --- Text messaging ---
+
+    async def send_text_message(
+        self,
+        destination: str | BACnetAddress,
+        message: str,
+        *,
+        confirmed: bool = True,
+        message_priority: MessagePriority | None = None,
+        message_class_numeric: int | None = None,
+        message_class_character: str | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        """Send a text message to a device or broadcast address.
+
+        :param destination: Target address (IP string or
+            :class:`BACnetAddress`).
+        :param message: Text message content.
+        :param confirmed: ``True`` for confirmed delivery (default),
+            ``False`` for unconfirmed (fire-and-forget).
+        :param message_priority: Message priority. Defaults to ``NORMAL``.
+        :param message_class_numeric: Optional numeric message class.
+        :param message_class_character: Optional character message class.
+        :param timeout: Optional caller-level timeout (confirmed only).
+        """
+        from bac_py.network.address import parse_address
+        from bac_py.types.enums import MessagePriority
+
+        client = self._require_client()
+        addr = parse_address(destination) if isinstance(destination, str) else destination
+        priority = message_priority if message_priority is not None else MessagePriority.NORMAL
+        source_device = self.app.device_object_identifier
+        if confirmed:
+            await client.send_confirmed_text_message(
+                addr,
+                source_device,
+                message,
+                message_priority=priority,
+                message_class_numeric=message_class_numeric,
+                message_class_character=message_class_character,
+                timeout=timeout,
+            )
+        else:
+            client.send_unconfirmed_text_message(
+                addr,
+                source_device,
+                message,
+                message_priority=priority,
+                message_class_numeric=message_class_numeric,
+                message_class_character=message_class_character,
+            )
+
+    # --- Backup and restore ---
+
+    async def backup(
+        self,
+        address: str | BACnetAddress,
+        password: str | None = None,
+        poll_interval: float = 1.0,
+        timeout: float | None = None,
+    ) -> BackupData:
+        """Back up a remote BACnet device's configuration.
+
+        Executes the full backup procedure (Clause 19.1):
+        start backup, poll state, download config files, end backup.
+
+        :param address: Target device address (IP string or
+            :class:`BACnetAddress`).
+        :param password: Optional password for ReinitializeDevice.
+        :param poll_interval: Seconds between state polls.
+        :param timeout: Optional overall timeout in seconds.
+        :returns: :class:`BackupData` with downloaded configuration files.
+        """
+        from bac_py.network.address import parse_address
+
+        client = self._require_client()
+        addr = parse_address(address) if isinstance(address, str) else address
+        return await client.backup_device(
+            addr, password=password, poll_interval=poll_interval, timeout=timeout
+        )
+
+    async def restore(
+        self,
+        address: str | BACnetAddress,
+        backup_data: BackupData,
+        password: str | None = None,
+        poll_interval: float = 1.0,
+        timeout: float | None = None,
+    ) -> None:
+        """Restore a remote BACnet device from backup data.
+
+        Executes the full restore procedure (Clause 19.1):
+        start restore, poll state, upload config files, end restore.
+
+        :param address: Target device address (IP string or
+            :class:`BACnetAddress`).
+        :param backup_data: :class:`BackupData` from a previous :meth:`backup`.
+        :param password: Optional password for ReinitializeDevice.
+        :param poll_interval: Seconds between state polls.
+        :param timeout: Optional overall timeout in seconds.
+        """
+        from bac_py.network.address import parse_address
+
+        client = self._require_client()
+        addr = parse_address(address) if isinstance(address, str) else address
+        await client.restore_device(
+            addr, backup_data, password=password, poll_interval=poll_interval, timeout=timeout
+        )
+
+    # --- Audit ---
+
+    async def query_audit_log(
+        self,
+        address: str | BACnetAddress,
+        audit_log: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
+        query_parameters: AuditQueryByTarget | AuditQueryBySource,
+        start_at_sequence_number: int | None = None,
+        requested_count: int = 100,
+        timeout: float | None = None,
+    ) -> AuditLogQueryACK:
+        """Query audit log records from a device.
+
+        :param address: Target device address (IP string or
+            :class:`BACnetAddress`).
+        :param audit_log: Audit Log object identifier (e.g.
+            ``"audit-log,1"``).
+        :param query_parameters: Query by target or source.
+        :param start_at_sequence_number: Optional starting sequence number.
+        :param requested_count: Maximum records to return (default 100).
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`AuditLogQueryACK`.
+        """
+        from bac_py.network.address import parse_address
+        from bac_py.types.parsing import parse_object_identifier
+
+        client = self._require_client()
+        addr = parse_address(address) if isinstance(address, str) else address
+        log_oid = parse_object_identifier(audit_log)
+        return await client.query_audit_log(
+            addr,
+            log_oid,
+            query_parameters,
+            start_at_sequence_number=start_at_sequence_number,
+            requested_count=requested_count,
+            timeout=timeout,
+        )
+
+    # --- COV property-level subscriptions ---
+
+    async def subscribe_cov_property(
+        self,
+        address: str | BACnetAddress,
+        object_identifier: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
+        property_identifier: str | int | PropertyIdentifier,
+        process_id: int,
+        confirmed: bool = True,
+        lifetime: int | None = None,
+        property_array_index: int | None = None,
+        cov_increment: float | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        """Subscribe to property-level COV notifications.
+
+        Like :meth:`subscribe_cov_ex` but monitors a specific property
+        rather than the default COV properties for the object type.
+
+        :param address: Target device address (IP string or
+            :class:`BACnetAddress`).
+        :param object_identifier: Object to monitor (e.g. ``"ai,1"``).
+        :param property_identifier: Property to monitor (e.g. ``"pv"``).
+        :param process_id: Subscriber process identifier (caller-managed).
+        :param confirmed: ``True`` for confirmed notifications.
+        :param lifetime: Subscription lifetime in seconds, or ``None``.
+        :param property_array_index: Optional array index within the property.
+        :param cov_increment: Optional COV increment override.
+        :param timeout: Optional caller-level timeout in seconds.
+        """
+        from bac_py.network.address import parse_address
+        from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
+
+        client = self._require_client()
+        addr = parse_address(address) if isinstance(address, str) else address
+        obj_id = parse_object_identifier(object_identifier)
+        prop_id = parse_property_identifier(property_identifier)
+        await client.subscribe_cov_property(
+            addr,
+            obj_id,
+            prop_id,
+            process_id,
+            confirmed=confirmed,
+            lifetime=lifetime,
+            property_array_index=property_array_index,
+            cov_increment=cov_increment,
+            timeout=timeout,
+        )
+
     # --- Protocol-level API ---
 
     async def read_property(
@@ -476,34 +860,65 @@ class Client:
 
     async def device_communication_control(
         self,
-        address: BACnetAddress,
-        enable_disable: EnableDisable,
+        address: str | BACnetAddress,
+        enable_disable: str | EnableDisable,
         time_duration: int | None = None,
         password: str | None = None,
         timeout: float | None = None,
     ) -> None:
         """Send DeviceCommunicationControl-Request.
 
-        See :meth:`~bac_py.app.client.BACnetClient.device_communication_control`.
+        :param address: Target device address (IP string or
+            :class:`BACnetAddress`).
+        :param enable_disable: State to set. Accepts a string
+            (``"enable"``, ``"disable"``, ``"disable-initiation"``)
+            or :class:`EnableDisable` enum.
+        :param time_duration: Optional duration in minutes.
+        :param password: Optional password.
+        :param timeout: Optional caller-level timeout in seconds.
         """
-        await self._require_client().device_communication_control(
-            address, enable_disable, time_duration, password, timeout=timeout
+        from bac_py.network.address import parse_address
+        from bac_py.types.enums import EnableDisable
+
+        client = self._require_client()
+        addr = parse_address(address) if isinstance(address, str) else address
+        if isinstance(enable_disable, str):
+            name = enable_disable.strip().upper().replace("-", "_")
+            state = EnableDisable[name]
+        else:
+            state = enable_disable
+        await client.device_communication_control(
+            addr, state, time_duration, password, timeout=timeout
         )
 
     async def reinitialize_device(
         self,
-        address: BACnetAddress,
-        reinitialized_state: ReinitializedState,
+        address: str | BACnetAddress,
+        reinitialized_state: str | ReinitializedState,
         password: str | None = None,
         timeout: float | None = None,
     ) -> None:
         """Send ReinitializeDevice-Request.
 
-        See :meth:`~bac_py.app.client.BACnetClient.reinitialize_device`.
+        :param address: Target device address (IP string or
+            :class:`BACnetAddress`).
+        :param reinitialized_state: State to set. Accepts a string
+            (``"coldstart"``, ``"warmstart"``, ``"start-backup"``, etc.)
+            or :class:`ReinitializedState` enum.
+        :param password: Optional password.
+        :param timeout: Optional caller-level timeout in seconds.
         """
-        await self._require_client().reinitialize_device(
-            address, reinitialized_state, password, timeout=timeout
-        )
+        from bac_py.network.address import parse_address
+        from bac_py.types.enums import ReinitializedState
+
+        client = self._require_client()
+        addr = parse_address(address) if isinstance(address, str) else address
+        if isinstance(reinitialized_state, str):
+            name = reinitialized_state.strip().upper().replace("-", "_")
+            state = ReinitializedState[name]
+        else:
+            state = reinitialized_state
+        await client.reinitialize_device(addr, state, password, timeout=timeout)
 
     def time_synchronization(
         self,
@@ -561,30 +976,60 @@ class Client:
 
     async def create_object(
         self,
-        address: BACnetAddress,
-        object_type: ObjectType | None = None,
-        object_identifier: ObjectIdentifier | None = None,
+        address: str | BACnetAddress,
+        object_type: str | ObjectType | None = None,
+        object_identifier: str
+        | tuple[str | ObjectType | int, int]
+        | ObjectIdentifier
+        | None = None,
         timeout: float | None = None,
     ) -> ObjectIdentifier:
         """Send CreateObject-Request.
 
-        See :meth:`~bac_py.app.client.BACnetClient.create_object`.
+        :param address: Target device address (IP string or
+            :class:`BACnetAddress`).
+        :param object_type: Object type to create. Accepts a string alias
+            (e.g. ``"av"`` or ``"analog-value"``) or :class:`ObjectType`.
+        :param object_identifier: Specific object identifier to create
+            (e.g. ``"av,1"``). If provided, *object_type* is ignored.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: :class:`ObjectIdentifier` of the newly created object.
         """
-        return await self._require_client().create_object(
-            address, object_type, object_identifier, timeout=timeout
-        )
+        from bac_py.network.address import parse_address
+        from bac_py.types.parsing import _resolve_object_type, parse_object_identifier
+
+        client = self._require_client()
+        addr = parse_address(address) if isinstance(address, str) else address
+        resolved_type: ObjectType | None = None
+        resolved_oid: ObjectIdentifier | None = None
+        if object_identifier is not None:
+            resolved_oid = parse_object_identifier(object_identifier)
+        elif object_type is not None:
+            resolved_type = (
+                _resolve_object_type(object_type) if isinstance(object_type, str) else object_type
+            )
+        return await client.create_object(addr, resolved_type, resolved_oid, timeout=timeout)
 
     async def delete_object(
         self,
-        address: BACnetAddress,
-        object_identifier: ObjectIdentifier,
+        address: str | BACnetAddress,
+        object_identifier: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
         timeout: float | None = None,
     ) -> None:
         """Send DeleteObject-Request.
 
-        See :meth:`~bac_py.app.client.BACnetClient.delete_object`.
+        :param address: Target device address (IP string or
+            :class:`BACnetAddress`).
+        :param object_identifier: Object to delete (e.g. ``"av,1"``).
+        :param timeout: Optional caller-level timeout in seconds.
         """
-        await self._require_client().delete_object(address, object_identifier, timeout=timeout)
+        from bac_py.network.address import parse_address
+        from bac_py.types.parsing import parse_object_identifier
+
+        client = self._require_client()
+        addr = parse_address(address) if isinstance(address, str) else address
+        obj_id = parse_object_identifier(object_identifier)
+        await client.delete_object(addr, obj_id, timeout=timeout)
 
     async def add_list_element(
         self,

@@ -1,92 +1,147 @@
-# Phase 6 -- Operational Completeness Implementation Plan
+# High-Level API & Examples Improvement Plan
 
-## Scope Analysis
+## Analysis Summary
 
-Phase 6 has 4 sub-phases making Schedule, Calendar, TrendLog, and Binary Output
-objects operationally functional. Object shells and types already exist; we need
-the evaluation engines and enforcement logic.
+### Current State
 
-### Step 1. Calendar Evaluation Logic (Clause 12.9)
+The `Client` class wraps `BACnetClient` with 2 tiers:
+- **High-level (string-based):** `read`, `write`, `read_multiple`, `write_multiple`, `get_object_list`, `discover`, `who_is`, `who_has`, `subscribe_cov_ex`, `unsubscribe_cov_ex`
+- **Low-level pass-through:** Everything else -- requires typed `BACnetAddress`, `ObjectIdentifier`, `PropertyIdentifier`, raw bytes
 
-**File: `src/bac_py/objects/calendar.py`**
+### Problems Identified
 
-Add `evaluate(date)` method to `CalendarObject`:
-- Iterate `date_list` (list of `BACnetCalendarEntry` items)
-- For each entry, match against current date:
-  - `choice=0` (BACnetDate): match year/month/day with wildcard support (0xFF=any,
-    month 13=odd, 14=even, day 32=last, 33=odd, 34=even)
-  - `choice=1` (BACnetDateRange): inclusive range check
-  - `choice=2` (BACnetWeekNDay): match month/week-of-month/day-of-week patterns
-- Set `present_value = True` if any entry matches, `False` otherwise
+**1. Missing high-level wrappers for common user tasks**
 
-**Helper function**: `_matches_date()` for BACnetDate wildcard matching (reusable
-by Schedule engine).
+These `BACnetClient` methods have no `Client` wrapper at all:
 
-### Step 2. Schedule and Calendar Evaluation Engine (Clause 12.24)
+| Method | User Task | Difficulty for Beginners |
+|--------|-----------|------------------------|
+| `discover_extended()` | See device profiles/tags | Must use `BACnetClient` directly |
+| `get_alarm_summary()` | Monitor active alarms | Must use `BACnetClient` directly |
+| `get_event_information()` | Check event states | Must use `BACnetClient` directly |
+| `acknowledge_alarm()` | Acknowledge an alarm | Must use `BACnetClient` directly |
+| `backup_device()` | Back up a device | Must use `BACnetClient` directly |
+| `restore_device()` | Restore a device | Must use `BACnetClient` directly |
+| `send_confirmed_text_message()` | Send a text message | Must use `BACnetClient` directly |
+| `send_unconfirmed_text_message()` | Send a text message (broadcast) | Must use `BACnetClient` directly |
+| `subscribe_cov_property()` | COV on specific property | Must use `BACnetClient` directly |
+| `query_audit_log()` | Query audit records | Must use `BACnetClient` directly |
 
-**New file: `src/bac_py/app/schedule_engine.py`**
+**2. Existing Client methods that are low-level only**
 
-`ScheduleEngine` class following `EventEngine` lifecycle pattern (start/stop/async loop):
+These ARE on `Client` but still require typed objects, defeating the convenience pattern:
 
-1. **Calendar evaluation**: On each cycle, update all CalendarObject `present_value`
-2. **Schedule evaluation** per Clause 12.24.4-12.24.9:
-   - Check `effective_period` -- outside → use `schedule_default`
-   - Check `exception_schedule` -- highest-priority BACnetSpecialEvent that matches
-     today; if entry's `period` is a CalendarEntry, match directly; if ObjectIdentifier
-     (referencing a Calendar), check that Calendar's `present_value`
-   - Fall back to `weekly_schedule[day_of_week]` (0=Monday..6=Sunday)
-   - Within matching day: find latest `BACnetTimeValue` with `time <= current_time`
-   - No match: use `schedule_default`
-3. **Output writing**: On value change, write to each target in
-   `list_of_object_property_references` at `priority_for_writing`
+| Method | Requires |
+|--------|----------|
+| `create_object()` | `ObjectType` or `ObjectIdentifier` |
+| `delete_object()` | `ObjectIdentifier` |
+| `add_list_element()` | `ObjectIdentifier`, `PropertyIdentifier`, raw bytes |
+| `remove_list_element()` | `ObjectIdentifier`, `PropertyIdentifier`, raw bytes |
+| `device_communication_control()` | `BACnetAddress`, `EnableDisable` enum |
+| `reinitialize_device()` | `BACnetAddress`, `ReinitializedState` enum |
+| `atomic_read_file()` | `BACnetAddress`, `ObjectIdentifier`, access method |
+| `atomic_write_file()` | `BACnetAddress`, `ObjectIdentifier`, access method |
 
-**Lifecycle**: `start()` → async loop → `stop()`. Default scan interval 10 seconds.
+**3. Example gaps**
 
-### Step 3. Trend Log Recording Engine (Clause 12.25)
+No example scripts exist for:
+- Alarm management (acknowledge, summary, event info)
+- Backup/restore
+- Text messaging
+- ReadRange / trend log data retrieval
+- Extended discovery (device profiles)
+- Audit log queries
+- WritePropertyMultiple (write_multiple)
 
-**New file: `src/bac_py/app/trendlog_engine.py`**
+**4. Inconsistencies**
 
-`TrendLogEngine` class with async lifecycle:
+- `who_is()` / `discover()` accept string destinations, but `device_communication_control()` / `reinitialize_device()` require `BACnetAddress`
+- `subscribe_cov_ex()` accepts strings, but `subscribe_cov()` requires typed objects (both on Client)
+- `create_object()` / `delete_object()` on Client require typed objects when they could easily accept strings like `"av,1"`
 
-1. **Polled logging** (Clause 12.25.12): Timer per TrendLog at `log_interval`. On
-   tick: read monitored property from object DB, construct `BACnetLogRecord`, append
-   to `log_buffer`. Support `align_intervals` and `interval_offset`.
+**5. Top-level exports missing common types**
 
-2. **Triggered logging** (Clause 12.25.14): When `trigger` property written to True,
-   record and reset to False.
+Users frequently need these but must dig into submodules:
+- `BACnetApplication`, `RouterConfig`, `RouterPortConfig` (for server use)
+- `DefaultServerHandlers` (for server use)
+- `DeviceObject` (for server use)
+- Common object classes (`AnalogInputObject`, etc.) for server use
 
-3. **Buffer management**: Circular overwrite vs stop-when-full. Update `record_count`
-   and `total_record_count`. Helper method on TrendLogObject for `append_record()`.
+---
 
-4. **Log control**: Honor `log_enable`, `start_time`/`stop_time`.
+## Implementation Plan
 
-**COV-based logging** deferred to future work (requires cross-device subscriptions).
+### Phase 1: Add missing high-level wrappers to Client
 
-### Step 4. Minimum On/Off Time Enforcement (Clause 19.2)
+Add string-based convenience wrappers to `Client` for common tasks that currently
+require dropping to `BACnetClient`:
 
-**File: `src/bac_py/objects/binary.py`**
+**1a. `Client.discover_extended(...)` → `list[DiscoveredDevice]`**
+- Same pattern as `discover()` but with profile enrichment
+- Already exists on `BACnetClient`, just needs `Client` wrapper with string destination support
 
-Add timer-based enforcement to `BinaryOutputObject`:
-- On write changing present_value state: start a lock timer for `minimum_on_time`
-  or `minimum_off_time` (in centiseconds per spec, stored as seconds)
-- During lock: writes are accepted into priority array but present_value stays locked
-- On timer expiry: re-evaluate priority array and update present_value
-- Store lock state as `_min_time_lock_until: float | None` timestamp
+**1b. `Client.get_alarm_summary(address)` → `GetAlarmSummaryACK`**
+- Accepts string address
+- Thin wrapper delegating to BACnetClient
 
-### Step 5. Tests
+**1c. `Client.get_event_information(address, ...)` → `GetEventInformationACK`**
+- Accepts string address
+- Thin wrapper delegating to BACnetClient
 
-**New test files:**
-- `tests/objects/test_calendar_eval.py` -- date matching with wildcards, ranges, weekNDay
-- `tests/app/test_schedule_engine.py` -- schedule evaluation, priority resolution, output writes
-- `tests/app/test_trendlog_engine.py` -- polled logging, buffer management, triggered logging
-- `tests/objects/test_min_on_off_time.py` -- minimum time enforcement
+**1d. `Client.acknowledge_alarm(address, object_id, ...)` → `None`**
+- Accepts string address and string object identifier (e.g. `"ai,1"`)
 
-## Verification
+**1e. `Client.send_text_message(destination, source_device, message, ...)` → `None`**
+- Accepts string destination
+- Separate confirmed/unconfirmed via `confirmed=` kwarg
 
-1. `pytest tests/ --ignore=tests/serialization/test_json.py` -- all pass
-2. `.venv/bin/ruff check src/ tests/` -- clean on new files
-3. `.venv/bin/mypy --ignore-missing-imports src/` -- clean
-4. Calendar wildcard matching for all date patterns
-5. Schedule resolves exception > weekly > default correctly
-6. TrendLog records polled and triggered data correctly
-7. Min on/off time prevents rapid state changes
+**1f. `Client.backup(address, ...)` → `BackupData`**
+- Accepts string address
+
+**1g. `Client.restore(address, backup_data, ...)` → `None`**
+- Accepts string address
+
+**1h. `Client.query_audit_log(address, ...)` → `AuditLogQueryACK`**
+- Accepts string address
+
+### Phase 2: Make existing Client methods accept strings
+
+Upgrade existing low-level-only methods on `Client` to accept strings while
+preserving backwards compatibility with typed objects:
+
+**2a. `create_object(address, object_type_str)` → `ObjectIdentifier`**
+- Accept `"av"` or `"analog-value"` in addition to `ObjectType` enum
+- Accept string address in addition to `BACnetAddress`
+
+**2b. `delete_object(address, object_id_str)` → `None`**
+- Accept `"av,1"` in addition to `ObjectIdentifier`
+- Accept string address
+
+**2c. `device_communication_control(address, state, ...)` → `None`**
+- Accept string address
+- Accept string state: `"enable"`, `"disable"`, `"disable-initiation"`
+
+**2d. `reinitialize_device(address, state, ...)` → `None`**
+- Accept string address
+- Accept string state: `"coldstart"`, `"warmstart"`, etc.
+
+### Phase 3: Add missing example scripts
+
+**3a. `examples/write_multiple.py`** -- `write_multiple()` dict API
+**3b. `examples/alarm_management.py`** -- alarm summary, event info, acknowledge
+**3c. `examples/backup_restore.py`** -- backup/restore workflow
+**3d. `examples/text_message.py`** -- sending text messages
+**3e. `examples/extended_discovery.py`** -- discover_extended with profiles
+
+### Phase 4: Expand top-level exports
+
+Add commonly needed server-side types to `bac_py.__init__`:
+- `BACnetApplication`, `RouterConfig`, `RouterPortConfig`
+- `DefaultServerHandlers`
+- `DeviceObject`
+
+### Phase 5: Update documentation
+
+- Update docs/examples.rst with new example scripts
+- Update docs/features.rst convenience API section
+- Update README.md examples table
