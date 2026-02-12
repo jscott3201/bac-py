@@ -393,7 +393,7 @@ class TestAuditReporterObject:
 
         obj = AuditReporterObject(1, object_name="ar-1")
         assert obj.OBJECT_TYPE == ObjectType.AUDIT_REPORTER
-        assert obj.read_property(PropertyIdentifier.AUDIT_LEVEL) == 0
+        assert obj.read_property(PropertyIdentifier.AUDIT_LEVEL) == 3  # AuditLevel.DEFAULT
         assert obj.read_property(PropertyIdentifier.MONITORED_OBJECTS) == []
 
 

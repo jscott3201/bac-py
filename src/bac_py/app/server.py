@@ -12,6 +12,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from bac_py.app._object_type_sets import ANALOG_TYPES
+from bac_py.app.audit import AuditManager
 from bac_py.encoding.primitives import (
     decode_all_application_values,
     decode_and_unwrap,
@@ -31,6 +32,12 @@ from bac_py.services.alarm_summary import (
     GetEnrollmentSummaryRequest,
     GetEventInformationACK,
     GetEventInformationRequest,
+)
+from bac_py.services.audit import (
+    AuditLogQueryACK,
+    AuditLogQueryRequest,
+    ConfirmedAuditNotificationRequest,
+    UnconfirmedAuditNotificationRequest,
 )
 from bac_py.services.cov import (
     COVNotificationMultipleRequest,
@@ -95,6 +102,7 @@ from bac_py.services.write_property_multiple import WritePropertyMultipleRequest
 from bac_py.types.constructed import BACnetTimeStamp
 from bac_py.types.enums import (
     AcknowledgmentFilter,
+    AuditOperation,
     ConfirmedServiceChoice,
     ErrorClass,
     ErrorCode,
@@ -179,6 +187,7 @@ class DefaultServerHandlers:
         self._app = app
         self._db = object_db
         self._device = device
+        self._audit_manager = AuditManager(object_db)
 
     def register(self) -> None:
         """Register all default handlers with the application."""
@@ -327,6 +336,18 @@ class DefaultServerHandlers:
             ConfirmedServiceChoice.VT_DATA,
             self.handle_vt_data,
         )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.AUDIT_LOG_QUERY,
+            self.handle_audit_log_query,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.CONFIRMED_AUDIT_NOTIFICATION,
+            self.handle_confirmed_audit_notification,
+        )
+        registry.register_unconfirmed(
+            UnconfirmedServiceChoice.UNCONFIRMED_AUDIT_NOTIFICATION,
+            self.handle_unconfirmed_audit_notification,
+        )
 
         # Auto-compute Protocol_Services_Supported from registered handlers
         # Per Clause 12.11.44: confirmed services at bit positions matching
@@ -430,6 +451,15 @@ class DefaultServerHandlers:
         cov_manager = self._app.cov_manager
         if cov_manager is not None:
             cov_manager.check_and_notify(obj, request.property_identifier)
+
+        self._audit_manager.record_operation(
+            operation=AuditOperation.WRITE,
+            target_object=obj_id,
+            target_property=request.property_identifier,
+            target_array_index=request.property_array_index,
+            target_priority=request.priority,
+            target_value=request.property_value,
+        )
 
         return None
 
@@ -779,6 +809,14 @@ class DefaultServerHandlers:
                 if cov_manager is not None:
                     cov_manager.check_and_notify(obj, pv.property_identifier)
 
+                self._audit_manager.record_operation(
+                    operation=AuditOperation.WRITE,
+                    target_object=obj.object_identifier,
+                    target_property=pv.property_identifier,
+                    target_array_index=pv.property_array_index,
+                    target_priority=pv.priority,
+                )
+
         return None
 
     async def handle_read_range(
@@ -1083,6 +1121,11 @@ class DefaultServerHandlers:
         obj = create_object(obj_type, instance, **kwargs)
         self._db.add(obj)
 
+        self._audit_manager.record_operation(
+            operation=AuditOperation.CREATE,
+            target_object=obj.object_identifier,
+        )
+
         return encode_application_object_id(obj_type, instance)
 
     async def handle_delete_object(
@@ -1105,6 +1148,11 @@ class DefaultServerHandlers:
         cov_manager = self._app.cov_manager
         if cov_manager is not None:
             cov_manager.remove_object_subscriptions(obj_id)
+
+        self._audit_manager.record_operation(
+            operation=AuditOperation.DELETE,
+            target_object=obj_id,
+        )
 
         return None
 
@@ -1781,3 +1829,87 @@ class DefaultServerHandlers:
         )
         ack = VTDataACK(all_new_data_accepted=True)
         return ack.encode()
+
+    # --- Audit handlers (Clause 13.19-13.21) ---
+
+    async def handle_audit_log_query(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes:
+        """Handle AuditLogQuery-Request per Clause 13.19.
+
+        Queries the specified Audit Log object's buffer.
+
+        :returns: Encoded AuditLogQuery-ACK.
+        :raises BACnetError: If the audit log object is not found.
+        """
+        from bac_py.objects.audit_log import AuditLogObject
+
+        request = AuditLogQueryRequest.decode(data)
+
+        obj = self._db.get(request.audit_log)
+        if obj is None or not isinstance(obj, AuditLogObject):
+            raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
+
+        records, no_more = obj.query_records(
+            start_at=request.start_at_sequence_number,
+            count=request.requested_count,
+        )
+
+        ack = AuditLogQueryACK(
+            audit_log=request.audit_log,
+            records=records,
+            no_more_items=no_more,
+        )
+        return ack.encode()
+
+    async def handle_confirmed_audit_notification(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle ConfirmedAuditNotification-Request per Clause 13.20.
+
+        Appends notifications to Audit Log objects.
+
+        :returns: ``None`` (SimpleACK response).
+        """
+        from bac_py.objects.audit_log import AuditLogObject
+
+        request = ConfirmedAuditNotificationRequest.decode(data)
+        for notification in request.notifications:
+            for obj in self._db.get_objects_of_type(ObjectType.AUDIT_LOG):
+                if isinstance(obj, AuditLogObject):
+                    obj.append_record(notification)
+        logger.debug(
+            "ConfirmedAuditNotification from %s: %d notifications",
+            source,
+            len(request.notifications),
+        )
+        return None
+
+    async def handle_unconfirmed_audit_notification(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Handle UnconfirmedAuditNotification-Request per Clause 13.21.
+
+        Appends notifications to Audit Log objects.
+        """
+        from bac_py.objects.audit_log import AuditLogObject
+
+        request = UnconfirmedAuditNotificationRequest.decode(data)
+        for notification in request.notifications:
+            for obj in self._db.get_objects_of_type(ObjectType.AUDIT_LOG):
+                if isinstance(obj, AuditLogObject):
+                    obj.append_record(notification)
+        logger.debug(
+            "UnconfirmedAuditNotification from %s: %d notifications",
+            source,
+            len(request.notifications),
+        )

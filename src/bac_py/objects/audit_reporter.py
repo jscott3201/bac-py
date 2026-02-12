@@ -13,6 +13,7 @@ from bac_py.objects.base import (
     status_properties,
 )
 from bac_py.types.enums import (
+    AuditLevel,
     ObjectType,
     PropertyIdentifier,
 )
@@ -23,9 +24,7 @@ from bac_py.types.primitives import BitString
 class AuditReporterObject(BACnetObject):
     """BACnet Audit Reporter object (Clause 12.63, new in 2020).
 
-    Monitors objects and generates audit notifications.  Full audit
-    integration is in Phase 4; this provides the object shell with
-    required properties.
+    Monitors objects and generates audit notifications.
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.AUDIT_REPORTER
@@ -38,7 +37,7 @@ class AuditReporterObject(BACnetObject):
             int,
             PropertyAccess.READ_WRITE,
             required=True,
-            default=0,
+            default=AuditLevel.DEFAULT,
         ),
         PropertyIdentifier.AUDITABLE_OPERATIONS: PropertyDefinition(
             PropertyIdentifier.AUDITABLE_OPERATIONS,
@@ -58,6 +57,26 @@ class AuditReporterObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=True,
             default=[],
+        ),
+        PropertyIdentifier.AUDIT_PRIORITY_FILTER: PropertyDefinition(
+            PropertyIdentifier.AUDIT_PRIORITY_FILTER,
+            int,
+            PropertyAccess.READ_WRITE,
+            required=False,
+            default=0,
+        ),
+        PropertyIdentifier.AUDIT_SOURCE_REPORTER: PropertyDefinition(
+            PropertyIdentifier.AUDIT_SOURCE_REPORTER,
+            object,
+            PropertyAccess.READ_ONLY,
+            required=False,
+        ),
+        PropertyIdentifier.MAXIMUM_SEND_DELAY: PropertyDefinition(
+            PropertyIdentifier.MAXIMUM_SEND_DELAY,
+            int,
+            PropertyAccess.READ_WRITE,
+            required=False,
+            default=0,
         ),
     }
 

@@ -30,6 +30,12 @@ from bac_py.services.alarm_summary import (
     GetEventInformationACK,
     GetEventInformationRequest,
 )
+from bac_py.services.audit import (
+    AuditLogQueryACK,
+    AuditLogQueryRequest,
+    ConfirmedAuditNotificationRequest,
+    UnconfirmedAuditNotificationRequest,
+)
 from bac_py.services.cov import (
     BACnetPropertyReference,
     COVNotificationRequest,
@@ -121,6 +127,11 @@ if TYPE_CHECKING:
     from bac_py.app.application import BACnetApplication
     from bac_py.network.address import BACnetAddress
     from bac_py.transport.bip import BIPTransport
+    from bac_py.types.audit_types import (
+        AuditQueryBySource,
+        AuditQueryByTarget,
+        BACnetAuditNotification,
+    )
     from bac_py.types.constructed import BACnetTimeStamp
 
 logger = logging.getLogger(__name__)
@@ -2224,3 +2235,70 @@ class BACnetClient:
             timeout=timeout,
         )
         return VTDataACK.decode(response_data)
+
+    # --- Audit services (Clause 13.19-13.21) ---
+
+    async def query_audit_log(
+        self,
+        address: BACnetAddress,
+        audit_log: ObjectIdentifier,
+        query_parameters: AuditQueryByTarget | AuditQueryBySource,
+        start_at_sequence_number: int | None = None,
+        requested_count: int = 100,
+        timeout: float | None = None,
+    ) -> AuditLogQueryACK:
+        """Send AuditLogQuery-Request per Clause 13.19.
+
+        :param address: Target device address.
+        :param audit_log: Audit Log object identifier.
+        :param query_parameters: Query by target or source.
+        :param start_at_sequence_number: Optional starting sequence number.
+        :param requested_count: Maximum number of records to return.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`AuditLogQueryACK`.
+        :raises BACnetError: On Error-PDU response.
+        """
+        request = AuditLogQueryRequest(
+            audit_log=audit_log,
+            query_parameters=query_parameters,
+            start_at_sequence_number=start_at_sequence_number,
+            requested_count=requested_count,
+        )
+        response_data = await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.AUDIT_LOG_QUERY,
+            service_data=request.encode(),
+            timeout=timeout,
+        )
+        return AuditLogQueryACK.decode(response_data)
+
+    async def send_audit_notification(
+        self,
+        address: BACnetAddress,
+        notifications: list[BACnetAuditNotification],
+        confirmed: bool = True,
+        timeout: float | None = None,
+    ) -> None:
+        """Send audit notification(s) per Clause 13.20/13.21.
+
+        :param address: Target device address.
+        :param notifications: List of audit notifications to send.
+        :param confirmed: ``True`` for confirmed, ``False`` for unconfirmed.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response (confirmed only).
+        """
+        if confirmed:
+            request = ConfirmedAuditNotificationRequest(notifications=notifications)
+            await self._app.confirmed_request(
+                destination=address,
+                service_choice=ConfirmedServiceChoice.CONFIRMED_AUDIT_NOTIFICATION,
+                service_data=request.encode(),
+                timeout=timeout,
+            )
+        else:
+            request = UnconfirmedAuditNotificationRequest(notifications=notifications)
+            self._app.unconfirmed_request(
+                destination=address,
+                service_choice=UnconfirmedServiceChoice.UNCONFIRMED_AUDIT_NOTIFICATION,
+                service_data=request.encode(),
+            )

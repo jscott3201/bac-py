@@ -12,7 +12,9 @@ from bac_py.objects.base import (
     standard_properties,
     status_properties,
 )
+from bac_py.types.audit_types import BACnetAuditLogRecord, BACnetAuditNotification
 from bac_py.types.enums import (
+    AuditLevel,
     ObjectType,
     PropertyIdentifier,
 )
@@ -23,9 +25,7 @@ from bac_py.types.primitives import BitString
 class AuditLogObject(BACnetObject):
     """BACnet Audit Log object (Clause 12.64, new in 2020).
 
-    Circular buffer of audit log records.  Full audit integration
-    including AuditLogQuery is in Phase 4; this provides the object
-    shell with required properties.
+    Circular buffer of audit log records with sequence numbering.
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.AUDIT_LOG
@@ -65,7 +65,7 @@ class AuditLogObject(BACnetObject):
             int,
             PropertyAccess.READ_WRITE,
             required=True,
-            default=0,
+            default=100,
         ),
         PropertyIdentifier.STOP_WHEN_FULL: PropertyDefinition(
             PropertyIdentifier.STOP_WHEN_FULL,
@@ -79,7 +79,7 @@ class AuditLogObject(BACnetObject):
             int,
             PropertyAccess.READ_WRITE,
             required=True,
-            default=0,
+            default=AuditLevel.DEFAULT,
         ),
         PropertyIdentifier.AUDITABLE_OPERATIONS: PropertyDefinition(
             PropertyIdentifier.AUDITABLE_OPERATIONS,
@@ -93,3 +93,61 @@ class AuditLogObject(BACnetObject):
         super().__init__(instance_number, **initial_properties)
         self._init_status_flags()
         self._set_default(PropertyIdentifier.LOG_BUFFER, [])
+        self._sequence_counter = 0
+
+    def append_record(self, notification: BACnetAuditNotification) -> BACnetAuditLogRecord | None:
+        """Append an audit notification to the log buffer.
+
+        Handles circular buffer overflow (oldest records removed) and
+        stop-when-full behavior. Returns the record if it was added.
+        """
+        if not self._properties.get(PropertyIdentifier.LOG_ENABLE, False):
+            return None
+
+        buffer: list[BACnetAuditLogRecord] = self._properties.get(
+            PropertyIdentifier.LOG_BUFFER, []
+        )
+        buffer_size = self._properties.get(PropertyIdentifier.BUFFER_SIZE, 100)
+        stop_when_full = self._properties.get(PropertyIdentifier.STOP_WHEN_FULL, False)
+
+        if stop_when_full and len(buffer) >= buffer_size:
+            return None
+
+        self._sequence_counter += 1
+        record = BACnetAuditLogRecord(
+            sequence_number=self._sequence_counter,
+            notification=notification,
+        )
+
+        if len(buffer) >= buffer_size:
+            # Circular: remove oldest
+            buffer.pop(0)
+
+        buffer.append(record)
+        self._properties[PropertyIdentifier.RECORD_COUNT] = len(buffer)
+        self._properties[PropertyIdentifier.TOTAL_RECORD_COUNT] = self._sequence_counter
+        return record
+
+    def query_records(
+        self,
+        start_at: int | None = None,
+        count: int = 100,
+    ) -> tuple[list[BACnetAuditLogRecord], bool]:
+        """Query records from the log buffer.
+
+        :param start_at: Starting sequence number (inclusive). If None, start from beginning.
+        :param count: Maximum number of records to return.
+        :returns: Tuple of (matching records, no_more_items flag).
+        """
+        buffer: list[BACnetAuditLogRecord] = self._properties.get(
+            PropertyIdentifier.LOG_BUFFER, []
+        )
+
+        if start_at is not None:
+            filtered = [r for r in buffer if r.sequence_number >= start_at]
+        else:
+            filtered = list(buffer)
+
+        result = filtered[:count]
+        no_more = len(filtered) <= count
+        return result, no_more

@@ -341,8 +341,8 @@ class TestDefaultServerHandlersRegister:
         handlers.register()
 
         registry = app.service_registry
-        assert registry.register_confirmed.call_count == 26
-        assert registry.register_unconfirmed.call_count == 10
+        assert registry.register_confirmed.call_count == 28
+        assert registry.register_unconfirmed.call_count == 11
 
 
 class TestHandleReadPropertyMultiple:

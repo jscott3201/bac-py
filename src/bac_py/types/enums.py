@@ -508,6 +508,9 @@ class PropertyIdentifier(IntEnum):
     AUDITABLE_OPERATIONS = 551
     AUDIT_NOTIFICATION_RECIPIENT = 552
     MONITORED_OBJECTS = 553
+    AUDIT_PRIORITY_FILTER = 554
+    AUDIT_SOURCE_REPORTER = 555
+    MAXIMUM_SEND_DELAY = 556
 
     # NetworkPort properties (Clause 12.56, added in revision 17+)
     NETWORK_TYPE = 441
@@ -781,6 +784,8 @@ class ConfirmedServiceChoice(IntEnum):
     GET_EVENT_INFORMATION = 29
     SUBSCRIBE_COV_PROPERTY_MULTIPLE = 30
     CONFIRMED_COV_NOTIFICATION_MULTIPLE = 31
+    CONFIRMED_AUDIT_NOTIFICATION = 32
+    AUDIT_LOG_QUERY = 33
 
 
 class UnconfirmedServiceChoice(IntEnum):
@@ -798,8 +803,9 @@ class UnconfirmedServiceChoice(IntEnum):
     UTC_TIME_SYNCHRONIZATION = 9
     WRITE_GROUP = 10
     UNCONFIRMED_COV_NOTIFICATION_MULTIPLE = 11
-    WHO_AM_I = 12
-    YOU_ARE = 13
+    UNCONFIRMED_AUDIT_NOTIFICATION = 12
+    WHO_AM_I = 13
+    YOU_ARE = 14
 
 
 class NetworkPriority(IntEnum):
@@ -1593,3 +1599,41 @@ class StagingState(IntEnum):
     COMMITTED = 4
     ABANDONING = 5
     ABANDONED = 6
+
+
+class AuditLevel(IntEnum):
+    """BACnet audit level (Clause 19.6, new in 2020)."""
+
+    NONE = 0
+    AUDIT_ALL = 1
+    AUDIT_CONFIG = 2
+    DEFAULT = 3
+
+
+class AuditOperation(IntEnum):
+    """BACnet audit operation (Clause 19.6, new in 2020)."""
+
+    READ = 0
+    WRITE = 1
+    CREATE = 2
+    DELETE = 3
+    LIFE_SAFETY = 4
+    ACKNOWLEDGE_ALARM = 5
+    DEVICE_DISABLE_COMM = 6
+    DEVICE_ENABLE_COMM = 7
+    DEVICE_RESET = 8
+    DEVICE_BACKUP = 9
+    DEVICE_RESTORE = 10
+    SUBSCRIPTION = 11
+    NOTIFICATION = 12
+    AUDITING_FAILURE = 13
+    NETWORK_CHANGES = 14
+    GENERAL = 15
+
+
+class BACnetSuccessFilter(IntEnum):
+    """BACnet success filter for audit log queries (Clause 13.19, new in 2020)."""
+
+    ALL = 0
+    SUCCESSES_ONLY = 1
+    FAILURES_ONLY = 2

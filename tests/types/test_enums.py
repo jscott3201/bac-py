@@ -409,6 +409,12 @@ class TestConfirmedServiceChoice:
     def test_confirmed_cov_notification_multiple(self) -> None:
         assert ConfirmedServiceChoice.CONFIRMED_COV_NOTIFICATION_MULTIPLE == 31
 
+    def test_confirmed_audit_notification(self) -> None:
+        assert ConfirmedServiceChoice.CONFIRMED_AUDIT_NOTIFICATION == 32
+
+    def test_audit_log_query(self) -> None:
+        assert ConfirmedServiceChoice.AUDIT_LOG_QUERY == 33
+
 
 # ---------------------------------------------------------------------------
 # UnconfirmedServiceChoice
@@ -443,8 +449,17 @@ class TestUnconfirmedServiceChoice:
     def test_unconfirmed_cov_notification_multiple(self) -> None:
         assert UnconfirmedServiceChoice.UNCONFIRMED_COV_NOTIFICATION_MULTIPLE == 11
 
+    def test_unconfirmed_audit_notification(self) -> None:
+        assert UnconfirmedServiceChoice.UNCONFIRMED_AUDIT_NOTIFICATION == 12
+
+    def test_who_am_i(self) -> None:
+        assert UnconfirmedServiceChoice.WHO_AM_I == 13
+
+    def test_you_are(self) -> None:
+        assert UnconfirmedServiceChoice.YOU_ARE == 14
+
     def test_member_count(self) -> None:
-        assert len(UnconfirmedServiceChoice) == 14
+        assert len(UnconfirmedServiceChoice) == 15
 
 
 # ---------------------------------------------------------------------------
