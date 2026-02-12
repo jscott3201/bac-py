@@ -1661,3 +1661,1552 @@ class TestGetEventInformation:
         app.confirmed_request.assert_called_once()
         call_kwargs = app.confirmed_request.call_args
         assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.GET_EVENT_INFORMATION
+
+
+# ---------------------------------------------------------------------------
+# Section 2A: Encoding & Decoding Helpers
+# ---------------------------------------------------------------------------
+
+
+class TestEncodingHelpers:
+    """Tests for decode_cov_values(), _encode_for_write(), and _lookup_datatype()."""
+
+    def _make_app(self):
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        return app
+
+    # --- decode_cov_values ---
+
+    def test_decode_cov_values_with_present_value(self):
+        """decode_cov_values extracts property names and decoded values."""
+        from bac_py.app.client import decode_cov_values
+        from bac_py.services.cov import COVNotificationRequest
+
+        notification = COVNotificationRequest(
+            subscriber_process_identifier=1,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            time_remaining=300,
+            list_of_values=[
+                BACnetPropertyValue(
+                    property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                    value=encode_application_real(72.5),
+                ),
+            ],
+        )
+
+        result = decode_cov_values(notification)
+        assert "present-value" in result
+        assert result["present-value"] == pytest.approx(72.5)
+
+    def test_decode_cov_values_with_empty_value(self):
+        """decode_cov_values maps empty value bytes to None."""
+        from bac_py.app.client import decode_cov_values
+        from bac_py.services.cov import COVNotificationRequest
+
+        notification = COVNotificationRequest(
+            subscriber_process_identifier=1,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            time_remaining=300,
+            list_of_values=[
+                BACnetPropertyValue(
+                    property_identifier=PropertyIdentifier.DESCRIPTION,
+                    value=b"",
+                ),
+            ],
+        )
+
+        result = decode_cov_values(notification)
+        assert result["description"] is None
+
+    def test_decode_cov_values_multiple_properties(self):
+        """decode_cov_values handles multiple property values in a single notification."""
+        from bac_py.app.client import decode_cov_values
+        from bac_py.services.cov import COVNotificationRequest
+
+        notification = COVNotificationRequest(
+            subscriber_process_identifier=1,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            time_remaining=60,
+            list_of_values=[
+                BACnetPropertyValue(
+                    property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                    value=encode_application_real(68.0),
+                ),
+                BACnetPropertyValue(
+                    property_identifier=PropertyIdentifier.OBJECT_NAME,
+                    value=encode_application_character_string("Zone Temp"),
+                ),
+            ],
+        )
+
+        result = decode_cov_values(notification)
+        assert len(result) == 2
+        assert result["present-value"] == pytest.approx(68.0)
+        assert result["object-name"] == "Zone Temp"
+
+    # --- _encode_for_write ---
+
+    def test_encode_for_write_bytes_pass_through(self):
+        """Already-encoded bytes pass through _encode_for_write unchanged."""
+        app = self._make_app()
+        client = BACnetClient(app)
+        raw = encode_application_real(42.0)
+
+        result = client._encode_for_write(
+            raw, PropertyIdentifier.PRESENT_VALUE, ObjectType.ANALOG_VALUE
+        )
+        assert result == raw
+
+    def test_encode_for_write_none_encodes_as_null(self):
+        """None encodes as Null via _encode_for_write."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        result = client._encode_for_write(
+            None, PropertyIdentifier.PRESENT_VALUE, ObjectType.ANALOG_OUTPUT
+        )
+        tag, _ = decode_tag(result, 0)
+        assert tag.number == 0  # Null
+
+    def test_encode_for_write_bool_for_binary_pv_encodes_enumerated(self):
+        """Bool for a binary object's PV (IntEnum datatype) encodes as Enumerated."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        result = client._encode_for_write(
+            True, PropertyIdentifier.PRESENT_VALUE, ObjectType.BINARY_VALUE
+        )
+        tag, offset = decode_tag(result, 0)
+        assert tag.number == 9  # Enumerated
+        assert decode_unsigned(result[offset : offset + tag.length]) == 1
+
+    def test_encode_for_write_bool_for_non_binary_encodes_boolean(self):
+        """Bool for a non-binary property (bool datatype) encodes as Boolean."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        result = client._encode_for_write(
+            True, PropertyIdentifier.OUT_OF_SERVICE, ObjectType.ANALOG_INPUT
+        )
+        tag, _ = decode_tag(result, 0)
+        assert tag.number == 1  # Boolean
+
+    def test_encode_for_write_int_for_float_property_encodes_real(self):
+        """Int for a property with float datatype encodes as Real."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        result = client._encode_for_write(
+            72, PropertyIdentifier.PRESENT_VALUE, ObjectType.ANALOG_VALUE
+        )
+        tag, offset = decode_tag(result, 0)
+        assert tag.number == 4  # Real
+        assert decode_real(result[offset : offset + tag.length]) == pytest.approx(72.0)
+
+    def test_encode_for_write_int_for_enum_property_encodes_enumerated(self):
+        """Int for a property with IntEnum datatype encodes as Enumerated."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        result = client._encode_for_write(
+            1, PropertyIdentifier.PRESENT_VALUE, ObjectType.BINARY_OUTPUT
+        )
+        tag, offset = decode_tag(result, 0)
+        assert tag.number == 9  # Enumerated
+        assert decode_unsigned(result[offset : offset + tag.length]) == 1
+
+    def test_encode_for_write_int_for_bool_property_encodes_boolean(self):
+        """Int for a property with bool datatype encodes as Boolean."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        result = client._encode_for_write(
+            1, PropertyIdentifier.OUT_OF_SERVICE, ObjectType.ANALOG_INPUT
+        )
+        tag, _ = decode_tag(result, 0)
+        assert tag.number == 1  # Boolean
+
+    # --- _lookup_datatype ---
+
+    def test_lookup_datatype_unknown_object_type_returns_none(self):
+        """_lookup_datatype returns None for an unregistered object type."""
+        result = BACnetClient._lookup_datatype(ObjectType(999), PropertyIdentifier.PRESENT_VALUE)
+        assert result is None
+
+    def test_lookup_datatype_unknown_property_returns_none(self):
+        """_lookup_datatype returns None for an unknown property on a known object."""
+        result = BACnetClient._lookup_datatype(ObjectType.ANALOG_INPUT, PropertyIdentifier(9999))
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Section 2B: Convenience Wrappers
+# ---------------------------------------------------------------------------
+
+
+class TestConvenienceWrappers:
+    """Tests for write_multiple, get_object_list, subscribe/unsubscribe_cov_ex, etc."""
+
+    def _make_app(self):
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        app.register_cov_callback = MagicMock()
+        app.unregister_cov_callback = MagicMock()
+        return app
+
+    # --- write_multiple ---
+
+    async def test_write_multiple_builds_specs(self):
+        """write_multiple builds WriteAccessSpecifications and sends WritePropertyMultiple."""
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.write_multiple(
+            "192.168.1.100",
+            {
+                "av,1": {"pv": 72.5, "object-name": "Zone Temp"},
+                "bo,1": {"pv": 1},
+            },
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.WRITE_PROPERTY_MULTIPLE
+        )
+
+    async def test_write_multiple_encodes_values_correctly(self):
+        """write_multiple uses _encode_for_write for each property value."""
+        from bac_py.services.write_property_multiple import WritePropertyMultipleRequest
+
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.write_multiple(
+            "192.168.1.100",
+            {"av,1": {"pv": 72.5}},
+        )
+
+        call_kwargs = app.confirmed_request.call_args
+        service_data = call_kwargs.kwargs["service_data"]
+        req = WritePropertyMultipleRequest.decode(service_data)
+        assert len(req.list_of_write_access_specs) == 1
+        spec = req.list_of_write_access_specs[0]
+        assert spec.object_identifier == ObjectIdentifier(ObjectType.ANALOG_VALUE, 1)
+        assert len(spec.list_of_properties) == 1
+        prop = spec.list_of_properties[0]
+        assert prop.property_identifier == PropertyIdentifier.PRESENT_VALUE
+        # Value should be a Real
+        tag, offset = decode_tag(prop.value, 0)
+        assert tag.number == 4  # Real
+        assert decode_real(prop.value[offset : offset + tag.length]) == pytest.approx(72.5)
+
+    # --- get_object_list fallback ---
+
+    async def test_get_object_list_fallback_on_segmentation_abort(self):
+        """get_object_list falls back to element-by-element on SEGMENTATION_NOT_SUPPORTED abort."""
+        from bac_py.services.errors import BACnetAbortError
+        from bac_py.types.enums import AbortReason
+
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        # First call: raise BACnetAbortError with SEGMENTATION_NOT_SUPPORTED
+        # Second call (array index 0): return count = 2
+        # Third call (array index 1): return first ObjectIdentifier
+        # Fourth call (array index 2): return second ObjectIdentifier
+        count_ack = ReadPropertyACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=0,
+            property_value=encode_application_unsigned(2),
+        )
+        oid1_ack = ReadPropertyACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=1,
+            property_value=encode_application_object_id(int(ObjectType.DEVICE), 1),
+        )
+        oid2_ack = ReadPropertyACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=2,
+            property_value=encode_application_object_id(int(ObjectType.ANALOG_INPUT), 1),
+        )
+
+        app.confirmed_request.side_effect = [
+            BACnetAbortError(AbortReason.SEGMENTATION_NOT_SUPPORTED),
+            count_ack.encode(),
+            oid1_ack.encode(),
+            oid2_ack.encode(),
+        ]
+
+        result = await client.get_object_list("192.168.1.100", 1)
+        assert len(result) == 2
+        assert result[0] == ObjectIdentifier(ObjectType.DEVICE, 1)
+        assert result[1] == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        assert app.confirmed_request.call_count == 4
+
+    async def test_get_object_list_reraises_other_abort(self):
+        """get_object_list re-raises BACnetAbortError for non-segmentation abort reasons."""
+        from bac_py.services.errors import BACnetAbortError
+        from bac_py.types.enums import AbortReason
+
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        app.confirmed_request.side_effect = BACnetAbortError(AbortReason.BUFFER_OVERFLOW)
+
+        with pytest.raises(BACnetAbortError):
+            await client.get_object_list("192.168.1.100", 1)
+
+    # --- subscribe_cov_ex ---
+
+    async def test_subscribe_cov_ex_registers_callback(self):
+        """subscribe_cov_ex registers callback and sends subscribe request."""
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        callback = MagicMock()
+
+        await client.subscribe_cov_ex(
+            "192.168.1.100",
+            "ai,1",
+            process_id=42,
+            callback=callback,
+            lifetime=3600,
+        )
+
+        app.register_cov_callback.assert_called_once_with(42, callback)
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.SUBSCRIBE_COV
+
+    async def test_subscribe_cov_ex_unregisters_callback_on_failure(self):
+        """subscribe_cov_ex unregisters callback when the subscription request fails."""
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.side_effect = RuntimeError("network error")
+
+        callback = MagicMock()
+
+        with pytest.raises(RuntimeError, match="network error"):
+            await client.subscribe_cov_ex(
+                "192.168.1.100",
+                "ai,1",
+                process_id=42,
+                callback=callback,
+            )
+
+        app.register_cov_callback.assert_called_once_with(42, callback)
+        app.unregister_cov_callback.assert_called_once_with(42)
+
+    async def test_subscribe_cov_ex_no_callback(self):
+        """subscribe_cov_ex works without callback (no register/unregister calls)."""
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.subscribe_cov_ex(
+            "192.168.1.100",
+            "ai,1",
+            process_id=1,
+        )
+
+        app.register_cov_callback.assert_not_called()
+        app.confirmed_request.assert_called_once()
+
+    # --- unsubscribe_cov_ex ---
+
+    async def test_unsubscribe_cov_ex_cancels_and_unregisters(self):
+        """unsubscribe_cov_ex sends unsubscribe and unregisters callback."""
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.unsubscribe_cov_ex(
+            "192.168.1.100",
+            "ai,1",
+            process_id=42,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.SUBSCRIBE_COV
+        app.unregister_cov_callback.assert_called_once_with(42)
+
+    async def test_unsubscribe_cov_ex_skip_unregister(self):
+        """unsubscribe_cov_ex skips callback unregister when unregister_callback=False."""
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.unsubscribe_cov_ex(
+            "192.168.1.100",
+            "ai,1",
+            process_id=42,
+            unregister_callback=False,
+        )
+
+        app.confirmed_request.assert_called_once()
+        app.unregister_cov_callback.assert_not_called()
+
+    # --- read_multiple (property_access_error sets None) ---
+
+    async def test_read_multiple_property_access_error_sets_none(self):
+        """read_multiple sets property to None when property_access_error is present."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        ack = ReadPropertyMultipleACK(
+            list_of_read_access_results=[
+                ReadAccessResult(
+                    object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                    list_of_results=[
+                        ReadResultElement(
+                            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                            property_value=encode_application_real(72.5),
+                        ),
+                        ReadResultElement(
+                            property_identifier=PropertyIdentifier.DESCRIPTION,
+                            property_access_error=(
+                                ErrorClass.PROPERTY,
+                                ErrorCode.UNKNOWN_PROPERTY,
+                            ),
+                        ),
+                    ],
+                ),
+            ]
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.read_multiple(
+            "192.168.1.100",
+            {"ai,1": ["pv", "desc"]},
+        )
+
+        props = result["analog-input,1"]
+        assert props["present-value"] == pytest.approx(72.5)
+        assert props["description"] is None
+
+    # --- subscribe_cov_property ---
+
+    async def test_subscribe_cov_property(self):
+        """subscribe_cov_property builds request with property reference and COV increment."""
+        from bac_py.services.cov import SubscribeCOVPropertyRequest
+
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.subscribe_cov_property(
+            address=PEER,
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            property_identifier=int(PropertyIdentifier.PRESENT_VALUE),
+            process_id=10,
+            confirmed=True,
+            lifetime=600,
+            cov_increment=0.5,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.SUBSCRIBE_COV_PROPERTY
+        )
+        # Verify request round-trips correctly
+        service_data = call_kwargs.kwargs["service_data"]
+        req = SubscribeCOVPropertyRequest.decode(service_data)
+        assert req.subscriber_process_identifier == 10
+        assert req.monitored_object_identifier == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        assert req.monitored_property_identifier.property_identifier == int(
+            PropertyIdentifier.PRESENT_VALUE
+        )
+        assert req.lifetime == 600
+        assert req.cov_increment == pytest.approx(0.5)
+
+    # --- subscribe_cov_property_multiple ---
+
+    async def test_subscribe_cov_property_multiple(self):
+        """subscribe_cov_property_multiple sends the correct service choice."""
+        from bac_py.services.cov import (
+            BACnetPropertyReference,
+            COVReference,
+            COVSubscriptionSpecification,
+        )
+
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        specs = [
+            COVSubscriptionSpecification(
+                monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                list_of_cov_references=[
+                    COVReference(
+                        monitored_property=BACnetPropertyReference(
+                            property_identifier=int(PropertyIdentifier.PRESENT_VALUE),
+                        ),
+                        cov_increment=1.0,
+                    ),
+                ],
+            ),
+        ]
+
+        await client.subscribe_cov_property_multiple(
+            address=PEER,
+            process_id=5,
+            specifications=specs,
+            confirmed=True,
+            lifetime=300,
+            max_notification_delay=10,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"]
+            == ConfirmedServiceChoice.SUBSCRIBE_COV_PROPERTY_MULTIPLE
+        )
+
+    # --- atomic_read_file ---
+
+    async def test_atomic_read_file_stream(self):
+        """atomic_read_file stream access round-trip."""
+        from bac_py.services.file_access import (
+            AtomicReadFileACK,
+            StreamReadAccess,
+            StreamReadACK,
+        )
+
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        ack = AtomicReadFileACK(
+            end_of_file=True,
+            access_method=StreamReadACK(
+                file_start_position=0,
+                file_data=b"Hello, BACnet!",
+            ),
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.atomic_read_file(
+            address=PEER,
+            file_identifier=ObjectIdentifier(ObjectType.FILE, 1),
+            access_method=StreamReadAccess(
+                file_start_position=0,
+                requested_octet_count=1024,
+            ),
+        )
+
+        assert isinstance(result, AtomicReadFileACK)
+        assert result.end_of_file is True
+        assert isinstance(result.access_method, StreamReadACK)
+        assert result.access_method.file_data == b"Hello, BACnet!"
+        assert result.access_method.file_start_position == 0
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.ATOMIC_READ_FILE
+
+    # --- atomic_write_file ---
+
+    async def test_atomic_write_file_stream(self):
+        """atomic_write_file stream access round-trip."""
+        from bac_py.services.file_access import (
+            AtomicWriteFileACK,
+            StreamWriteAccess,
+        )
+
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        ack = AtomicWriteFileACK(is_stream=True, file_start=0)
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.atomic_write_file(
+            address=PEER,
+            file_identifier=ObjectIdentifier(ObjectType.FILE, 2),
+            access_method=StreamWriteAccess(
+                file_start_position=0,
+                file_data=b"config data",
+            ),
+        )
+
+        assert isinstance(result, AtomicWriteFileACK)
+        assert result.is_stream is True
+        assert result.file_start == 0
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.ATOMIC_WRITE_FILE
+
+    # --- who_has ---
+
+    async def test_who_has_by_object_name(self):
+        """who_has collects I-Have responses when searching by name."""
+        from bac_py.services.who_has import IHaveRequest
+
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        registered_handler = None
+
+        def capture_handler(service_choice, handler):
+            nonlocal registered_handler
+            registered_handler = handler
+
+        app.register_temporary_handler.side_effect = capture_handler
+
+        task = asyncio.create_task(client.who_has(object_name="Zone Temp", timeout=0.1))
+        await asyncio.sleep(0.01)
+
+        assert registered_handler is not None
+        ihave = IHaveRequest(
+            device_identifier=ObjectIdentifier(ObjectType.DEVICE, 100),
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            object_name="Zone Temp",
+        )
+        registered_handler(ihave.encode(), PEER)
+
+        results = await task
+        assert len(results) == 1
+        assert results[0].object_name == "Zone Temp"
+        assert results[0].device_identifier == ObjectIdentifier(ObjectType.DEVICE, 100)
+
+        app.register_temporary_handler.assert_called_once_with(
+            UnconfirmedServiceChoice.I_HAVE, registered_handler
+        )
+        app.unregister_temporary_handler.assert_called_once()
+
+    async def test_who_has_by_object_identifier(self):
+        """who_has collects I-Have responses when searching by ObjectIdentifier."""
+        from bac_py.services.who_has import IHaveRequest
+
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        registered_handler = None
+
+        def capture_handler(service_choice, handler):
+            nonlocal registered_handler
+            registered_handler = handler
+
+        app.register_temporary_handler.side_effect = capture_handler
+
+        target_oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 5)
+        task = asyncio.create_task(client.who_has(object_identifier=target_oid, timeout=0.1))
+        await asyncio.sleep(0.01)
+
+        assert registered_handler is not None
+        ihave = IHaveRequest(
+            device_identifier=ObjectIdentifier(ObjectType.DEVICE, 200),
+            object_identifier=target_oid,
+            object_name="AHU-1 Temp",
+        )
+        registered_handler(ihave.encode(), PEER)
+
+        results = await task
+        assert len(results) == 1
+        assert results[0].object_identifier == target_oid
+
+    async def test_who_has_no_responses(self):
+        """who_has returns empty list when no I-Have responses are received."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        results = await client.who_has(object_name="NonExistent", timeout=0.05)
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# Section 2C: BBMD Table Operations
+# ---------------------------------------------------------------------------
+
+
+class TestBBMDOperations:
+    """Tests for BBMD table management methods (Section 2C)."""
+
+    def _make_app(self):
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        app._transport = None  # Default: no transport
+        app._parse_bip_address = MagicMock()
+        app.register_network_message_handler = MagicMock()
+        app.unregister_network_message_handler = MagicMock()
+        app.send_network_message = MagicMock()
+        return app
+
+    def _make_app_with_transport(self):
+        """Create a mock app with a mocked BIP transport."""
+        app = self._make_app()
+        transport = MagicMock()
+        transport.read_bdt = AsyncMock()
+        transport.read_fdt = AsyncMock()
+        transport.write_bdt = AsyncMock()
+        transport.delete_fdt_entry = AsyncMock()
+        app._transport = transport
+        return app, transport
+
+    def test_require_transport_raises_when_none(self):
+        """_require_transport raises RuntimeError when transport is None."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        with pytest.raises(RuntimeError, match="Transport not available"):
+            client._require_transport()
+
+    async def test_read_bdt(self):
+        """read_bdt reads BDT from transport and returns BDTEntryInfo list."""
+        app, transport = self._make_app_with_transport()
+        client = BACnetClient(app)
+
+        bip_addr = BIPAddress(host="192.168.1.1", port=47808)
+        app._parse_bip_address.return_value = bip_addr
+
+        # Mock BDT entries returned by transport
+        mock_entry = MagicMock()
+        mock_entry.address = BIPAddress(host="192.168.1.2", port=47808)
+        mock_entry.broadcast_mask = b"\xff\xff\xff\xff"
+        transport.read_bdt.return_value = [mock_entry]
+
+        result = await client.read_bdt("192.168.1.1")
+
+        assert len(result) == 1
+        assert result[0].address == "192.168.1.2:47808"
+        assert result[0].mask == "255.255.255.255"
+        transport.read_bdt.assert_called_once_with(bip_addr, timeout=5.0)
+
+    async def test_read_fdt(self):
+        """read_fdt reads FDT from transport and returns FDTEntryInfo list."""
+        app, transport = self._make_app_with_transport()
+        client = BACnetClient(app)
+
+        bip_addr = BIPAddress(host="192.168.1.1", port=47808)
+        app._parse_bip_address.return_value = bip_addr
+
+        # Mock FDT entries returned by transport
+        mock_entry = MagicMock()
+        mock_entry.address = BIPAddress(host="10.0.0.50", port=47808)
+        mock_entry.ttl = 300
+        mock_entry.remaining = 250
+        transport.read_fdt.return_value = [mock_entry]
+
+        result = await client.read_fdt("192.168.1.1")
+
+        assert len(result) == 1
+        assert result[0].address == "10.0.0.50:47808"
+        assert result[0].ttl == 300
+        assert result[0].remaining == 250
+        transport.read_fdt.assert_called_once_with(bip_addr, timeout=5.0)
+
+    async def test_write_bdt_success(self):
+        """write_bdt sends entries to transport and succeeds on SUCCESSFUL_COMPLETION."""
+        from bac_py.app.client import BDTEntryInfo
+        from bac_py.types.enums import BvlcResultCode
+
+        app, transport = self._make_app_with_transport()
+        client = BACnetClient(app)
+
+        bip_addr = BIPAddress(host="192.168.1.1", port=47808)
+        entry_addr = BIPAddress(host="192.168.1.2", port=47808)
+        app._parse_bip_address.side_effect = [bip_addr, entry_addr]
+
+        transport.write_bdt.return_value = BvlcResultCode.SUCCESSFUL_COMPLETION
+
+        entries = [BDTEntryInfo(address="192.168.1.2:47808", mask="255.255.255.255")]
+        await client.write_bdt("192.168.1.1", entries)
+
+        transport.write_bdt.assert_called_once()
+
+    async def test_write_bdt_failure_raises(self):
+        """write_bdt raises RuntimeError on non-successful result code."""
+        from bac_py.app.client import BDTEntryInfo
+        from bac_py.types.enums import BvlcResultCode
+
+        app, transport = self._make_app_with_transport()
+        client = BACnetClient(app)
+
+        bip_addr = BIPAddress(host="192.168.1.1", port=47808)
+        entry_addr = BIPAddress(host="192.168.1.2", port=47808)
+        app._parse_bip_address.side_effect = [bip_addr, entry_addr]
+
+        transport.write_bdt.return_value = BvlcResultCode.WRITE_BROADCAST_DISTRIBUTION_TABLE_NAK
+
+        entries = [BDTEntryInfo(address="192.168.1.2:47808", mask="255.255.255.255")]
+        with pytest.raises(RuntimeError, match="BBMD rejected Write-BDT"):
+            await client.write_bdt("192.168.1.1", entries)
+
+    async def test_delete_fdt_entry_success(self):
+        """delete_fdt_entry succeeds on SUCCESSFUL_COMPLETION."""
+        from bac_py.types.enums import BvlcResultCode
+
+        app, transport = self._make_app_with_transport()
+        client = BACnetClient(app)
+
+        bip_bbmd = BIPAddress(host="192.168.1.1", port=47808)
+        bip_entry = BIPAddress(host="10.0.0.50", port=47808)
+        app._parse_bip_address.side_effect = [bip_bbmd, bip_entry]
+
+        transport.delete_fdt_entry.return_value = BvlcResultCode.SUCCESSFUL_COMPLETION
+
+        await client.delete_fdt_entry("192.168.1.1", "10.0.0.50:47808")
+
+        transport.delete_fdt_entry.assert_called_once_with(bip_bbmd, bip_entry, timeout=5.0)
+
+    async def test_delete_fdt_entry_failure_raises(self):
+        """delete_fdt_entry raises RuntimeError on NAK."""
+        from bac_py.types.enums import BvlcResultCode
+
+        app, transport = self._make_app_with_transport()
+        client = BACnetClient(app)
+
+        bip_bbmd = BIPAddress(host="192.168.1.1", port=47808)
+        bip_entry = BIPAddress(host="10.0.0.50", port=47808)
+        app._parse_bip_address.side_effect = [bip_bbmd, bip_entry]
+
+        transport.delete_fdt_entry.return_value = (
+            BvlcResultCode.DELETE_FOREIGN_DEVICE_TABLE_ENTRY_NAK
+        )
+
+        with pytest.raises(RuntimeError, match="BBMD rejected Delete-FDT-Entry"):
+            await client.delete_fdt_entry("192.168.1.1", "10.0.0.50:47808")
+
+    async def test_who_is_router_to_network(self):
+        """who_is_router_to_network collects I-Am-Router-To-Network responses."""
+        from bac_py.network.messages import IAmRouterToNetwork
+
+        app = self._make_app()
+        app._transport = MagicMock()  # Just needs to exist
+        client = BACnetClient(app)
+
+        captured_handler = None
+
+        def capture_handler(msg_type, handler):
+            nonlocal captured_handler
+            captured_handler = handler
+
+        app.register_network_message_handler.side_effect = capture_handler
+
+        task = asyncio.create_task(client.who_is_router_to_network(timeout=0.1))
+        await asyncio.sleep(0.01)
+
+        # Simulate an I-Am-Router-To-Network response
+        assert captured_handler is not None
+        iam_msg = IAmRouterToNetwork(networks=(1, 2, 3))
+        source_mac = BIPAddress(host="192.168.1.10", port=47808).encode()
+        captured_handler(iam_msg, source_mac)
+
+        result = await task
+        assert len(result) == 1
+        assert result[0].address == "192.168.1.10:47808"
+        assert result[0].networks == [1, 2, 3]
+
+        app.unregister_network_message_handler.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Section 2D: Backup/Restore Procedures
+# ---------------------------------------------------------------------------
+
+
+class TestBackupRestore:
+    """Tests for backup_device, restore_device, and helper methods (Section 2D).
+
+    These tests mock client methods directly (read_property, reinitialize_device,
+    atomic_read_file, atomic_write_file) because the backup/restore procedures
+    compose multiple client calls and check decoded property_value types.
+    """
+
+    def _make_client(self):
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        client = BACnetClient(app)
+        return client
+
+    async def test_discover_device_oid_returns_oid(self):
+        """_discover_device_oid returns ObjectIdentifier when property_value is one."""
+        client = self._make_client()
+
+        oid = ObjectIdentifier(ObjectType.DEVICE, 100)
+        mock_ack = MagicMock()
+        mock_ack.property_value = oid
+        client.read_property = AsyncMock(return_value=mock_ack)
+
+        result = await client._discover_device_oid(PEER)
+        assert result == oid
+
+    async def test_discover_device_oid_fallback(self):
+        """_discover_device_oid falls back to wildcard when value is not ObjectIdentifier."""
+        client = self._make_client()
+
+        mock_ack = MagicMock()
+        mock_ack.property_value = b"\x91\x00"  # raw bytes, not ObjectIdentifier
+        client.read_property = AsyncMock(return_value=mock_ack)
+
+        result = await client._discover_device_oid(PEER)
+        assert result == ObjectIdentifier(ObjectType.DEVICE, 4194303)
+
+    async def test_poll_backup_restore_state_returns_on_target(self):
+        """_poll_backup_restore_state returns when target state is reached."""
+        from bac_py.types.enums import BackupAndRestoreState
+
+        client = self._make_client()
+        device_oid = ObjectIdentifier(ObjectType.DEVICE, 100)
+
+        # Return int value matching a target state
+        mock_ack = MagicMock()
+        mock_ack.property_value = int(BackupAndRestoreState.PERFORMING_A_BACKUP)
+        client.read_property = AsyncMock(return_value=mock_ack)
+
+        result = await client._poll_backup_restore_state(
+            PEER,
+            device_oid,
+            target_states=(
+                BackupAndRestoreState.PERFORMING_A_BACKUP,
+                BackupAndRestoreState.PREPARING_FOR_BACKUP,
+            ),
+            poll_interval=0.01,
+        )
+        assert result == BackupAndRestoreState.PERFORMING_A_BACKUP
+
+    async def test_poll_backup_restore_state_polls_until_target(self):
+        """_poll_backup_restore_state polls multiple times until target state."""
+        from bac_py.types.enums import BackupAndRestoreState
+
+        client = self._make_client()
+        device_oid = ObjectIdentifier(ObjectType.DEVICE, 100)
+
+        # First returns non-int (bytes), second returns target int
+        non_target_ack = MagicMock()
+        non_target_ack.property_value = b"\x91\x00"  # bytes, not int
+
+        target_ack = MagicMock()
+        target_ack.property_value = int(BackupAndRestoreState.PERFORMING_A_BACKUP)
+
+        client.read_property = AsyncMock(side_effect=[non_target_ack, target_ack])
+
+        result = await client._poll_backup_restore_state(
+            PEER,
+            device_oid,
+            target_states=(BackupAndRestoreState.PERFORMING_A_BACKUP,),
+            poll_interval=0.01,
+        )
+        assert result == BackupAndRestoreState.PERFORMING_A_BACKUP
+        assert client.read_property.call_count == 2
+
+    async def test_download_file_single_chunk(self):
+        """_download_file reads a file in a single chunk (end_of_file=True)."""
+        from bac_py.services.file_access import AtomicReadFileACK, StreamReadACK
+
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        client = BACnetClient(app)
+
+        file_oid = ObjectIdentifier(ObjectType.FILE, 1)
+
+        ack = AtomicReadFileACK(
+            end_of_file=True,
+            access_method=StreamReadACK(
+                file_start_position=0,
+                file_data=b"config data here",
+            ),
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        data = await client._download_file(PEER, file_oid)
+        assert data == b"config data here"
+        app.confirmed_request.assert_called_once()
+
+    async def test_download_file_multiple_chunks(self):
+        """_download_file reads a file across multiple chunks."""
+        from bac_py.services.file_access import AtomicReadFileACK, StreamReadACK
+
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        client = BACnetClient(app)
+
+        file_oid = ObjectIdentifier(ObjectType.FILE, 1)
+
+        chunk1 = AtomicReadFileACK(
+            end_of_file=False,
+            access_method=StreamReadACK(
+                file_start_position=0,
+                file_data=b"chunk1",
+            ),
+        )
+        chunk2 = AtomicReadFileACK(
+            end_of_file=True,
+            access_method=StreamReadACK(
+                file_start_position=6,
+                file_data=b"chunk2",
+            ),
+        )
+        app.confirmed_request.side_effect = [chunk1.encode(), chunk2.encode()]
+
+        data = await client._download_file(PEER, file_oid)
+        assert data == b"chunk1chunk2"
+        assert app.confirmed_request.call_count == 2
+
+    async def test_backup_device_full_procedure(self):
+        """backup_device executes the 5-step backup procedure."""
+        from bac_py.services.file_access import AtomicReadFileACK, StreamReadACK
+        from bac_py.types.enums import BackupAndRestoreState
+
+        client = self._make_client()
+
+        device_oid = ObjectIdentifier(ObjectType.DEVICE, 100)
+        file_oid = ObjectIdentifier(ObjectType.FILE, 1)
+
+        # Mock reinitialize_device (Steps 1 and 5)
+        client.reinitialize_device = AsyncMock()
+
+        # Mock _discover_device_oid (Step 2a)
+        discover_ack = MagicMock()
+        discover_ack.property_value = device_oid
+
+        # Mock _poll state (Step 2b)
+        state_ack = MagicMock()
+        state_ack.property_value = int(BackupAndRestoreState.PERFORMING_A_BACKUP)
+
+        # Mock read config files (Step 3)
+        config_ack = MagicMock()
+        config_ack.property_value = file_oid  # single ObjectIdentifier
+
+        client.read_property = AsyncMock(side_effect=[discover_ack, state_ack, config_ack])
+
+        # Mock _download_file (Step 4)
+        read_ack = AtomicReadFileACK(
+            end_of_file=True,
+            access_method=StreamReadACK(
+                file_start_position=0,
+                file_data=b"backup-contents",
+            ),
+        )
+        client.atomic_read_file = AsyncMock(return_value=read_ack)
+
+        result = await client.backup_device(PEER, password="pass", poll_interval=0.01)
+
+        assert result.device_instance == 100
+        assert len(result.configuration_files) == 1
+        assert result.configuration_files[0][0] == file_oid
+        assert result.configuration_files[0][1] == b"backup-contents"
+        assert client.reinitialize_device.call_count == 2
+
+    async def test_restore_device_full_procedure(self):
+        """restore_device executes the 4-step restore procedure."""
+        from bac_py.app.client import BackupData
+        from bac_py.services.file_access import AtomicWriteFileACK
+        from bac_py.types.enums import BackupAndRestoreState
+
+        client = self._make_client()
+
+        device_oid = ObjectIdentifier(ObjectType.DEVICE, 100)
+        file_oid = ObjectIdentifier(ObjectType.FILE, 1)
+
+        backup_data = BackupData(
+            device_instance=100,
+            configuration_files=[(file_oid, b"restore-data")],
+        )
+
+        # Mock reinitialize_device (Steps 1 and 4)
+        client.reinitialize_device = AsyncMock()
+
+        # Mock _discover_device_oid (Step 2a)
+        discover_ack = MagicMock()
+        discover_ack.property_value = device_oid
+
+        # Mock _poll state (Step 2b)
+        state_ack = MagicMock()
+        state_ack.property_value = int(BackupAndRestoreState.PERFORMING_A_RESTORE)
+
+        client.read_property = AsyncMock(side_effect=[discover_ack, state_ack])
+
+        # Mock atomic_write_file (Step 3)
+        write_ack = AtomicWriteFileACK(
+            is_stream=True,
+            file_start=0,
+        )
+        client.atomic_write_file = AsyncMock(return_value=write_ack)
+
+        await client.restore_device(PEER, backup_data, password="pass", poll_interval=0.01)
+
+        assert client.reinitialize_device.call_count == 2
+        client.atomic_write_file.assert_called_once()
+
+    async def test_backup_device_multiple_config_files(self):
+        """backup_device handles multiple configuration files."""
+        from bac_py.services.file_access import AtomicReadFileACK, StreamReadACK
+        from bac_py.types.enums import BackupAndRestoreState
+
+        client = self._make_client()
+
+        device_oid = ObjectIdentifier(ObjectType.DEVICE, 200)
+        file_oid1 = ObjectIdentifier(ObjectType.FILE, 1)
+        file_oid2 = ObjectIdentifier(ObjectType.FILE, 2)
+
+        client.reinitialize_device = AsyncMock()
+
+        # _discover_device_oid
+        discover_ack = MagicMock()
+        discover_ack.property_value = device_oid
+
+        # _poll state
+        state_ack = MagicMock()
+        state_ack.property_value = int(BackupAndRestoreState.PERFORMING_A_BACKUP)
+
+        # config files list
+        config_ack = MagicMock()
+        config_ack.property_value = [file_oid1, file_oid2]
+
+        client.read_property = AsyncMock(side_effect=[discover_ack, state_ack, config_ack])
+
+        # File downloads
+        ack1 = AtomicReadFileACK(
+            end_of_file=True,
+            access_method=StreamReadACK(file_start_position=0, file_data=b"file1"),
+        )
+        ack2 = AtomicReadFileACK(
+            end_of_file=True,
+            access_method=StreamReadACK(file_start_position=0, file_data=b"file2"),
+        )
+        client.atomic_read_file = AsyncMock(side_effect=[ack1, ack2])
+
+        result = await client.backup_device(PEER, poll_interval=0.01)
+
+        assert result.device_instance == 200
+        assert len(result.configuration_files) == 2
+        assert result.configuration_files[0] == (file_oid1, b"file1")
+        assert result.configuration_files[1] == (file_oid2, b"file2")
+
+
+# ---------------------------------------------------------------------------
+# Section 2E: Discovery Extensions
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoveryExtensions:
+    """Tests for discover(), discover_extended(), traverse_hierarchy, and helpers."""
+
+    def _make_app(self):
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        return app
+
+    async def test_discover_returns_discovered_devices(self):
+        """discover() returns DiscoveredDevice objects with address info."""
+        from bac_py.app.client import DiscoveredDevice
+
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        registered_handler = None
+
+        def capture_handler(service_choice, handler):
+            nonlocal registered_handler
+            registered_handler = handler
+
+        app.register_temporary_handler.side_effect = capture_handler
+
+        task = asyncio.create_task(client.discover(timeout=0.1))
+        await asyncio.sleep(0.01)
+
+        # Simulate an I-Am response
+        assert registered_handler is not None
+        iam = IAmRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 42),
+            max_apdu_length=1476,
+            segmentation_supported=Segmentation.BOTH,
+            vendor_id=7,
+        )
+        registered_handler(iam.encode(), PEER)
+
+        result = await task
+        assert len(result) == 1
+        assert isinstance(result[0], DiscoveredDevice)
+        assert result[0].instance == 42
+        assert result[0].vendor_id == 7
+        assert result[0].max_apdu_length == 1476
+        assert result[0].address == PEER
+
+    async def test_discover_extended_enriches_with_rpm(self):
+        """discover_extended() enriches devices with profile metadata via RPM.
+
+        The _enrich_device method checks isinstance(val, str) on property_value,
+        so we mock read_property_multiple to return pre-decoded string values.
+        """
+        from bac_py.app.client import DiscoveredDevice
+
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        registered_handler = None
+
+        def capture_handler(service_choice, handler):
+            nonlocal registered_handler
+            registered_handler = handler
+
+        app.register_temporary_handler.side_effect = capture_handler
+
+        # Mock RPM to return decoded result elements with str property_value
+        mock_rpm_ack = MagicMock()
+        mock_result = MagicMock()
+        mock_result.list_of_results = [
+            MagicMock(
+                property_identifier=PropertyIdentifier.PROFILE_NAME,
+                property_value="TestProfile",
+                property_access_error=None,
+            ),
+            MagicMock(
+                property_identifier=PropertyIdentifier.PROFILE_LOCATION,
+                property_value="http://example.com",
+                property_access_error=None,
+            ),
+            MagicMock(
+                property_identifier=PropertyIdentifier.TAGS,
+                property_value=None,
+                property_access_error=(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY),
+            ),
+        ]
+        mock_rpm_ack.list_of_read_access_results = [mock_result]
+        client.read_property_multiple = AsyncMock(return_value=mock_rpm_ack)
+
+        task = asyncio.create_task(client.discover_extended(timeout=0.1, enrich_timeout=1.0))
+        await asyncio.sleep(0.01)
+
+        assert registered_handler is not None
+        iam = IAmRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 42),
+            max_apdu_length=1476,
+            segmentation_supported=Segmentation.BOTH,
+            vendor_id=7,
+        )
+        registered_handler(iam.encode(), PEER)
+
+        result = await task
+        assert len(result) == 1
+        dev = result[0]
+        assert isinstance(dev, DiscoveredDevice)
+        assert dev.instance == 42
+        assert dev.profile_name == "TestProfile"
+        assert dev.profile_location == "http://example.com"
+        assert dev.tags is None  # Error response -> None
+
+    async def test_traverse_hierarchy_non_list_returns_early(self):
+        """_traverse_hierarchy_recursive returns early for non-list subordinates.
+
+        The method checks isinstance(subordinates, list). Since read_property
+        returns raw bytes in property_value, a non-list value causes early return.
+        We mock read_property to return a non-list property_value.
+        """
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        root = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
+
+        # Return a non-list property_value (a single int)
+        mock_ack = MagicMock()
+        mock_ack.property_value = 42  # not a list
+        client.read_property = AsyncMock(return_value=mock_ack)
+
+        result = await client.traverse_hierarchy(PEER, root)
+        # Non-list means no subordinates found
+        assert result == []
+
+    async def test_traverse_hierarchy_handles_cycles(self):
+        """_traverse_hierarchy_recursive handles visited nodes to avoid cycles.
+
+        We mock read_property to return list property_values containing
+        ObjectIdentifier subordinates.
+        """
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        root = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
+        child = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 2)
+
+        # Root has child as subordinate
+        root_ack = MagicMock()
+        root_ack.property_value = [child]
+
+        # Child refers back to root (cycle)
+        child_ack = MagicMock()
+        child_ack.property_value = [root]
+
+        client.read_property = AsyncMock(side_effect=[root_ack, child_ack])
+
+        result = await client.traverse_hierarchy(PEER, root)
+        # Should find child (SV,2) and root (SV,1) listed as child's subordinate.
+        # Root is already visited so recursion stops.
+        assert ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 2) in result
+        assert ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1) in result
+
+    async def test_collect_unconfirmed_responses_expected_count(self):
+        """_collect_unconfirmed_responses returns early when expected_count reached."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        registered_handler = None
+
+        def capture_handler(service_choice, handler):
+            nonlocal registered_handler
+            registered_handler = handler
+
+        app.register_temporary_handler.side_effect = capture_handler
+
+        task = asyncio.create_task(client.who_is(timeout=5.0, expected_count=1))
+        await asyncio.sleep(0.01)
+
+        assert registered_handler is not None
+        iam = IAmRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 99),
+            max_apdu_length=1476,
+            segmentation_supported=Segmentation.BOTH,
+            vendor_id=0,
+        )
+        registered_handler(iam.encode(), PEER)
+
+        # Should return early (not wait full 5 seconds)
+        result = await asyncio.wait_for(task, timeout=1.0)
+        assert len(result) == 1
+        assert result[0].object_identifier.instance_number == 99
+
+
+# ---------------------------------------------------------------------------
+# Additional uncovered small methods
+# ---------------------------------------------------------------------------
+
+
+class TestAdditionalMethods:
+    """Tests for remaining small uncovered methods."""
+
+    def _make_app(self):
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        return app
+
+    def test_who_am_i(self):
+        """who_am_i sends unconfirmed Who-Am-I request."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        client.who_am_i(
+            destination=PEER,
+            vendor_id=7,
+            model_name="TestModel",
+            serial_number="SN12345",
+        )
+
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == UnconfirmedServiceChoice.WHO_AM_I
+
+    def test_you_are(self):
+        """you_are sends unconfirmed You-Are request."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        client.you_are(
+            destination=PEER,
+            device_identifier=ObjectIdentifier(ObjectType.DEVICE, 100),
+            device_mac_address=b"\xc0\xa8\x01\x64\xba\xc0",
+        )
+
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == UnconfirmedServiceChoice.YOU_ARE
+
+    def test_you_are_with_network_number(self):
+        """you_are sends You-Are with optional network number."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        client.you_are(
+            destination=PEER,
+            device_identifier=ObjectIdentifier(ObjectType.DEVICE, 200),
+            device_mac_address=b"\xc0\xa8\x01\x64\xba\xc0",
+            device_network_number=5,
+        )
+
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == UnconfirmedServiceChoice.YOU_ARE
+
+    async def test_discover_unconfigured(self):
+        """discover_unconfigured collects Who-Am-I messages."""
+        from bac_py.app.client import UnconfiguredDevice
+        from bac_py.services.device_discovery import WhoAmIRequest
+
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        registered_handler = None
+
+        def capture_handler(service_choice, handler):
+            nonlocal registered_handler
+            registered_handler = handler
+
+        app.register_temporary_handler.side_effect = capture_handler
+
+        task = asyncio.create_task(client.discover_unconfigured(timeout=0.1))
+        await asyncio.sleep(0.01)
+
+        assert registered_handler is not None
+        who_am_i = WhoAmIRequest(
+            vendor_id=7,
+            model_name="TestModel",
+            serial_number="SN12345",
+        )
+        registered_handler(who_am_i.encode(), PEER)
+
+        result = await task
+        assert len(result) == 1
+        assert isinstance(result[0], UnconfiguredDevice)
+        assert result[0].vendor_id == 7
+        assert result[0].model_name == "TestModel"
+        assert result[0].serial_number == "SN12345"
+
+        app.unregister_temporary_handler.assert_called_once()
+
+    async def test_send_audit_notification_confirmed(self):
+        """send_audit_notification uses confirmed path when confirmed=True."""
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        # Use a mock notification since BACnetAuditNotification has many fields
+        mock_notification = MagicMock()
+        mock_notification.encode.return_value = b"\x00"
+
+        await client.send_audit_notification(
+            address=PEER,
+            notifications=[mock_notification],
+            confirmed=True,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"]
+            == ConfirmedServiceChoice.CONFIRMED_AUDIT_NOTIFICATION
+        )
+
+    async def test_send_audit_notification_unconfirmed(self):
+        """send_audit_notification uses unconfirmed path when confirmed=False."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        mock_notification = MagicMock()
+        mock_notification.encode.return_value = b"\x00"
+
+        await client.send_audit_notification(
+            address=PEER,
+            notifications=[mock_notification],
+            confirmed=False,
+        )
+
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"]
+            == UnconfirmedServiceChoice.UNCONFIRMED_AUDIT_NOTIFICATION
+        )
+        app.confirmed_request.assert_not_called()
+
+    async def test_query_audit_log(self):
+        """query_audit_log sends AuditLogQuery request."""
+        from bac_py.services.audit import AuditLogQueryACK
+        from bac_py.types.audit_types import AuditQueryByTarget
+
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        ack = AuditLogQueryACK(
+            audit_log=ObjectIdentifier(ObjectType.AUDIT_LOG, 1),
+            records=[],
+            no_more_items=True,
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        query = AuditQueryByTarget(
+            target_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 100),
+        )
+
+        result = await client.query_audit_log(
+            address=PEER,
+            audit_log=ObjectIdentifier(ObjectType.AUDIT_LOG, 1),
+            query_parameters=query,
+        )
+
+        assert isinstance(result, AuditLogQueryACK)
+        assert result.no_more_items is True
+        assert result.records == []
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.AUDIT_LOG_QUERY
+
+    async def test_get_enrollment_summary(self):
+        """get_enrollment_summary sends request and decodes ACK."""
+        from bac_py.services.alarm_summary import (
+            EnrollmentSummary,
+            GetEnrollmentSummaryACK,
+        )
+        from bac_py.types.enums import AcknowledgmentFilter, EventType
+
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        ack = GetEnrollmentSummaryACK(
+            list_of_enrollment_summaries=[
+                EnrollmentSummary(
+                    object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                    event_type=EventType.CHANGE_OF_VALUE,
+                    event_state=EventState.HIGH_LIMIT,
+                    priority=3,
+                    notification_class=10,
+                ),
+            ]
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.get_enrollment_summary(
+            address=PEER,
+            acknowledgment_filter=AcknowledgmentFilter.ALL,
+        )
+
+        assert isinstance(result, GetEnrollmentSummaryACK)
+        assert len(result.list_of_enrollment_summaries) == 1
+        assert result.list_of_enrollment_summaries[0].priority == 3
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.GET_ENROLLMENT_SUMMARY
+        )

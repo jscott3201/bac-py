@@ -35,6 +35,7 @@ from bac_py.types.constructed import BACnetTimeStamp
 from bac_py.types.enums import (
     AcknowledgmentFilter,
     ConfirmedServiceChoice,
+    ErrorClass,
     ErrorCode,
     EventState,
     EventType,
@@ -3128,3 +3129,1028 @@ class TestHandleAuditNotification:
             SOURCE,
         )
         assert result is None  # SimpleACK, no error even without log objects
+
+
+# ---------------------------------------------------------------------------
+# Section 3A: Write & COV Integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestWriteAndCOVIntegration:
+    """Tests for _encode_property_value error path and COV handlers.
+
+    Covers write_property decode errors, COV notification after write,
+    and COV subscribe/notification handlers.
+    """
+
+    def test_encode_property_value_type_error(self):
+        """_encode_property_value raises BACnetError on unencodable value."""
+
+        class _Unencodable:
+            pass
+
+        with pytest.raises(BACnetError) as exc_info:
+            _encode_property_value(_Unencodable())
+        assert exc_info.value.error_class == ErrorClass.PROPERTY
+        assert exc_info.value.error_code == ErrorCode.OTHER
+
+    @pytest.mark.asyncio
+    async def test_write_property_invalid_data_raises_error(self):
+        """WriteProperty with garbage property_value bytes raises INVALID_DATA_TYPE."""
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        # 0x08 is a context tag (class bit set), which triggers ValueError
+        # in decode_all_application_values ("Expected application tag")
+        request = WritePropertyRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_NAME,
+            property_value=b"\x08",
+        )
+
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_write_property(15, request.encode(), SOURCE)
+        assert exc_info.value.error_class == ErrorClass.PROPERTY
+        assert exc_info.value.error_code == ErrorCode.INVALID_DATA_TYPE
+
+    @pytest.mark.asyncio
+    async def test_write_property_triggers_cov_notification(self):
+        """Write property with cov_manager set calls check_and_notify."""
+        app, db, device = _make_app()
+        app.cov_manager = MagicMock()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = WritePropertyRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_NAME,
+            property_value=b"\x75\x0a\x00new-name!",
+        )
+
+        result = await handlers.handle_write_property(15, request.encode(), SOURCE)
+        assert result is None
+        app.cov_manager.check_and_notify.assert_called_once()
+        call_args = app.cov_manager.check_and_notify.call_args
+        assert call_args[0][1] == PropertyIdentifier.OBJECT_NAME
+
+    @pytest.mark.asyncio
+    async def test_subscribe_cov_success(self):
+        """SubscribeCOV with valid object and cov_manager returns SimpleACK."""
+        from bac_py.services.cov import SubscribeCOVRequest
+
+        app, db, device = _make_app()
+        app.cov_manager = MagicMock()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            issue_confirmed_notifications=True,
+            lifetime=300,
+        )
+
+        result = await handlers.handle_subscribe_cov(
+            ConfirmedServiceChoice.SUBSCRIBE_COV,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+        app.cov_manager.subscribe.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_subscribe_cov_no_cov_manager(self):
+        """SubscribeCOV when cov_manager is None raises SERVICE_REQUEST_DENIED."""
+        from bac_py.services.cov import SubscribeCOVRequest
+
+        app, db, device = _make_app()
+        app.cov_manager = None
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            issue_confirmed_notifications=True,
+            lifetime=300,
+        )
+
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_subscribe_cov(
+                ConfirmedServiceChoice.SUBSCRIBE_COV,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_class == ErrorClass.SERVICES
+        assert exc_info.value.error_code == ErrorCode.SERVICE_REQUEST_DENIED
+
+    @pytest.mark.asyncio
+    async def test_subscribe_cov_property_success(self):
+        """SubscribeCOVProperty with valid object returns SimpleACK."""
+        from bac_py.services.cov import BACnetPropertyReference, SubscribeCOVPropertyRequest
+
+        app, db, device = _make_app()
+        app.cov_manager = MagicMock()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = SubscribeCOVPropertyRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            monitored_property_identifier=BACnetPropertyReference(
+                property_identifier=PropertyIdentifier.SYSTEM_STATUS,
+            ),
+            issue_confirmed_notifications=True,
+            lifetime=600,
+        )
+
+        result = await handlers.handle_subscribe_cov_property(
+            ConfirmedServiceChoice.SUBSCRIBE_COV_PROPERTY,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+        app.cov_manager.subscribe_property.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_subscribe_cov_property_multiple_no_manager(self):
+        """SubscribeCOVPropertyMultiple with cov_manager=None raises error."""
+        from bac_py.services.cov import (
+            BACnetPropertyReference,
+            COVReference,
+            COVSubscriptionSpecification,
+            SubscribeCOVPropertyMultipleRequest,
+        )
+
+        app, db, device = _make_app()
+        app.cov_manager = None
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=1,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=PropertyIdentifier.SYSTEM_STATUS,
+                            ),
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_subscribe_cov_property_multiple(
+                ConfirmedServiceChoice.SUBSCRIBE_COV_PROPERTY_MULTIPLE,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_class == ErrorClass.SERVICES
+        assert exc_info.value.error_code == ErrorCode.SERVICE_REQUEST_DENIED
+
+    @pytest.mark.asyncio
+    async def test_confirmed_cov_notification_multiple(self):
+        """ConfirmedCOVNotification-Multiple returns SimpleACK."""
+        from bac_py.encoding.primitives import encode_application_unsigned
+        from bac_py.services.cov import (
+            COVNotificationMultipleRequest,
+            COVObjectNotification,
+            COVPropertyValue,
+        )
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = COVNotificationMultipleRequest(
+            subscriber_process_identifier=1,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 2),
+            time_remaining=120,
+            timestamp=BACnetTimeStamp(choice=1, value=0),
+            list_of_cov_notifications=[
+                COVObjectNotification(
+                    monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                    list_of_values=[
+                        COVPropertyValue(
+                            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                            value=encode_application_unsigned(42),
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+        result = await handlers.handle_confirmed_cov_notification_multiple(
+            ConfirmedServiceChoice.CONFIRMED_COV_NOTIFICATION_MULTIPLE,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_unconfirmed_cov_notification_multiple(self):
+        """UnconfirmedCOVNotification-Multiple returns None."""
+        from bac_py.encoding.primitives import encode_application_unsigned
+        from bac_py.services.cov import (
+            COVNotificationMultipleRequest,
+            COVObjectNotification,
+            COVPropertyValue,
+        )
+        from bac_py.types.enums import UnconfirmedServiceChoice
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = COVNotificationMultipleRequest(
+            subscriber_process_identifier=1,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 2),
+            time_remaining=60,
+            timestamp=BACnetTimeStamp(choice=1, value=0),
+            list_of_cov_notifications=[
+                COVObjectNotification(
+                    monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                    list_of_values=[
+                        COVPropertyValue(
+                            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                            value=encode_application_unsigned(10),
+                        ),
+                    ],
+                ),
+            ],
+        )
+
+        result = await handlers.handle_unconfirmed_cov_notification_multiple(
+            UnconfirmedServiceChoice.UNCONFIRMED_COV_NOTIFICATION_MULTIPLE,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Section 3C: Object & Property Edge Cases tests
+# ---------------------------------------------------------------------------
+
+
+class TestObjectPropertyEdgeCases:
+    """Tests for object and property edge cases.
+
+    Covers ACTIVE_COV_SUBSCRIPTIONS, create_object auto-instance,
+    create_object with initial values, delete_object COV cleanup,
+    and read_range on non-list property.
+    """
+
+    @pytest.mark.asyncio
+    async def test_read_active_cov_subscriptions_no_manager(self):
+        """ACTIVE_COV_SUBSCRIPTIONS returns [] when cov_manager is None."""
+        app, db, device = _make_app()
+        app.cov_manager = None
+        handlers = DefaultServerHandlers(app, db, device)
+
+        result = handlers._read_object_property(
+            device,
+            PropertyIdentifier.ACTIVE_COV_SUBSCRIPTIONS,
+            None,
+        )
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_read_active_cov_subscriptions_with_manager(self):
+        """ACTIVE_COV_SUBSCRIPTIONS delegates to cov_manager.get_active_subscriptions."""
+        app, db, device = _make_app()
+        app.cov_manager = MagicMock()
+        sentinel = [{"fake": "subscription"}]
+        app.cov_manager.get_active_subscriptions.return_value = sentinel
+        handlers = DefaultServerHandlers(app, db, device)
+
+        result = handlers._read_object_property(
+            device,
+            PropertyIdentifier.ACTIVE_COV_SUBSCRIPTIONS,
+            None,
+        )
+        assert result is sentinel
+        app.cov_manager.get_active_subscriptions.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_object_auto_instance(self):
+        """CreateObject with object_type only auto-assigns instance from existing max+1."""
+        import bac_py.objects  # noqa: F401
+        from bac_py.encoding.primitives import decode_object_identifier
+        from bac_py.encoding.tags import decode_tag
+        from bac_py.services.object_mgmt import CreateObjectRequest
+
+        app, db, device = _make_app()
+        # Pre-add an existing AnalogInput so auto-instance picks max+1
+        db.add(AnalogInputObject(5, object_name="AI-5"))
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = CreateObjectRequest(object_type=ObjectType.ANALOG_INPUT)
+
+        result = await handlers.handle_create_object(10, request.encode(), SOURCE)
+        tag, offset = decode_tag(result, 0)
+        obj_type, instance = decode_object_identifier(result[offset : offset + tag.length])
+        assert obj_type == ObjectType.ANALOG_INPUT
+        assert instance == 6  # max existing (5) + 1
+
+    @pytest.mark.asyncio
+    async def test_create_object_with_initial_values(self):
+        """CreateObject with list_of_initial_values applies initial property values."""
+        import bac_py.objects  # noqa: F401
+        from bac_py.encoding.primitives import decode_object_identifier
+        from bac_py.encoding.tags import decode_tag
+        from bac_py.services.common import BACnetPropertyValue
+        from bac_py.services.object_mgmt import CreateObjectRequest
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        # Provide initial OBJECT_NAME value as application-tagged character string
+        # Tag 7 (CharacterString), encoding 0 (UTF-8), "my-ai"
+        name_bytes = b"\x75\x06\x00my-ai"
+        request = CreateObjectRequest(
+            object_type=ObjectType.ANALOG_INPUT,
+            list_of_initial_values=[
+                BACnetPropertyValue(
+                    property_identifier=PropertyIdentifier.OBJECT_NAME,
+                    value=name_bytes,
+                ),
+            ],
+        )
+
+        result = await handlers.handle_create_object(10, request.encode(), SOURCE)
+        tag, offset = decode_tag(result, 0)
+        obj_type, instance = decode_object_identifier(result[offset : offset + tag.length])
+        assert obj_type == ObjectType.ANALOG_INPUT
+
+        created = db.get(ObjectIdentifier(ObjectType.ANALOG_INPUT, instance))
+        assert created is not None
+        assert created.read_property(PropertyIdentifier.OBJECT_NAME) == "my-ai"
+
+    @pytest.mark.asyncio
+    async def test_delete_object_cov_cleanup(self):
+        """DeleteObject with cov_manager calls remove_object_subscriptions."""
+        import bac_py.objects  # noqa: F401
+        from bac_py.services.object_mgmt import DeleteObjectRequest
+
+        app, db, device = _make_app()
+        app.cov_manager = MagicMock()
+        ai = AnalogInputObject(1, object_name="AI-1")
+        db.add(ai)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        ai_oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        request = DeleteObjectRequest(object_identifier=ai_oid)
+
+        result = await handlers.handle_delete_object(11, request.encode(), SOURCE)
+        assert result is None
+        app.cov_manager.remove_object_subscriptions.assert_called_once_with(ai_oid)
+
+    @pytest.mark.asyncio
+    async def test_read_range_non_list_property(self):
+        """ReadRange on a non-list property raises PROPERTY_IS_NOT_A_LIST."""
+        from bac_py.services.read_range import ReadRangeRequest
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        # OBJECT_NAME is a scalar string, not a list
+        request = ReadRangeRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_NAME,
+        )
+
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_read_range(26, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.PROPERTY_IS_NOT_A_LIST
+
+
+# ---------------------------------------------------------------------------
+# Section 3E: Reinitialize State Machine tests
+# ---------------------------------------------------------------------------
+
+
+class TestReinitializeStateMachine:
+    """Tests for backup/restore state transitions via ReinitializeDevice handler."""
+
+    @pytest.mark.asyncio
+    async def test_reinitialize_start_backup(self):
+        """START_BACKUP from IDLE sets BACKUP_IN_PROGRESS and PREPARING_FOR_BACKUP."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            BackupAndRestoreState,
+            DeviceStatus,
+            ReinitializedState,
+        )
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.START_BACKUP,
+        )
+
+        result = await handlers.handle_reinitialize_device(20, request.encode(), SOURCE)
+        assert result is None
+        assert (
+            device._properties[PropertyIdentifier.SYSTEM_STATUS] == DeviceStatus.BACKUP_IN_PROGRESS
+        )
+        assert (
+            device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE]
+            == BackupAndRestoreState.PREPARING_FOR_BACKUP
+        )
+
+    @pytest.mark.asyncio
+    async def test_reinitialize_end_backup(self):
+        """END_BACKUP from PREPARING_FOR_BACKUP returns to OPERATIONAL/IDLE."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            BackupAndRestoreState,
+            DeviceStatus,
+            ReinitializedState,
+        )
+
+        app, db, device = _make_app()
+        device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+            BackupAndRestoreState.PREPARING_FOR_BACKUP
+        )
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.END_BACKUP,
+        )
+
+        result = await handlers.handle_reinitialize_device(20, request.encode(), SOURCE)
+        assert result is None
+        assert device._properties[PropertyIdentifier.SYSTEM_STATUS] == DeviceStatus.OPERATIONAL
+        assert (
+            device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE]
+            == BackupAndRestoreState.IDLE
+        )
+
+    @pytest.mark.asyncio
+    async def test_reinitialize_start_restore(self):
+        """START_RESTORE from IDLE sets DOWNLOAD_IN_PROGRESS and PREPARING_FOR_RESTORE."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            BackupAndRestoreState,
+            DeviceStatus,
+            ReinitializedState,
+        )
+
+        app, db, device = _make_app()
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.START_RESTORE,
+        )
+
+        result = await handlers.handle_reinitialize_device(20, request.encode(), SOURCE)
+        assert result is None
+        assert (
+            device._properties[PropertyIdentifier.SYSTEM_STATUS]
+            == DeviceStatus.DOWNLOAD_IN_PROGRESS
+        )
+        assert (
+            device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE]
+            == BackupAndRestoreState.PREPARING_FOR_RESTORE
+        )
+
+    @pytest.mark.asyncio
+    async def test_reinitialize_end_restore(self):
+        """END_RESTORE from PREPARING_FOR_RESTORE sets OPERATIONAL/IDLE and LAST_RESTORE_TIME."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            BackupAndRestoreState,
+            DeviceStatus,
+            ReinitializedState,
+        )
+
+        app, db, device = _make_app()
+        device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+            BackupAndRestoreState.PREPARING_FOR_RESTORE
+        )
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.END_RESTORE,
+        )
+
+        result = await handlers.handle_reinitialize_device(20, request.encode(), SOURCE)
+        assert result is None
+        assert device._properties[PropertyIdentifier.SYSTEM_STATUS] == DeviceStatus.OPERATIONAL
+        assert (
+            device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE]
+            == BackupAndRestoreState.IDLE
+        )
+        # LAST_RESTORE_TIME should be set
+        assert PropertyIdentifier.LAST_RESTORE_TIME in device._properties
+
+    @pytest.mark.asyncio
+    async def test_reinitialize_abort_restore(self):
+        """ABORT_RESTORE from PERFORMING_A_RESTORE sets OPERATIONAL/IDLE."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            BackupAndRestoreState,
+            DeviceStatus,
+            ReinitializedState,
+        )
+
+        app, db, device = _make_app()
+        device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+            BackupAndRestoreState.PERFORMING_A_RESTORE
+        )
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.ABORT_RESTORE,
+        )
+
+        result = await handlers.handle_reinitialize_device(20, request.encode(), SOURCE)
+        assert result is None
+        assert device._properties[PropertyIdentifier.SYSTEM_STATUS] == DeviceStatus.OPERATIONAL
+        assert (
+            device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE]
+            == BackupAndRestoreState.IDLE
+        )
+
+
+# ---------------------------------------------------------------------------
+# Section 3B: Alarm & Event Responses (~10 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestAlarmSummaryCoercion:
+    """Tests for GetAlarmSummary handler edge cases: int coercion and BitString handling."""
+
+    @pytest.mark.asyncio
+    async def test_alarm_summary_event_state_int_coercion(self):
+        """Object with EVENT_STATE as raw int (not EventState enum) is coerced and included."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        # Set EVENT_STATE as a raw int matching OFFNORMAL (2)
+        ai._properties[PropertyIdentifier.EVENT_STATE] = int(EventState.OFFNORMAL)
+        ai._properties[PropertyIdentifier.ACKED_TRANSITIONS] = [True, True, True]
+        db.add(ai)
+
+        request_data = GetAlarmSummaryRequest().encode()
+        result = await handlers.handle_get_alarm_summary(0, request_data, SOURCE)
+        ack = GetAlarmSummaryACK.decode(result)
+        assert len(ack.list_of_alarm_summaries) == 1
+        assert ack.list_of_alarm_summaries[0].alarm_state == EventState.OFFNORMAL
+
+    @pytest.mark.asyncio
+    async def test_alarm_summary_acked_transitions_bitstring(self):
+        """Object with ACKED_TRANSITIONS as BitString is used directly."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.EVENT_STATE] = EventState.HIGH_LIMIT
+        # Provide acked_transitions as a BitString directly
+        acked_bs = BitString(b"\xa0", 5)
+        ai._properties[PropertyIdentifier.ACKED_TRANSITIONS] = acked_bs
+        db.add(ai)
+
+        request_data = GetAlarmSummaryRequest().encode()
+        result = await handlers.handle_get_alarm_summary(0, request_data, SOURCE)
+        ack = GetAlarmSummaryACK.decode(result)
+        assert len(ack.list_of_alarm_summaries) == 1
+        summary = ack.list_of_alarm_summaries[0]
+        assert summary.acknowledged_transitions == acked_bs
+
+    @pytest.mark.asyncio
+    async def test_alarm_summary_acked_transitions_list(self):
+        """Object with ACKED_TRANSITIONS as list [True, False, True] is converted to BitString."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.EVENT_STATE] = EventState.OFFNORMAL
+        ai._properties[PropertyIdentifier.ACKED_TRANSITIONS] = [True, False, True]
+        db.add(ai)
+
+        request_data = GetAlarmSummaryRequest().encode()
+        result = await handlers.handle_get_alarm_summary(0, request_data, SOURCE)
+        ack = GetAlarmSummaryACK.decode(result)
+        assert len(ack.list_of_alarm_summaries) == 1
+        summary = ack.list_of_alarm_summaries[0]
+        # Verify the BitString was constructed from list: T=1, F=0, T=1 -> 0b10100000 = 0xa0
+        assert isinstance(summary.acknowledged_transitions, BitString)
+        assert summary.acknowledged_transitions.data[0] & 0xE0 == 0xA0
+
+
+class TestEnrollmentSummaryCoercion:
+    """Tests for GetEnrollmentSummary handler edge cases: coercion, defaults, ack filters."""
+
+    def _make_enrollment_raw(
+        self,
+        db,
+        instance,
+        *,
+        event_type=None,
+        event_state=None,
+        notification_class=0,
+        acked_transitions=None,
+    ):
+        """Create an EventEnrollmentObject with raw (non-enum) property values."""
+        obj_ref = MagicMock()
+        obj_ref.object_identifier = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        obj_ref.property_identifier = PropertyIdentifier.PRESENT_VALUE
+        ee = EventEnrollmentObject(
+            instance,
+            object_property_reference=obj_ref,
+        )
+        if event_type is not None:
+            ee._properties[PropertyIdentifier.EVENT_TYPE] = event_type
+        if event_state is not None:
+            ee._properties[PropertyIdentifier.EVENT_STATE] = event_state
+        ee._properties[PropertyIdentifier.NOTIFICATION_CLASS] = notification_class
+        if acked_transitions is not None:
+            ee._properties[PropertyIdentifier.ACKED_TRANSITIONS] = acked_transitions
+        db.add(ee)
+        return ee
+
+    @pytest.mark.asyncio
+    async def test_enrollment_summary_event_type_coercion(self):
+        """EventEnrollment with EVENT_TYPE as raw int is coerced to EventType."""
+        _, db, _, handlers = _make_app_and_handlers()
+        self._make_enrollment_raw(
+            db,
+            1,
+            event_type=int(EventType.OUT_OF_RANGE),
+            event_state=EventState.NORMAL,
+        )
+
+        request = GetEnrollmentSummaryRequest(
+            acknowledgment_filter=AcknowledgmentFilter.ALL,
+        )
+        result = await handlers.handle_get_enrollment_summary(0, request.encode(), SOURCE)
+        ack = GetEnrollmentSummaryACK.decode(result)
+        assert len(ack.list_of_enrollment_summaries) == 1
+        assert ack.list_of_enrollment_summaries[0].event_type == EventType.OUT_OF_RANGE
+
+    @pytest.mark.asyncio
+    async def test_enrollment_summary_defaults(self):
+        """EventEnrollment with no EVENT_TYPE and no EVENT_STATE uses defaults."""
+        _, db, _, handlers = _make_app_and_handlers()
+        # Remove both EVENT_TYPE and EVENT_STATE so handler uses defaults
+        obj_ref = MagicMock()
+        obj_ref.object_identifier = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        obj_ref.property_identifier = PropertyIdentifier.PRESENT_VALUE
+        ee = EventEnrollmentObject(1, object_property_reference=obj_ref)
+        # Explicitly remove properties to trigger the default paths
+        ee._properties.pop(PropertyIdentifier.EVENT_TYPE, None)
+        ee._properties.pop(PropertyIdentifier.EVENT_STATE, None)
+        db.add(ee)
+
+        request = GetEnrollmentSummaryRequest(
+            acknowledgment_filter=AcknowledgmentFilter.ALL,
+        )
+        result = await handlers.handle_get_enrollment_summary(0, request.encode(), SOURCE)
+        ack = GetEnrollmentSummaryACK.decode(result)
+        assert len(ack.list_of_enrollment_summaries) == 1
+        summary = ack.list_of_enrollment_summaries[0]
+        assert summary.event_type == EventType.CHANGE_OF_VALUE
+        assert summary.event_state == EventState.NORMAL
+
+    @pytest.mark.asyncio
+    async def test_enrollment_summary_acked_filter_excludes_not_all_acked(self):
+        """ACKED filter excludes enrollment with not-all-acked transitions list."""
+        _, db, _, handlers = _make_app_and_handlers()
+        # Enrollment with acked_transitions = [True, False, True] -> not all acked
+        self._make_enrollment_raw(
+            db,
+            1,
+            event_type=EventType.CHANGE_OF_VALUE,
+            event_state=EventState.NORMAL,
+            acked_transitions=[True, False, True],
+        )
+
+        request = GetEnrollmentSummaryRequest(
+            acknowledgment_filter=AcknowledgmentFilter.ACKED,
+        )
+        result = await handlers.handle_get_enrollment_summary(0, request.encode(), SOURCE)
+        ack = GetEnrollmentSummaryACK.decode(result)
+        assert len(ack.list_of_enrollment_summaries) == 0
+
+    @pytest.mark.asyncio
+    async def test_enrollment_summary_not_acked_filter_excludes_all_acked(self):
+        """NOT_ACKED filter excludes enrollment with all-acked transitions list."""
+        _, db, _, handlers = _make_app_and_handlers()
+        # Enrollment with acked_transitions = [True, True, True] -> all acked
+        self._make_enrollment_raw(
+            db,
+            1,
+            event_type=EventType.CHANGE_OF_VALUE,
+            event_state=EventState.NORMAL,
+            acked_transitions=[True, True, True],
+        )
+
+        request = GetEnrollmentSummaryRequest(
+            acknowledgment_filter=AcknowledgmentFilter.NOT_ACKED,
+        )
+        result = await handlers.handle_get_enrollment_summary(0, request.encode(), SOURCE)
+        ack = GetEnrollmentSummaryACK.decode(result)
+        assert len(ack.list_of_enrollment_summaries) == 0
+
+    @pytest.mark.asyncio
+    async def test_enrollment_summary_event_state_coercion(self):
+        """EventEnrollment with EVENT_STATE as raw int is coerced to EventState."""
+        _, db, _, handlers = _make_app_and_handlers()
+        self._make_enrollment_raw(
+            db,
+            1,
+            event_type=EventType.CHANGE_OF_VALUE,
+            event_state=int(EventState.OFFNORMAL),
+        )
+
+        request = GetEnrollmentSummaryRequest(
+            acknowledgment_filter=AcknowledgmentFilter.ALL,
+        )
+        result = await handlers.handle_get_enrollment_summary(0, request.encode(), SOURCE)
+        ack = GetEnrollmentSummaryACK.decode(result)
+        assert len(ack.list_of_enrollment_summaries) == 1
+        assert ack.list_of_enrollment_summaries[0].event_state == EventState.OFFNORMAL
+
+
+class TestEventInformationCoercion:
+    """Tests for GetEventInformation handler edge cases: coercion, timestamps, BitString."""
+
+    @pytest.mark.asyncio
+    async def test_event_information_state_coercion(self):
+        """Object with EVENT_STATE as raw int is coerced to EventState enum."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        # Set EVENT_STATE as a raw int (not enum)
+        ai._properties[PropertyIdentifier.EVENT_STATE] = int(EventState.HIGH_LIMIT)
+        db.add(ai)
+
+        request = GetEventInformationRequest()
+        result = await handlers.handle_get_event_information(0, request.encode(), SOURCE)
+        ack = GetEventInformationACK.decode(result)
+        assert len(ack.list_of_event_summaries) == 1
+        assert ack.list_of_event_summaries[0].event_state == EventState.HIGH_LIMIT
+
+    @pytest.mark.asyncio
+    async def test_event_information_normal_state_skipped(self):
+        """Object with EVENT_STATE as raw int for NORMAL is skipped."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        # Set EVENT_STATE as raw int for NORMAL (0)
+        ai._properties[PropertyIdentifier.EVENT_STATE] = int(EventState.NORMAL)
+        db.add(ai)
+
+        request = GetEventInformationRequest()
+        result = await handlers.handle_get_event_information(0, request.encode(), SOURCE)
+        ack = GetEventInformationACK.decode(result)
+        assert len(ack.list_of_event_summaries) == 0
+
+    @pytest.mark.asyncio
+    async def test_event_information_with_timestamps(self):
+        """Object with valid EVENT_TIME_STAMPS list of 3 BACnetTimeStamp is used."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.EVENT_STATE] = EventState.OFFNORMAL
+        ts0 = BACnetTimeStamp(choice=1, value=100)
+        ts1 = BACnetTimeStamp(choice=1, value=200)
+        ts2 = BACnetTimeStamp(choice=1, value=300)
+        ai._properties[PropertyIdentifier.EVENT_TIME_STAMPS] = [ts0, ts1, ts2]
+        db.add(ai)
+
+        request = GetEventInformationRequest()
+        result = await handlers.handle_get_event_information(0, request.encode(), SOURCE)
+        ack = GetEventInformationACK.decode(result)
+        assert len(ack.list_of_event_summaries) == 1
+        summary = ack.list_of_event_summaries[0]
+        assert summary.event_time_stamps == (ts0, ts1, ts2)
+
+    @pytest.mark.asyncio
+    async def test_event_information_event_enable_bitstring(self):
+        """Object with EVENT_ENABLE as BitString is used directly."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.EVENT_STATE] = EventState.OFFNORMAL
+        enable_bs = BitString(b"\xc0", 5)  # to-offnormal=T, to-fault=T, to-normal=F
+        ai._properties[PropertyIdentifier.EVENT_ENABLE] = enable_bs
+        db.add(ai)
+
+        request = GetEventInformationRequest()
+        result = await handlers.handle_get_event_information(0, request.encode(), SOURCE)
+        ack = GetEventInformationACK.decode(result)
+        assert len(ack.list_of_event_summaries) == 1
+        assert ack.list_of_event_summaries[0].event_enable == enable_bs
+
+
+# ---------------------------------------------------------------------------
+# Section 3D: Misc Handlers (~8 tests)
+# ---------------------------------------------------------------------------
+
+
+class TestWhoHasByName:
+    """Tests for Who-Has handler name matching and edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_who_has_by_name_found(self):
+        """WhoHasRequest with object_name matching an object sends I-Have."""
+        import bac_py.objects  # noqa: F401
+        from bac_py.services.who_has import WhoHasRequest
+
+        app, db, device = _make_app(device_instance=100)
+        ai = AnalogInputObject(1, object_name="test-sensor")
+        db.add(ai)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = WhoHasRequest(object_name="test-sensor")
+        await handlers.handle_who_has(7, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_who_has_by_name_not_found(self):
+        """WhoHasRequest with object_name not matching any object sends no I-Have."""
+        import bac_py.objects  # noqa: F401
+        from bac_py.services.who_has import WhoHasRequest
+
+        app, db, device = _make_app(device_instance=100)
+        ai = AnalogInputObject(1, object_name="real-sensor")
+        db.add(ai)
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = WhoHasRequest(object_name="nonexistent-sensor")
+        await handlers.handle_who_has(7, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_not_called()
+
+
+class TestWriteGroupChannel:
+    """Tests for WriteGroup handler channel matching."""
+
+    @pytest.mark.asyncio
+    async def test_write_group_channel_match(self):
+        """WriteGroup with channel that matches a Channel object writes the value."""
+        from bac_py.encoding.primitives import encode_application_unsigned
+        from bac_py.objects.channel import ChannelObject
+        from bac_py.services.write_group import GroupChannelValue, WriteGroupRequest
+        from bac_py.types.enums import UnconfirmedServiceChoice
+
+        _, db, _, handlers = _make_app_and_handlers()
+
+        # Create a Channel object that belongs to group 5 with channel_number=1
+        channel = ChannelObject(1, channel_number=1)
+        channel._properties[PropertyIdentifier.CONTROL_GROUPS] = [5]
+        channel.async_write_property = AsyncMock()
+        db.add(channel)
+
+        value_bytes = encode_application_unsigned(42)
+        request = WriteGroupRequest(
+            group_number=5,
+            write_priority=8,
+            change_list=[
+                GroupChannelValue(channel=1, value=bytes(value_bytes)),
+            ],
+        )
+        await handlers.handle_write_group(
+            UnconfirmedServiceChoice.WRITE_GROUP,
+            request.encode(),
+            SOURCE,
+        )
+        # The channel's async_write_property should have been called
+        channel.async_write_property.assert_called_once()
+        call_args = channel.async_write_property.call_args
+        assert call_args[0][0] == PropertyIdentifier.PRESENT_VALUE
+
+    @pytest.mark.asyncio
+    async def test_write_group_no_matching_channel(self):
+        """WriteGroup with group/channel that doesn't match any object does nothing."""
+        from bac_py.encoding.primitives import encode_application_unsigned
+        from bac_py.objects.channel import ChannelObject
+        from bac_py.services.write_group import GroupChannelValue, WriteGroupRequest
+        from bac_py.types.enums import UnconfirmedServiceChoice
+
+        _, db, _, handlers = _make_app_and_handlers()
+
+        # Create a Channel object that belongs to group 10 (not group 5)
+        channel = ChannelObject(1, channel_number=1)
+        channel._properties[PropertyIdentifier.CONTROL_GROUPS] = [10]
+        channel.async_write_property = AsyncMock()
+        db.add(channel)
+
+        value_bytes = encode_application_unsigned(42)
+        request = WriteGroupRequest(
+            group_number=5,
+            write_priority=8,
+            change_list=[
+                GroupChannelValue(channel=1, value=bytes(value_bytes)),
+            ],
+        )
+        await handlers.handle_write_group(
+            UnconfirmedServiceChoice.WRITE_GROUP,
+            request.encode(),
+            SOURCE,
+        )
+        # Channel should NOT have been written to (group doesn't match)
+        channel.async_write_property.assert_not_called()
+
+
+class TestYouAreHandler:
+    """Tests for You-Are handler callback invocation."""
+
+    @pytest.mark.asyncio
+    async def test_you_are_callback(self):
+        """YouAreRequest when _you_are_callback is set invokes the callback."""
+        from bac_py.services.device_discovery import YouAreRequest
+        from bac_py.types.enums import UnconfirmedServiceChoice
+
+        app, _, _, handlers = _make_app_and_handlers()
+        callback = MagicMock()
+        app._you_are_callback = callback
+
+        request = YouAreRequest(
+            device_identifier=ObjectIdentifier(ObjectType.DEVICE, 42),
+            device_mac_address=b"\xc0\xa8\x01\x01\xba\xc0",
+        )
+        await handlers.handle_you_are(
+            UnconfirmedServiceChoice.YOU_ARE,
+            request.encode(),
+            SOURCE,
+        )
+        callback.assert_called_once()
+        call_args = callback.call_args
+        assert call_args[0][0].device_identifier == ObjectIdentifier(ObjectType.DEVICE, 42)
+        assert call_args[0][0].device_mac_address == b"\xc0\xa8\x01\x01\xba\xc0"
+        assert call_args[0][1] == SOURCE
+
+    @pytest.mark.asyncio
+    async def test_you_are_no_callback(self):
+        """YouAreRequest when no callback is set does not raise."""
+        from bac_py.services.device_discovery import YouAreRequest
+        from bac_py.types.enums import UnconfirmedServiceChoice
+
+        app, _, _, handlers = _make_app_and_handlers()
+        # Ensure no callback attribute
+        if hasattr(app, "_you_are_callback"):
+            delattr(app, "_you_are_callback")
+
+        request = YouAreRequest(
+            device_identifier=ObjectIdentifier(ObjectType.DEVICE, 42),
+            device_mac_address=b"\xc0\xa8\x01\x01\xba\xc0",
+        )
+        result = await handlers.handle_you_are(
+            UnconfirmedServiceChoice.YOU_ARE,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+
+class TestReadRangeNegativeCount:
+    """Tests for ReadRange handler with negative count (reverse direction)."""
+
+    @pytest.mark.asyncio
+    async def test_read_range_negative_count(self):
+        """ReadRange with negative count returns items in reverse direction."""
+        import bac_py.objects  # noqa: F401
+        from bac_py.services.read_range import (
+            RangeByPosition,
+            ReadRangeACK,
+            ReadRangeRequest,
+        )
+
+        app, db, device = _make_app()
+        # Add enough objects so OBJECT_LIST has multiple entries
+        for i in range(1, 8):
+            db.add(AnalogInputObject(i, object_name=f"AI-{i}"))
+        handlers = DefaultServerHandlers(app, db, device)
+
+        # total items = 8 (1 device + 7 analog inputs)
+        # reference_index=6, count=-3 -> end = min(8, 6) = 6, start = max(0, 6 + (-3)) = 3
+        # items = value[3:6] -> 3 items
+        request = ReadRangeRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            range=RangeByPosition(reference_index=6, count=-3),
+        )
+
+        result = await handlers.handle_read_range(26, request.encode(), SOURCE)
+        ack = ReadRangeACK.decode(result)
+        assert ack.item_count == 3
+        # Not the first item, not the last item
+        assert ack.result_flags.first_item is False
+        assert ack.result_flags.last_item is False
+        assert ack.result_flags.more_items is True
+
+
+class TestValidatePasswordUnexpected:
+    """Tests for _validate_password edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_validate_password_unexpected(self):
+        """Device has no password but request includes one raises PASSWORD_FAILURE."""
+        from bac_py.services.device_mgmt import DeviceCommunicationControlRequest
+        from bac_py.types.enums import EnableDisable
+
+        app, db, device = _make_app()
+        # No password configured (default from _make_app)
+        assert app.config.password is None
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = DeviceCommunicationControlRequest(
+            enable_disable=EnableDisable.ENABLE,
+            password="unexpected-password",
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_device_communication_control(17, request.encode(), SOURCE)
+        assert exc_info.value.error_class == ErrorClass.SECURITY
+        assert exc_info.value.error_code == ErrorCode.PASSWORD_FAILURE

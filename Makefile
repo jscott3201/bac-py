@@ -1,6 +1,7 @@
 .PHONY: lint typecheck test docs check fix format coverage coverage-html \
        docker-build docker-test docker-stress docker-test-client docker-test-bbmd \
-       docker-test-router docker-demo docker-demo-auto docker-clean
+       docker-test-router docker-test-device-mgmt docker-test-cov-advanced \
+       docker-test-events docker-demo docker-demo-auto docker-clean
 
 lint:
 	uv run ruff check src/ tests/
@@ -55,11 +56,26 @@ docker-test-stress: docker-build
 	$(COMPOSE) --profile stress up --abort-on-container-exit --exit-code-from test-stress
 	$(COMPOSE) --profile stress down -v
 
+docker-test-device-mgmt: docker-build
+	$(COMPOSE) --profile device-mgmt up --abort-on-container-exit --exit-code-from test-device-mgmt
+	$(COMPOSE) --profile device-mgmt down -v
+
+docker-test-cov-advanced: docker-build
+	$(COMPOSE) --profile cov-advanced up --abort-on-container-exit --exit-code-from test-cov-advanced
+	$(COMPOSE) --profile cov-advanced down -v
+
+docker-test-events: docker-build
+	$(COMPOSE) --profile events up --abort-on-container-exit --exit-code-from test-events
+	$(COMPOSE) --profile events down -v
+
 docker-test: docker-build
 	$(MAKE) docker-test-client
 	$(MAKE) docker-test-bbmd
 	$(MAKE) docker-test-router
 	$(MAKE) docker-test-stress
+	$(MAKE) docker-test-device-mgmt
+	$(MAKE) docker-test-cov-advanced
+	$(MAKE) docker-test-events
 
 docker-stress: docker-build
 	$(COMPOSE) --profile stress-runner up --abort-on-container-exit --exit-code-from stress-runner

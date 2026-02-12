@@ -40,6 +40,7 @@ services:
       ROLE: server
       DEVICE_INSTANCE: "100"
       BACNET_PORT: "47808"
+      BROADCAST_ADDRESS: "172.30.1.255"
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.10
@@ -72,6 +73,7 @@ services:
       ROLE: bbmd
       DEVICE_INSTANCE: "200"
       BACNET_PORT: "47808"
+      BROADCAST_ADDRESS: "172.30.1.255"
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.30
@@ -84,6 +86,7 @@ services:
       ROLE: server
       DEVICE_INSTANCE: "201"
       BACNET_PORT: "47808"
+      BROADCAST_ADDRESS: "172.30.1.255"
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.31
@@ -125,6 +128,7 @@ services:
       INTERFACE_2: "172.30.2.50"
       PORT_1: "47808"
       PORT_2: "47808"
+      BROADCAST_ADDRESS: "172.30.1.255"
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.50
@@ -139,6 +143,7 @@ services:
       ROLE: server
       DEVICE_INSTANCE: "301"
       BACNET_PORT: "47808"
+      BROADCAST_ADDRESS: "172.30.2.255"
     networks:
       bacnet-secondary:
         ipv4_address: 172.30.2.10
@@ -178,10 +183,11 @@ services:
       ROLE: server
       DEVICE_INSTANCE: "400"
       BACNET_PORT: "47808"
+      BROADCAST_ADDRESS: "172.30.1.255"
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.70
-    profiles: ["stress", "all"]
+    profiles: ["stress", "stress-runner", "all"]
 
   test-stress:
     <<: *build
@@ -211,6 +217,7 @@ services:
       ROLE: thermostat
       DEVICE_INSTANCE: "500"
       BACNET_PORT: "47808"
+      BROADCAST_ADDRESS: "172.30.1.255"
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.90
@@ -247,3 +254,102 @@ services:
       server-stress:
         condition: service_healthy
     profiles: ["stress-runner"]
+
+  # ===========================================================================
+  # Scenario 6: Device Management (DCC, TimeSynchronization, CreateObject, etc.)
+  # ===========================================================================
+
+  server-device-mgmt:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-server-device-mgmt
+    environment:
+      ROLE: server
+      DEVICE_INSTANCE: "600"
+      BACNET_PORT: "47808"
+      BROADCAST_ADDRESS: "172.30.1.255"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.100
+    profiles: ["device-mgmt", "all"]
+
+  test-device-mgmt:
+    <<: *build
+    container_name: bacnet-test-device-mgmt
+    environment:
+      ROLE: test
+      TEST_FILE: test_device_mgmt.py
+      SERVER_ADDRESS: "172.30.1.100"
+      SERVER_INSTANCE: "600"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.101
+    depends_on:
+      server-device-mgmt:
+        condition: service_healthy
+    profiles: ["device-mgmt", "all"]
+
+  # ===========================================================================
+  # Scenario 7: COV Advanced (subscriptions, lifetime, confirmed/unconfirmed)
+  # ===========================================================================
+
+  server-cov:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-server-cov
+    environment:
+      ROLE: server
+      DEVICE_INSTANCE: "601"
+      BACNET_PORT: "47808"
+      BROADCAST_ADDRESS: "172.30.1.255"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.102
+    profiles: ["cov-advanced", "all"]
+
+  test-cov-advanced:
+    <<: *build
+    container_name: bacnet-test-cov-advanced
+    environment:
+      ROLE: test
+      TEST_FILE: test_cov_advanced.py
+      SERVER_ADDRESS: "172.30.1.102"
+      SERVER_INSTANCE: "601"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.103
+    depends_on:
+      server-cov:
+        condition: service_healthy
+    profiles: ["cov-advanced", "all"]
+
+  # ===========================================================================
+  # Scenario 8: Events & Alarms (GetAlarmSummary, GetEventInfo, Acknowledge)
+  # ===========================================================================
+
+  server-events:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-server-events
+    environment:
+      ROLE: server-extended
+      DEVICE_INSTANCE: "602"
+      BACNET_PORT: "47808"
+      BROADCAST_ADDRESS: "172.30.1.255"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.104
+    profiles: ["events", "all"]
+
+  test-events:
+    <<: *build
+    container_name: bacnet-test-events
+    environment:
+      ROLE: test
+      TEST_FILE: test_events.py
+      SERVER_ADDRESS: "172.30.1.104"
+      SERVER_INSTANCE: "602"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.105
+    depends_on:
+      server-events:
+        condition: service_healthy
+    profiles: ["events", "all"]

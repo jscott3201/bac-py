@@ -142,6 +142,12 @@ class DeviceConfig:
     router_config: RouterConfig | None = None
     """Optional router configuration for multi-network mode."""
 
+    broadcast_address: str = "255.255.255.255"
+    """Directed broadcast address for this subnet. Default global
+    broadcast works on physical networks; set to the subnet broadcast
+    (e.g. ``"192.168.1.255"``) when running in Docker bridge networks
+    where global broadcast is not routable."""
+
     password: str | None = None
     """Optional password for DeviceCommunicationControl and ReinitializeDevice
     services (1-20 characters, per Clause 16.1.3.1 and 16.4.3.4).
@@ -341,6 +347,7 @@ class BACnetApplication:
         self._transport = BIPTransport(
             interface=self._config.interface,
             port=self._config.port,
+            broadcast_address=self._config.broadcast_address,
         )
         self._network = NetworkLayer(self._transport)
         self._network.on_receive(self._on_apdu_received)

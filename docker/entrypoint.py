@@ -15,6 +15,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger("entrypoint")
 
+# Subnet-directed broadcast for Docker bridge networks (global broadcast
+# 255.255.255.255 is not routable on bridge networks).
+BROADCAST_ADDRESS = os.environ.get("BROADCAST_ADDRESS", "255.255.255.255")
+
 
 async def run_server() -> None:
     """Run a BACnet server with sample objects."""
@@ -32,6 +36,7 @@ async def run_server() -> None:
         instance_number=instance,
         name=f"Docker-Device-{instance}",
         port=port,
+        broadcast_address=BROADCAST_ADDRESS,
     )
     app = BACnetApplication(config)
     await app.start()
@@ -109,6 +114,7 @@ async def run_bbmd() -> None:
         instance_number=instance,
         name=f"Docker-BBMD-{instance}",
         port=port,
+        broadcast_address=BROADCAST_ADDRESS,
     )
     app = BACnetApplication(config)
     await app.start()
@@ -184,6 +190,7 @@ async def run_router() -> None:
         instance_number=instance,
         name=f"Docker-Router-{instance}",
         router_config=router_config,
+        broadcast_address=BROADCAST_ADDRESS,
     )
     app = BACnetApplication(config)
     await app.start()
@@ -219,6 +226,155 @@ async def run_router() -> None:
     await stop.wait()
 
     logger.info("Shutting down router...")
+    await app.stop()
+
+
+async def run_server_extended() -> None:
+    """Run a BACnet server with additional objects for advanced integration tests.
+
+    Extends the basic server with: extra analog objects (for segmentation
+    testing), notification class + event enrollment (for alarm/event testing),
+    and audit reporter/log (for audit testing).
+    """
+    from bac_py.app.application import BACnetApplication, DeviceConfig
+    from bac_py.app.audit import AuditManager
+    from bac_py.app.server import DefaultServerHandlers
+    from bac_py.objects.analog import AnalogInputObject, AnalogOutputObject, AnalogValueObject
+    from bac_py.objects.audit_log import AuditLogObject
+    from bac_py.objects.audit_reporter import AuditReporterObject
+    from bac_py.objects.binary import BinaryInputObject, BinaryValueObject
+    from bac_py.objects.device import DeviceObject
+    from bac_py.objects.event_enrollment import EventEnrollmentObject
+    from bac_py.objects.notification import NotificationClassObject
+    from bac_py.types.constructed import BACnetDeviceObjectPropertyReference
+    from bac_py.types.enums import (
+        AuditLevel,
+        EngineeringUnits,
+        EventType,
+        ObjectType,
+        PropertyIdentifier,
+    )
+    from bac_py.types.primitives import ObjectIdentifier
+
+    instance = int(os.environ.get("DEVICE_INSTANCE", "600"))
+    port = int(os.environ.get("BACNET_PORT", "47808"))
+
+    config = DeviceConfig(
+        instance_number=instance,
+        name=f"Docker-Extended-{instance}",
+        port=port,
+        broadcast_address=BROADCAST_ADDRESS,
+    )
+    app = BACnetApplication(config)
+    await app.start()
+
+    device = DeviceObject(
+        instance,
+        object_name=f"Docker-Extended-{instance}",
+        vendor_name="bac-py",
+        vendor_identifier=0,
+        model_name="bac-py-docker-extended",
+        firmware_revision="0.1.0",
+        application_software_version="0.1.0",
+    )
+    app.object_db.add(device)
+
+    # --- Basic objects (same as standard server) ---
+    ai1 = AnalogInputObject(
+        1,
+        object_name="Temperature",
+        present_value=72.5,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+    )
+    ao1 = AnalogOutputObject(
+        1,
+        object_name="Setpoint-Output",
+        present_value=68.0,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+    )
+    av1 = AnalogValueObject(
+        1,
+        object_name="Setpoint",
+        present_value=70.0,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+        commandable=True,
+    )
+    bi1 = BinaryInputObject(1, object_name="Occupancy")
+    bv1 = BinaryValueObject(1, object_name="Override", commandable=True)
+
+    for obj in (ai1, ao1, av1, bi1, bv1):
+        app.object_db.add(obj)
+
+    # --- Extra analog objects (for segmentation / RPM testing) ---
+    for i in range(2, 22):
+        ai = AnalogInputObject(
+            i,
+            object_name=f"Sensor-{i}",
+            present_value=60.0 + i * 0.5,
+            units=EngineeringUnits.DEGREES_FAHRENHEIT,
+        )
+        app.object_db.add(ai)
+
+    # --- Notification Class (for alarm/event testing) ---
+    nc = NotificationClassObject(1, object_name="Alarms")
+    nc._properties[PropertyIdentifier.PRIORITY] = [3, 3, 3]
+    nc._properties[PropertyIdentifier.ACK_REQUIRED] = [True, False, False]
+    app.object_db.add(nc)
+
+    # --- Event Enrollment monitoring ai,1 (for alarm testing) ---
+    ee = EventEnrollmentObject(
+        1,
+        object_name="TempHighAlarm",
+        event_type=EventType.OUT_OF_RANGE,
+    )
+    ee._properties[PropertyIdentifier.OBJECT_PROPERTY_REFERENCE] = (
+        BACnetDeviceObjectPropertyReference(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+        )
+    )
+    ee._properties[PropertyIdentifier.NOTIFICATION_CLASS] = 1
+    ee._properties[PropertyIdentifier.EVENT_PARAMETERS] = {
+        "low_limit": 50.0,
+        "high_limit": 90.0,
+        "deadband": 2.0,
+        "time_delay": 0,
+    }
+    app.object_db.add(ee)
+
+    # --- Audit Reporter + Audit Log (for audit testing) ---
+    reporter = AuditReporterObject(1, object_name="AuditReporter-1")
+    reporter._properties[PropertyIdentifier.AUDIT_LEVEL] = AuditLevel.AUDIT_ALL
+    app.object_db.add(reporter)
+
+    audit_log = AuditLogObject(1, object_name="AuditLog-1")
+    audit_log._properties[PropertyIdentifier.LOG_ENABLE] = True
+    audit_log._properties[PropertyIdentifier.BUFFER_SIZE] = 1000
+    audit_log._properties[PropertyIdentifier.STOP_WHEN_FULL] = False
+    app.object_db.add(audit_log)
+
+    # Wire up audit manager
+    app._audit_manager = AuditManager(app.object_db)
+
+    # Register default handlers
+    handlers = DefaultServerHandlers(app, app.object_db, device)
+    handlers.register()
+
+    logger.info(
+        "Extended server running: device %d on port %d (%d objects)",
+        instance,
+        port,
+        len(list(app.object_db)),
+    )
+    _write_healthy()
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+    logger.info("Shutting down extended server...")
     await app.stop()
 
 
@@ -283,6 +439,8 @@ def main() -> None:
 
     if role == "server":
         asyncio.run(run_server())
+    elif role == "server-extended":
+        asyncio.run(run_server_extended())
     elif role == "bbmd":
         asyncio.run(run_bbmd())
     elif role == "router":
@@ -297,8 +455,8 @@ def main() -> None:
         run_demo_client()
     else:
         logger.error(
-            "Unknown ROLE: %r (expected: server, bbmd, router, test, stress, "
-            "thermostat, demo-client)",
+            "Unknown ROLE: %r (expected: server, server-extended, bbmd, router, "
+            "test, stress, thermostat, demo-client)",
             role,
         )
         sys.exit(1)

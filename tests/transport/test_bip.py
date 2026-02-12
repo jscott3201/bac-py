@@ -2,12 +2,17 @@
 
 import asyncio
 import logging
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from bac_py.network.address import BIPAddress
-from bac_py.transport.bip import BIPTransport, _UDPProtocol
+from bac_py.transport.bip import (
+    BIPTransport,
+    _is_confirmed_request_npdu,
+    _resolve_local_ip,
+    _UDPProtocol,
+)
 from bac_py.transport.bvll import encode_bvll
 from bac_py.types.enums import BvlcFunction, BvlcResultCode
 
@@ -1240,3 +1245,813 @@ class TestBBMDClientFunctions:
         with pytest.raises(TimeoutError):
             await transport.read_bdt(self.BBMD_ADDR, timeout=0.1)
         await task
+
+
+# --- Coverage gap tests ---
+
+
+class TestIsConfirmedRequestNpduEdgeCases:
+    """Cover edge cases in _is_confirmed_request_npdu: truncated DNET/SNET."""
+
+    def test_dnet_present_but_truncated(self):
+        """Line 48: DNET flag set but data truncated before DLEN byte."""
+        # control=0x20 (DNET present), but only 2 bytes after version+control
+        npdu = b"\x01\x20\xff"
+        assert _is_confirmed_request_npdu(npdu) is False
+
+    def test_snet_present_but_truncated(self):
+        """Line 53: SNET flag set but data truncated before SLEN byte."""
+        # control=0x08 (SNET present), only 2 bytes after version+control
+        npdu = b"\x01\x08\x00"
+        assert _is_confirmed_request_npdu(npdu) is False
+
+    def test_dnet_plus_snet_offset_overflow(self):
+        """Line 59: DNET+SNET present, offset overflows past data length."""
+        # control=0x28 (DNET+SNET both present)
+        # DNET=0x0001, DLEN=0 (broadcast dest), hop count consumed,
+        # but SNET data truncated
+        npdu = b"\x01\x28\x00\x01\x00"
+        assert _is_confirmed_request_npdu(npdu) is False
+
+    def test_dnet_with_hop_count_overflow(self):
+        """DNET present but hop count pushes offset past data."""
+        # control=0x20 (DNET), DNET=0x0001, DLEN=0, hop count byte needed
+        # but no APDU byte after hop count
+        npdu = b"\x01\x20\x00\x01\x00\xff"
+        assert _is_confirmed_request_npdu(npdu) is False
+
+    def test_snet_present_alone_truncated_at_slen(self):
+        """SNET flag set with just enough for offset+3 check to fail."""
+        # control=0x08, only one byte of SNET data (need 3)
+        npdu = b"\x01\x08\x00\x01"
+        assert _is_confirmed_request_npdu(npdu) is False
+
+    def test_dnet_and_snet_confirmed_request(self):
+        """Full DNET+SNET with confirmed request at the end."""
+        # control=0x28 (DNET+SNET), DNET=0x0001, DLEN=1, DADR=0x05,
+        # SNET=0x0002, SLEN=1, SADR=0x06, hop_count=0xFF,
+        # APDU type=0x00 (confirmed request)
+        npdu = b"\x01\x28\x00\x01\x01\x05\x00\x02\x01\x06\xff\x00\x02"
+        assert _is_confirmed_request_npdu(npdu) is True
+
+
+class TestResolveLocalIp:
+    """Cover _resolve_local_ip OSError fallback (lines 71-77)."""
+
+    def test_oserror_returns_loopback(self):
+        """When socket.connect raises OSError, return 127.0.0.1."""
+        with patch("bac_py.transport.bip.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock.__enter__ = MagicMock(return_value=mock_sock)
+            mock_sock.__exit__ = MagicMock(return_value=False)
+            mock_sock.connect.side_effect = OSError("Network unreachable")
+            mock_sock_cls.return_value = mock_sock
+
+            result = _resolve_local_ip()
+            assert result == "127.0.0.1"
+
+    def test_successful_resolution_returns_ip(self):
+        """Normal path returns the IP from getsockname."""
+        with patch("bac_py.transport.bip.socket.socket") as mock_sock_cls:
+            mock_sock = MagicMock()
+            mock_sock.__enter__ = MagicMock(return_value=mock_sock)
+            mock_sock.__exit__ = MagicMock(return_value=False)
+            mock_sock.getsockname.return_value = ("192.168.1.100", 0)
+            mock_sock_cls.return_value = mock_sock
+
+            result = _resolve_local_ip()
+            assert result == "192.168.1.100"
+
+
+class TestUDPProtocolConnectionLost:
+    """Cover _UDPProtocol.connection_lost paths (lines 102, 105)."""
+
+    def test_connection_lost_with_exception_logs_warning(self, caplog):
+        """Line 102: exc is not None => warning log."""
+        callback = MagicMock()
+        lost_callback = MagicMock()
+        protocol = _UDPProtocol(callback, connection_lost_callback=lost_callback)
+
+        exc = OSError("Socket closed unexpectedly")
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.bip"):
+            protocol.connection_lost(exc)
+
+        assert "UDP connection lost" in caplog.text
+        assert "Socket closed unexpectedly" in caplog.text
+        lost_callback.assert_called_once_with(exc)
+
+    def test_connection_lost_without_exception_logs_debug(self, caplog):
+        """Exc is None => debug log, callback still invoked."""
+        callback = MagicMock()
+        lost_callback = MagicMock()
+        protocol = _UDPProtocol(callback, connection_lost_callback=lost_callback)
+
+        with caplog.at_level(logging.DEBUG, logger="bac_py.transport.bip"):
+            protocol.connection_lost(None)
+
+        assert "UDP connection closed" in caplog.text
+        lost_callback.assert_called_once_with(None)
+
+    def test_connection_lost_no_callback(self, caplog):
+        """Line 105: connection_lost_callback is None => no call."""
+        callback = MagicMock()
+        protocol = _UDPProtocol(callback, connection_lost_callback=None)
+
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.bip"):
+            protocol.connection_lost(OSError("test"))
+
+        assert "UDP connection lost" in caplog.text
+
+
+class TestStartWildcardIP:
+    """Cover start() with wildcard interface resolving local IP (line 171)."""
+
+    async def test_start_wildcard_resolves_local_ip(self):
+        """Line 171: When interface is 0.0.0.0, _resolve_local_ip is called."""
+        transport = BIPTransport(interface="0.0.0.0", port=0)
+        with patch(
+            "bac_py.transport.bip._resolve_local_ip", return_value="10.0.0.42"
+        ) as mock_resolve:
+            try:
+                await transport.start()
+                mock_resolve.assert_called_once()
+                assert transport.local_address.host == "10.0.0.42"
+            finally:
+                await transport.stop()
+
+
+class TestStartMulticastJoinFailure:
+    """Cover multicast join OSError path (lines 183-184)."""
+
+    async def test_multicast_join_failure_logged_as_warning(self, caplog):
+        """Lines 183-184: OSError during multicast join logged as warning."""
+        transport = BIPTransport(
+            interface="127.0.0.1",
+            port=0,
+            multicast_enabled=True,
+        )
+        # Patch socket.inet_aton to raise OSError during multicast join
+        # (called after endpoint creation, so the socket bind succeeds)
+        original_inet_aton = __import__("socket").inet_aton
+
+        call_count = 0
+
+        def failing_inet_aton(addr):
+            nonlocal call_count
+            call_count += 1
+            # The first call to inet_aton within the multicast block is
+            # for the group address. Let it fail.
+            if call_count == 1:
+                raise OSError("Multicast join failed")
+            return original_inet_aton(addr)
+
+        try:
+            with (
+                patch(
+                    "bac_py.transport.bip.socket.inet_aton",
+                    side_effect=failing_inet_aton,
+                ),
+                caplog.at_level(logging.WARNING, logger="bac_py.transport.bip"),
+            ):
+                await transport.start()
+            assert "Failed to join multicast group" in caplog.text
+        finally:
+            await transport.stop()
+
+
+class TestStopForeignDeviceCleanup:
+    """Cover stop() foreign device cleanup path (lines 191-192)."""
+
+    async def test_stop_calls_foreign_device_stop(self):
+        """Lines 191-192: stop() calls _foreign_device.stop() and clears it."""
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        await transport.start()
+
+        mock_fd = AsyncMock()
+        mock_fd.stop = AsyncMock()
+        transport._foreign_device = mock_fd
+
+        await transport.stop()
+
+        mock_fd.stop.assert_awaited_once()
+        assert transport._foreign_device is None
+
+
+class TestStopMulticastLeaveOSError:
+    """Cover stop() multicast leave OSError path (lines 206-207)."""
+
+    async def test_multicast_leave_oserror_suppressed(self):
+        """Lines 206-207: OSError during multicast leave is silently caught."""
+        transport = BIPTransport(
+            interface="127.0.0.1",
+            port=0,
+            multicast_enabled=True,
+        )
+        await transport.start()
+
+        # Patch socket.inet_aton to raise OSError during multicast leave.
+        # stop() calls socket.inet_aton inside the try/except OSError block.
+        with patch(
+            "bac_py.transport.bip.socket.inet_aton",
+            side_effect=OSError("Cannot leave multicast group"),
+        ):
+            # Should not raise despite OSError
+            await transport.stop()
+
+        assert transport._transport is None
+
+
+class TestSendBroadcastForeignDevice:
+    """Cover send_broadcast() foreign device distribute path (lines 252-253)."""
+
+    def test_send_broadcast_uses_distribute_when_registered(self):
+        """Lines 252-253: Foreign device uses distribute instead of broadcast."""
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+
+        mock_fd = MagicMock()
+        mock_fd.is_registered = True
+        mock_fd.send_distribute_broadcast = MagicMock()
+        transport._foreign_device = mock_fd
+
+        npdu = b"\x01\x00\x10"
+        transport.send_broadcast(npdu)
+
+        mock_fd.send_distribute_broadcast.assert_called_once_with(npdu)
+        # Regular sendto should NOT have been called
+        mock_udp.sendto.assert_not_called()
+
+    def test_send_broadcast_normal_when_fd_not_registered(self):
+        """When foreign device exists but not registered, use normal broadcast."""
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+
+        mock_fd = MagicMock()
+        mock_fd.is_registered = False
+        transport._foreign_device = mock_fd
+
+        npdu = b"\x01\x00\x10"
+        transport.send_broadcast(npdu)
+
+        # Normal broadcast should happen
+        mock_udp.sendto.assert_called_once()
+
+
+class TestAttachForeignDevice:
+    """Cover attach_foreign_device method (lines 353-372)."""
+
+    @pytest.mark.asyncio
+    async def test_attach_foreign_device_success(self):
+        """Lines 353-372: Full attach_foreign_device path."""
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        await transport.start()
+        bbmd_addr = BIPAddress(host="192.168.1.1", port=47808)
+
+        try:
+            fd = await transport.attach_foreign_device(bbmd_addr, ttl=60)
+
+            assert fd is not None
+            assert transport._foreign_device is fd
+            assert fd.bbmd_address == bbmd_addr
+            assert fd.ttl == 60
+        finally:
+            await transport.stop()
+
+    @pytest.mark.asyncio
+    async def test_attach_foreign_device_not_started_raises(self):
+        """Line 353-355: RuntimeError when transport not started."""
+        transport = BIPTransport()
+        bbmd_addr = BIPAddress(host="192.168.1.1", port=47808)
+
+        with pytest.raises(RuntimeError, match="Transport not started"):
+            await transport.attach_foreign_device(bbmd_addr, ttl=60)
+
+    @pytest.mark.asyncio
+    async def test_attach_foreign_device_already_attached_raises(self):
+        """Lines 356-358: RuntimeError when FD already attached."""
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        await transport.start()
+        bbmd_addr = BIPAddress(host="192.168.1.1", port=47808)
+
+        try:
+            await transport.attach_foreign_device(bbmd_addr, ttl=60)
+            with pytest.raises(RuntimeError, match="Foreign device manager already attached"):
+                await transport.attach_foreign_device(bbmd_addr, ttl=60)
+        finally:
+            await transport.stop()
+
+
+class TestForeignDeviceProperty:
+    """Cover foreign_device property (line 331)."""
+
+    def test_foreign_device_none_initially(self):
+        """Line 331: Returns None when no FD is attached."""
+        transport = BIPTransport()
+        assert transport.foreign_device is None
+
+    @pytest.mark.asyncio
+    async def test_foreign_device_returns_manager_after_attach(self):
+        """Line 331: Returns the ForeignDeviceManager after attach."""
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        await transport.start()
+        bbmd_addr = BIPAddress(host="192.168.1.1", port=47808)
+
+        try:
+            fd = await transport.attach_foreign_device(bbmd_addr, ttl=60)
+            assert transport.foreign_device is fd
+        finally:
+            await transport.stop()
+
+
+class TestBBMDLocalDeliverConfirmedDrop:
+    """Cover _bbmd_local_deliver confirmed request drop (lines 567-572)."""
+
+    def test_confirmed_request_dropped_via_bbmd_local_deliver(self, caplog):
+        """Lines 567-572: Confirmed request via BBMD broadcast is dropped."""
+        transport = BIPTransport()
+        received: list[tuple[bytes, bytes]] = []
+        transport.on_receive(lambda d, s: received.append((d, s)))
+
+        # Confirmed request NPDU: version=1, control=0x04, APDU type=0x00
+        confirmed_npdu = b"\x01\x04\x00\x02\x01\x0c"
+        source = BIPAddress(host="10.0.0.50", port=47808)
+
+        with caplog.at_level(logging.DEBUG, logger="bac_py.transport.bip"):
+            transport._bbmd_local_deliver(confirmed_npdu, source)
+
+        assert len(received) == 0
+        assert "Dropped confirmed request via BBMD broadcast" in caplog.text
+
+    def test_unconfirmed_request_delivered_via_bbmd_local_deliver(self):
+        """Unconfirmed requests via BBMD are delivered normally."""
+        transport = BIPTransport()
+        received: list[tuple[bytes, bytes]] = []
+        transport.on_receive(lambda d, s: received.append((d, s)))
+
+        # Unconfirmed request NPDU: version=1, control=0x00, APDU type=0x10
+        unconfirmed_npdu = b"\x01\x00\x10\x08\x00"
+        source = BIPAddress(host="10.0.0.50", port=47808)
+
+        transport._bbmd_local_deliver(unconfirmed_npdu, source)
+
+        assert len(received) == 1
+        assert received[0][0] == unconfirmed_npdu
+
+    def test_bbmd_local_deliver_no_callback(self):
+        """No callback registered => no delivery, no error."""
+        transport = BIPTransport()
+        unconfirmed_npdu = b"\x01\x00\x10\x08\x00"
+        source = BIPAddress(host="10.0.0.50", port=47808)
+
+        # Should not raise
+        transport._bbmd_local_deliver(unconfirmed_npdu, source)
+
+
+class TestReadBdtTruncatedEntry:
+    """Cover read_bdt truncated entry path (line 404)."""
+
+    BBMD_ADDR = BIPAddress(host="192.168.1.1", port=47808)
+
+    def _make_transport_with_mock(self) -> tuple[BIPTransport, MagicMock]:
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+        transport._local_address = BIPAddress(host="10.0.0.1", port=47808)
+        return transport, mock_udp
+
+    @pytest.mark.asyncio
+    async def test_read_bdt_truncated_entry_skipped(self):
+        """Line 404: Truncated BDT entry at end of response is skipped."""
+        transport, _ = self._make_transport_with_mock()
+
+        async def respond():
+            await asyncio.sleep(0.01)
+            from bac_py.transport.bbmd import BDTEntry
+
+            entry = BDTEntry(
+                address=self.BBMD_ADDR,
+                broadcast_mask=b"\xff\xff\xff\xff",
+            )
+            full_entry = entry.encode()
+            # Add 5 extra bytes (truncated second entry)
+            truncated = full_entry + b"\x01\x02\x03\x04\x05"
+            ack = encode_bvll(
+                BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK,
+                truncated,
+            )
+            transport._on_datagram_received(ack, (self.BBMD_ADDR.host, self.BBMD_ADDR.port))
+
+        task = asyncio.create_task(respond())
+        result = await transport.read_bdt(self.BBMD_ADDR, timeout=1.0)
+        await task
+
+        # Only the first complete entry should be returned
+        assert len(result) == 1
+
+
+class TestWriteBdtShortResponse:
+    """Cover write_bdt short response fallback (line 441)."""
+
+    BBMD_ADDR = BIPAddress(host="192.168.1.1", port=47808)
+
+    def _make_transport_with_mock(self) -> tuple[BIPTransport, MagicMock]:
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+        transport._local_address = BIPAddress(host="10.0.0.1", port=47808)
+        return transport, mock_udp
+
+    @pytest.mark.asyncio
+    async def test_write_bdt_short_response_returns_nak(self):
+        """Line 441: Response with < 2 bytes returns WRITE_BDT_NAK."""
+        transport, _ = self._make_transport_with_mock()
+
+        async def respond():
+            await asyncio.sleep(0.01)
+            # Inject a BVLC-Result with only 1 byte of data
+            key = (BvlcFunction.BVLC_RESULT, self.BBMD_ADDR)
+            future = transport._pending_bvlc.get(key)
+            if future and not future.done():
+                future.set_result(b"\x00")  # Only 1 byte
+
+        from bac_py.transport.bbmd import BDTEntry
+
+        entries = [
+            BDTEntry(address=self.BBMD_ADDR, broadcast_mask=b"\xff\xff\xff\xff"),
+        ]
+
+        task = asyncio.create_task(respond())
+        result = await transport.write_bdt(self.BBMD_ADDR, entries, timeout=1.0)
+        await task
+        assert result == BvlcResultCode.WRITE_BROADCAST_DISTRIBUTION_TABLE_NAK
+
+
+class TestDeleteFdtEntryShortResponse:
+    """Cover delete_fdt_entry short response fallback (line 514)."""
+
+    BBMD_ADDR = BIPAddress(host="192.168.1.1", port=47808)
+
+    def _make_transport_with_mock(self) -> tuple[BIPTransport, MagicMock]:
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+        transport._local_address = BIPAddress(host="10.0.0.1", port=47808)
+        return transport, mock_udp
+
+    @pytest.mark.asyncio
+    async def test_delete_fdt_entry_short_response_returns_nak(self):
+        """Line 514: Response with < 2 bytes returns DELETE_FDT_ENTRY_NAK."""
+        transport, _ = self._make_transport_with_mock()
+        fd_addr = BIPAddress(host="10.0.0.50", port=47808)
+
+        async def respond():
+            await asyncio.sleep(0.01)
+            key = (BvlcFunction.BVLC_RESULT, self.BBMD_ADDR)
+            future = transport._pending_bvlc.get(key)
+            if future and not future.done():
+                future.set_result(b"\x00")  # Only 1 byte
+
+        task = asyncio.create_task(respond())
+        result = await transport.delete_fdt_entry(self.BBMD_ADDR, fd_addr, timeout=1.0)
+        await task
+        assert result == BvlcResultCode.DELETE_FOREIGN_DEVICE_TABLE_ENTRY_NAK
+
+
+class TestSendRawNoTransport:
+    """Cover _send_raw when transport is None (line 555)."""
+
+    def test_send_raw_no_transport_does_not_raise(self):
+        """Line 555: _send_raw with None transport silently returns."""
+        transport = BIPTransport()
+        dest = BIPAddress(host="10.0.0.1", port=47808)
+
+        # Should not raise
+        transport._send_raw(b"\x81\x0a\x00\x05\x01", dest)
+
+
+class TestReadFdtTruncatedEntry:
+    """Cover read_fdt truncated entry path (line 471)."""
+
+    BBMD_ADDR = BIPAddress(host="192.168.1.1", port=47808)
+
+    def _make_transport_with_mock(self) -> tuple[BIPTransport, MagicMock]:
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+        transport._local_address = BIPAddress(host="10.0.0.1", port=47808)
+        return transport, mock_udp
+
+    @pytest.mark.asyncio
+    async def test_read_fdt_truncated_entry_skipped(self):
+        """Line 471: Truncated FDT entry at end of response is skipped."""
+        transport, _ = self._make_transport_with_mock()
+
+        async def respond():
+            await asyncio.sleep(0.01)
+            fd_addr = BIPAddress(host="10.0.0.50", port=47808)
+            full_entry = fd_addr.encode() + (60).to_bytes(2, "big") + (45).to_bytes(2, "big")
+            # Add 5 truncated bytes (incomplete second entry)
+            truncated = full_entry + b"\x01\x02\x03\x04\x05"
+            ack = encode_bvll(
+                BvlcFunction.READ_FOREIGN_DEVICE_TABLE_ACK,
+                truncated,
+            )
+            transport._on_datagram_received(ack, (self.BBMD_ADDR.host, self.BBMD_ADDR.port))
+
+        task = asyncio.create_task(respond())
+        result = await transport.read_fdt(self.BBMD_ADDR, timeout=1.0)
+        await task
+
+        assert len(result) == 1
+        assert result[0].address == BIPAddress(host="10.0.0.50", port=47808)
+
+
+class TestBvlcRequestTransportNone:
+    """Cover _bvlc_request path when transport is None during send (line 539)."""
+
+    @pytest.mark.asyncio
+    async def test_bvlc_request_transport_none_skips_sendto(self):
+        """Line 539: If transport becomes None, sendto is skipped."""
+        transport = BIPTransport()
+        transport._local_address = BIPAddress(host="10.0.0.1", port=47808)
+        # Transport is None -- sendto should be skipped, will timeout
+        dest = BIPAddress(host="192.168.1.1", port=47808)
+        bvll = encode_bvll(BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE, b"")
+
+        with pytest.raises(TimeoutError):
+            await transport._bvlc_request(
+                bvll,
+                dest,
+                BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK,
+                timeout=0.05,
+            )
+
+
+class TestStopBBMDCleanup:
+    """Cover stop() BBMD cleanup path (lines 194-195)."""
+
+    async def test_stop_calls_bbmd_stop(self):
+        """Lines 194-195: stop() calls _bbmd.stop() and clears it."""
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        await transport.start()
+
+        mock_bbmd = AsyncMock()
+        mock_bbmd.stop = AsyncMock()
+        transport._bbmd = mock_bbmd
+
+        await transport.stop()
+
+        mock_bbmd.stop.assert_awaited_once()
+        assert transport._bbmd is None
+
+
+class TestSendBroadcastMulticast:
+    """Cover send_broadcast() multicast path (line 258)."""
+
+    def test_send_broadcast_multicast_sends_to_group(self):
+        """Line 258: When multicast is enabled, send to multicast group."""
+        transport = BIPTransport(
+            multicast_enabled=True,
+            multicast_address="239.255.186.192",
+        )
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+
+        npdu = b"\x01\x00\x10"
+        transport.send_broadcast(npdu)
+
+        # Should have two sendto calls: multicast group + directed broadcast
+        assert mock_udp.sendto.call_count == 2
+        first_call_addr = mock_udp.sendto.call_args_list[0][0][1]
+        assert first_call_addr == ("239.255.186.192", 0xBAC0)
+
+
+class TestSendBroadcastWithBBMD:
+    """Cover send_broadcast() BBMD forward path (line 264)."""
+
+    def test_send_broadcast_forwards_to_bbmd(self):
+        """Line 264: When BBMD is attached, handle_bvlc is called."""
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+        transport._local_address = BIPAddress(host="10.0.0.1", port=47808)
+
+        mock_bbmd = MagicMock()
+        transport._bbmd = mock_bbmd
+
+        npdu = b"\x01\x00\x10"
+        transport.send_broadcast(npdu)
+
+        mock_bbmd.handle_bvlc.assert_called_once_with(
+            BvlcFunction.ORIGINAL_BROADCAST_NPDU,
+            npdu,
+            transport.local_address,
+        )
+
+
+class TestBBMDProperty:
+    """Cover bbmd property (line 287)."""
+
+    def test_bbmd_none_initially(self):
+        """Line 287: Returns None when no BBMD is attached."""
+        transport = BIPTransport()
+        assert transport.bbmd is None
+
+    @pytest.mark.asyncio
+    async def test_bbmd_returns_manager_after_attach(self):
+        """Line 287: Returns the BBMDManager after attach."""
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        await transport.start()
+        try:
+            bbmd = await transport.attach_bbmd()
+            assert transport.bbmd is bbmd
+        finally:
+            await transport.stop()
+
+
+class TestAttachBBMD:
+    """Cover attach_bbmd method (lines 305-326)."""
+
+    @pytest.mark.asyncio
+    async def test_attach_bbmd_success(self):
+        """Lines 305-326: Full attach_bbmd path."""
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        await transport.start()
+        try:
+            bbmd = await transport.attach_bbmd()
+            assert bbmd is not None
+            assert transport._bbmd is bbmd
+        finally:
+            await transport.stop()
+
+    @pytest.mark.asyncio
+    async def test_attach_bbmd_with_bdt_entries(self):
+        """Lines 318-319: attach_bbmd with initial BDT entries."""
+        from bac_py.transport.bbmd import BDTEntry
+
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        await transport.start()
+        try:
+            entries = [
+                BDTEntry(
+                    address=transport.local_address,
+                    broadcast_mask=b"\xff\xff\xff\x00",
+                ),
+            ]
+            bbmd = await transport.attach_bbmd(bdt_entries=entries)
+            assert bbmd is not None
+        finally:
+            await transport.stop()
+
+    @pytest.mark.asyncio
+    async def test_attach_bbmd_not_started_raises(self):
+        """Lines 305-307: RuntimeError when transport not started."""
+        transport = BIPTransport()
+        with pytest.raises(RuntimeError, match="Transport not started"):
+            await transport.attach_bbmd()
+
+    @pytest.mark.asyncio
+    async def test_attach_bbmd_already_attached_raises(self):
+        """Lines 308-310: RuntimeError when BBMD already attached."""
+        transport = BIPTransport(interface="127.0.0.1", port=0)
+        await transport.start()
+        try:
+            await transport.attach_bbmd()
+            with pytest.raises(RuntimeError, match="BBMD already attached"):
+                await transport.attach_bbmd()
+        finally:
+            await transport.stop()
+
+
+class TestSendRawWithTransport:
+    """Cover _send_raw when transport is present (line 556)."""
+
+    def test_send_raw_with_transport_sends_data(self):
+        """Line 556: _send_raw with active transport calls sendto."""
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+        dest = BIPAddress(host="10.0.0.1", port=47808)
+
+        data = b"\x81\x0a\x00\x05\x01"
+        transport._send_raw(data, dest)
+
+        mock_udp.sendto.assert_called_once_with(data, ("10.0.0.1", 47808))
+
+
+class TestSelfAddressDrop:
+    """Cover F6 self-address drop (line 603)."""
+
+    def test_own_datagram_dropped(self):
+        """Line 603: Datagrams from own address are dropped."""
+        transport = BIPTransport()
+        transport._local_address = BIPAddress(host="192.168.1.50", port=47808)
+        received: list[tuple[bytes, bytes]] = []
+        transport.on_receive(lambda d, s: received.append((d, s)))
+
+        npdu = b"\x01\x00\x10"
+        bvll = encode_bvll(BvlcFunction.ORIGINAL_UNICAST_NPDU, npdu)
+        # Send from our own address
+        transport._on_datagram_received(bvll, ("192.168.1.50", 47808))
+
+        assert len(received) == 0
+
+
+class TestBBMDInterceptPaths:
+    """Cover BBMD intercept paths in _on_datagram_received (lines 609-629)."""
+
+    def _make_transport_with_bbmd(self):
+        """Create transport with a mock BBMD attached."""
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+        transport._local_address = BIPAddress(host="10.0.0.1", port=47808)
+        mock_bbmd = MagicMock()
+        transport._bbmd = mock_bbmd
+        return transport, mock_bbmd
+
+    def test_bbmd_intercept_handled_returns_early(self):
+        """Lines 618-622: BBMD handles message exclusively (returns True)."""
+        transport, mock_bbmd = self._make_transport_with_bbmd()
+        mock_bbmd.handle_bvlc.return_value = True
+
+        received: list[tuple[bytes, bytes]] = []
+        transport.on_receive(lambda d, s: received.append((d, s)))
+
+        bvll = encode_bvll(
+            BvlcFunction.REGISTER_FOREIGN_DEVICE,
+            (60).to_bytes(2, "big"),
+        )
+        transport._on_datagram_received(bvll, ("10.0.0.50", 47808))
+
+        mock_bbmd.handle_bvlc.assert_called_once()
+        assert len(received) == 0
+
+    def test_bbmd_intercept_forwarded_npdu_not_double_delivered(self):
+        """Lines 628-629: Forwarded-NPDU skips normal path after BBMD."""
+        transport, mock_bbmd = self._make_transport_with_bbmd()
+        # BBMD returns False (not exclusively handled) for broadcast NPDUs
+        mock_bbmd.handle_bvlc.return_value = False
+
+        received: list[tuple[bytes, bytes]] = []
+        transport.on_receive(lambda d, s: received.append((d, s)))
+
+        npdu = b"\x01\x00\x10\x08\x00"
+        orig = BIPAddress(host="10.0.0.99", port=47808)
+        bvll = encode_bvll(
+            BvlcFunction.FORWARDED_NPDU,
+            npdu,
+            originating_address=orig,
+        )
+        transport._on_datagram_received(bvll, ("192.168.1.1", 47808))
+
+        # Should NOT be delivered via normal path (BBMD already did it)
+        assert len(received) == 0
+
+    def test_bbmd_intercept_forwarded_npdu_uses_originating_address(self):
+        """Lines 609-610: Forwarded-NPDU passes originating address to BBMD."""
+        transport, mock_bbmd = self._make_transport_with_bbmd()
+        mock_bbmd.handle_bvlc.return_value = True
+
+        npdu = b"\x01\x00\x10"
+        orig = BIPAddress(host="10.0.0.99", port=47808)
+        bvll = encode_bvll(
+            BvlcFunction.FORWARDED_NPDU,
+            npdu,
+            originating_address=orig,
+        )
+        transport._on_datagram_received(bvll, ("192.168.1.1", 47808))
+
+        call_args = mock_bbmd.handle_bvlc.call_args
+        # The source passed to BBMD should be the originating address
+        assert call_args[0][2] == orig
+
+    def test_bbmd_intercept_non_forwarded_uses_udp_source(self):
+        """Lines 611-612: Non-forwarded uses UDP source for BBMD."""
+        transport, mock_bbmd = self._make_transport_with_bbmd()
+        mock_bbmd.handle_bvlc.return_value = False
+
+        npdu = b"\x01\x00\x10"
+        bvll = encode_bvll(BvlcFunction.ORIGINAL_BROADCAST_NPDU, npdu)
+        transport._on_datagram_received(bvll, ("10.0.0.50", 47808))
+
+        call_args = mock_bbmd.handle_bvlc.call_args
+        expected_source = BIPAddress(host="10.0.0.50", port=47808)
+        assert call_args[0][2] == expected_source
+
+    def test_bbmd_intercept_original_broadcast_delivered_normally(self):
+        """When BBMD returns False for Original-Broadcast, normal delivery."""
+        transport, mock_bbmd = self._make_transport_with_bbmd()
+        mock_bbmd.handle_bvlc.return_value = False
+
+        received: list[tuple[bytes, bytes]] = []
+        transport.on_receive(lambda d, s: received.append((d, s)))
+
+        npdu = b"\x01\x00\x10\x08\x00"
+        bvll = encode_bvll(BvlcFunction.ORIGINAL_BROADCAST_NPDU, npdu)
+        transport._on_datagram_received(bvll, ("10.0.0.50", 47808))
+
+        assert len(received) == 1
+        assert received[0][0] == npdu

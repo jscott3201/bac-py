@@ -11,10 +11,19 @@ from bac_py.objects.analog import AnalogValueObject
 from bac_py.objects.base import ObjectDatabase
 from bac_py.objects.binary import BinaryValueObject
 from bac_py.objects.multistate import MultiStateValueObject
-from bac_py.services.cov import SubscribeCOVRequest
+from bac_py.services.cov import (
+    BACnetPropertyReference,
+    COVNotificationRequest,
+    COVReference,
+    COVSubscriptionSpecification,
+    SubscribeCOVPropertyMultipleRequest,
+    SubscribeCOVPropertyRequest,
+    SubscribeCOVRequest,
+)
 from bac_py.services.errors import BACnetError, BACnetRejectError
 from bac_py.types.enums import (
     ConfirmedServiceChoice,
+    ErrorClass,
     ErrorCode,
     ObjectType,
     PropertyIdentifier,
@@ -877,3 +886,754 @@ class TestServerSubscribeCOVHandler:
 
         # COV notification should have been sent
         app.unconfirmed_request.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Property-level COV subscription tests
+# ---------------------------------------------------------------------------
+
+
+def _make_prop_request(
+    obj_id,
+    *,
+    process_id=42,
+    property_id=PropertyIdentifier.PRESENT_VALUE,
+    array_index=None,
+    confirmed=False,
+    lifetime=None,
+    cov_increment=None,
+):
+    """Build a SubscribeCOVPropertyRequest for testing."""
+    return SubscribeCOVPropertyRequest(
+        subscriber_process_identifier=process_id,
+        monitored_object_identifier=obj_id,
+        monitored_property_identifier=BACnetPropertyReference(
+            property_identifier=int(property_id),
+            property_array_index=array_index,
+        ),
+        issue_confirmed_notifications=confirmed,
+        lifetime=lifetime,
+        cov_increment=cov_increment,
+    )
+
+
+class TestSubscribeProperty:
+    """Tests for subscribe_property (Clause 13.15)."""
+
+    def test_subscribe_property_creates_subscription(self):
+        """Create a PropertySubscription and send initial notification."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        request = _make_prop_request(av.object_identifier)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+
+        # Should have exactly one property subscription
+        assert len(cov._property_subscriptions) == 1
+        sub = next(iter(cov._property_subscriptions.values()))
+        assert sub.monitored_property == int(PropertyIdentifier.PRESENT_VALUE)
+        assert sub.confirmed is False
+        assert sub.lifetime is None
+        assert sub.cov_increment is None
+
+        # Initial notification sent
+        app.unconfirmed_request.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_subscribe_property_with_lifetime(self):
+        """subscribe_property with lifetime sets up an expiry timer."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        request = _make_prop_request(av.object_identifier, lifetime=300)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+
+        sub = next(iter(cov._property_subscriptions.values()))
+        assert sub.lifetime == 300.0
+        assert sub.expiry_handle is not None
+
+        # Clean up timer
+        sub.expiry_handle.cancel()
+
+    @pytest.mark.asyncio
+    async def test_subscribe_property_replaces_existing(self):
+        """Subscribing twice with the same key cancels the first timer."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        # First subscription with lifetime
+        request1 = _make_prop_request(av.object_identifier, lifetime=300)
+        cov.subscribe_property(SUBSCRIBER, request1, db)
+
+        sub1 = next(iter(cov._property_subscriptions.values()))
+        handle1 = sub1.expiry_handle
+        assert handle1 is not None
+
+        # Replace with a new subscription
+        request2 = _make_prop_request(av.object_identifier, lifetime=600)
+        cov.subscribe_property(SUBSCRIBER, request2, db)
+
+        # First timer should have been cancelled
+        assert handle1.cancelled()
+
+        # Only one subscription remains
+        assert len(cov._property_subscriptions) == 1
+        sub2 = next(iter(cov._property_subscriptions.values()))
+        assert sub2.lifetime == 600.0
+
+        # Clean up
+        if sub2.expiry_handle:
+            sub2.expiry_handle.cancel()
+
+    def test_subscribe_property_unknown_object(self):
+        """subscribe_property for a nonexistent object raises BACnetError."""
+        _app, db, cov = _make_cov_manager()
+        obj_id = ObjectIdentifier(ObjectType.ANALOG_VALUE, 99)
+
+        request = _make_prop_request(obj_id)
+        with pytest.raises(BACnetError) as exc_info:
+            cov.subscribe_property(SUBSCRIBER, request, db)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+
+class TestSubscribePropertyMultiple:
+    """Tests for subscribe_property_multiple (Clause 13.16)."""
+
+    def test_subscribe_property_multiple_basic(self):
+        """subscribe_property_multiple with one spec creates subscriptions."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        request = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=42,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=av.object_identifier,
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=int(PropertyIdentifier.PRESENT_VALUE),
+                            ),
+                            cov_increment=2.0,
+                        ),
+                    ],
+                ),
+            ],
+            issue_confirmed_notifications=False,
+        )
+        cov.subscribe_property_multiple(SUBSCRIBER, request, db)
+
+        assert len(cov._property_subscriptions) == 1
+        sub = next(iter(cov._property_subscriptions.values()))
+        assert sub.cov_increment == 2.0
+        assert sub.monitored_property == int(PropertyIdentifier.PRESENT_VALUE)
+
+        # Initial notification sent
+        app.unconfirmed_request.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_subscribe_property_multiple_with_lifetime(self):
+        """subscribe_property_multiple with lifetime sets timers per subscription."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        request = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=42,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=av.object_identifier,
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=int(PropertyIdentifier.PRESENT_VALUE),
+                            ),
+                        ),
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=int(PropertyIdentifier.STATUS_FLAGS),
+                            ),
+                        ),
+                    ],
+                ),
+            ],
+            issue_confirmed_notifications=False,
+            lifetime=300,
+        )
+        cov.subscribe_property_multiple(SUBSCRIBER, request, db)
+
+        assert len(cov._property_subscriptions) == 2
+        for sub in cov._property_subscriptions.values():
+            assert sub.lifetime == 300.0
+            assert sub.expiry_handle is not None
+
+        # Clean up timers
+        for sub in cov._property_subscriptions.values():
+            if sub.expiry_handle:
+                sub.expiry_handle.cancel()
+
+    def test_subscribe_property_multiple_unknown_object(self):
+        """subscribe_property_multiple for an unknown object raises BACnetError."""
+        _app, db, cov = _make_cov_manager()
+
+        request = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=42,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_VALUE, 99),
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=int(PropertyIdentifier.PRESENT_VALUE),
+                            ),
+                        ),
+                    ],
+                ),
+            ],
+            issue_confirmed_notifications=False,
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            cov.subscribe_property_multiple(SUBSCRIBER, request, db)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+
+class TestUnsubscribeProperty:
+    """Tests for unsubscribe_property."""
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_property_cancels_timer(self):
+        """unsubscribe_property cancels the timer and removes the subscription."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        # Subscribe with lifetime so there is a timer to cancel
+        request = _make_prop_request(obj_id, lifetime=300)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        assert len(cov._property_subscriptions) == 1
+
+        sub = next(iter(cov._property_subscriptions.values()))
+        handle = sub.expiry_handle
+        assert handle is not None
+
+        cov.unsubscribe_property(
+            SUBSCRIBER,
+            42,
+            obj_id,
+            int(PropertyIdentifier.PRESENT_VALUE),
+        )
+
+        assert len(cov._property_subscriptions) == 0
+        assert handle.cancelled()
+
+    def test_unsubscribe_property_nonexistent(self):
+        """unsubscribe_property for a nonexistent subscription does not error."""
+        _app, _db, cov = _make_cov_manager()
+        obj_id = ObjectIdentifier(ObjectType.ANALOG_VALUE, 99)
+
+        # Should not raise
+        cov.unsubscribe_property(
+            SUBSCRIBER,
+            42,
+            obj_id,
+            int(PropertyIdentifier.PRESENT_VALUE),
+        )
+
+
+class TestCheckAndNotifyProperty:
+    """Tests for check_and_notify_property and _should_notify_property."""
+
+    def test_check_and_notify_property_triggers(self):
+        """Writing a monitored property triggers a property notification."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        request = _make_prop_request(av.object_identifier)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        app.unconfirmed_request.reset_mock()
+
+        # Change the monitored property
+        av.write_property(PropertyIdentifier.PRESENT_VALUE, 42.0)
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+
+        app.unconfirmed_request.assert_called_once()
+
+    def test_check_and_notify_property_no_change(self):
+        """No change in monitored property value means no notification."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        request = _make_prop_request(av.object_identifier)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        app.unconfirmed_request.reset_mock()
+
+        # Don't change the value, just trigger check
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+
+        app.unconfirmed_request.assert_not_called()
+
+    def test_should_notify_property_analog_with_increment(self):
+        """Analog property with cov_increment: change >= increment triggers."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        # Subscribe with a cov_increment of 5.0
+        request = _make_prop_request(av.object_identifier, cov_increment=5.0)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        app.unconfirmed_request.reset_mock()
+
+        # Change by exactly 5.0 from initial (0.0)
+        av.write_property(PropertyIdentifier.PRESENT_VALUE, 5.0)
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+
+        app.unconfirmed_request.assert_called_once()
+
+    def test_should_notify_property_analog_below_increment(self):
+        """Analog property with cov_increment: change < increment does not trigger."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        # Subscribe with a cov_increment of 5.0
+        request = _make_prop_request(av.object_identifier, cov_increment=5.0)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        app.unconfirmed_request.reset_mock()
+
+        # Change by only 4.9 from initial (0.0)
+        av.write_property(PropertyIdentifier.PRESENT_VALUE, 4.9)
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+
+        app.unconfirmed_request.assert_not_called()
+
+    def test_should_notify_property_non_analog(self):
+        """Non-analog (binary) property: any change triggers notification."""
+        from bac_py.types.enums import BinaryPV
+
+        app, db, cov = _make_cov_manager()
+        bv = BinaryValueObject(1)
+        db.add(bv)
+
+        request = _make_prop_request(bv.object_identifier)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        app.unconfirmed_request.reset_mock()
+
+        bv.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.ACTIVE)
+        cov.check_and_notify_property(bv, PropertyIdentifier.PRESENT_VALUE)
+
+        app.unconfirmed_request.assert_called_once()
+
+    def test_should_notify_property_analog_none_last_value(self):
+        """Analog property with last_value=None should trigger notification."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        # Subscribe with cov_increment; manually set last_value to None
+        request = _make_prop_request(av.object_identifier, cov_increment=5.0)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        app.unconfirmed_request.reset_mock()
+
+        # Force last_value to None to simulate the edge case
+        sub = next(iter(cov._property_subscriptions.values()))
+        sub.last_value = None
+
+        av.write_property(PropertyIdentifier.PRESENT_VALUE, 1.0)
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+
+        # Should notify because last_value is None
+        app.unconfirmed_request.assert_called_once()
+
+
+class TestPropertyNotificationSending:
+    """Tests for _send_property_notification dispatch."""
+
+    def test_send_property_notification_confirmed(self):
+        """Confirmed property subscription sends via send_confirmed_cov_notification."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        request = _make_prop_request(av.object_identifier, confirmed=True)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+
+        # Initial notification sent as confirmed
+        app.send_confirmed_cov_notification.assert_called_once()
+        call_args = app.send_confirmed_cov_notification.call_args
+        assert call_args[0][2] == ConfirmedServiceChoice.CONFIRMED_COV_NOTIFICATION
+        app.unconfirmed_request.assert_not_called()
+
+    def test_send_property_notification_unconfirmed(self):
+        """Unconfirmed property subscription sends via unconfirmed_request."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        request = _make_prop_request(av.object_identifier, confirmed=False)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+
+        # Initial notification sent as unconfirmed
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"]
+            == UnconfirmedServiceChoice.UNCONFIRMED_COV_NOTIFICATION
+        )
+        app.send_confirmed_cov_notification.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_property_notification_time_remaining(self):
+        """Property subscription with lifetime includes correct time_remaining."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        request = _make_prop_request(av.object_identifier, lifetime=600)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+
+        # Decode the initial notification
+        call_kwargs = app.unconfirmed_request.call_args
+        service_data = call_kwargs.kwargs["service_data"]
+        notification = COVNotificationRequest.decode(service_data)
+
+        # time_remaining should be close to 600 (just started)
+        assert 595 <= notification.time_remaining <= 600
+
+        # Clean up timer
+        sub = next(iter(cov._property_subscriptions.values()))
+        if sub.expiry_handle:
+            sub.expiry_handle.cancel()
+
+    def test_send_property_notification_content(self):
+        """Property notification includes the monitored property and Status_Flags."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        av.write_property(PropertyIdentifier.PRESENT_VALUE, 25.5)
+
+        request = _make_prop_request(av.object_identifier)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+
+        call_kwargs = app.unconfirmed_request.call_args
+        service_data = call_kwargs.kwargs["service_data"]
+        notification = COVNotificationRequest.decode(service_data)
+
+        assert notification.subscriber_process_identifier == 42
+        assert notification.monitored_object_identifier == av.object_identifier
+        assert len(notification.list_of_values) == 2
+
+        prop_ids = [pv.property_identifier for pv in notification.list_of_values]
+        assert PropertyIdentifier.PRESENT_VALUE in prop_ids
+        assert PropertyIdentifier.STATUS_FLAGS in prop_ids
+
+
+class TestPropertySubscriptionExpiry:
+    """Tests for property subscription expiry and cleanup."""
+
+    @pytest.mark.asyncio
+    async def test_on_property_subscription_expired(self):
+        """Expiry handler removes the property subscription."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        request = _make_prop_request(av.object_identifier, lifetime=1)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        assert len(cov._property_subscriptions) == 1
+
+        # Wait for expiry
+        await asyncio.sleep(1.1)
+
+        assert len(cov._property_subscriptions) == 0
+
+    @pytest.mark.asyncio
+    async def test_remove_object_subscriptions_with_property_subs(self):
+        """remove_object_subscriptions cleans up property subscriptions too."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        # Create both a regular and a property subscription
+        regular_request = SubscribeCOVRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=av.object_identifier,
+            issue_confirmed_notifications=False,
+            lifetime=300,
+        )
+        cov.subscribe(SUBSCRIBER, regular_request, db)
+
+        prop_request = _make_prop_request(av.object_identifier, process_id=2, lifetime=300)
+        cov.subscribe_property(SUBSCRIBER, prop_request, db)
+
+        assert len(cov._subscriptions) == 1
+        assert len(cov._property_subscriptions) == 1
+
+        # Capture the timer handles
+        reg_handle = next(iter(cov._subscriptions.values())).expiry_handle
+        prop_handle = next(iter(cov._property_subscriptions.values())).expiry_handle
+        assert reg_handle is not None
+        assert prop_handle is not None
+
+        cov.remove_object_subscriptions(av.object_identifier)
+
+        assert len(cov._subscriptions) == 0
+        assert len(cov._property_subscriptions) == 0
+        assert reg_handle.cancelled()
+        assert prop_handle.cancelled()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_cleans_property_subscriptions(self):
+        """Shutdown cancels property subscription timers."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        prop_request = _make_prop_request(av.object_identifier, lifetime=300)
+        cov.subscribe_property(SUBSCRIBER, prop_request, db)
+
+        assert len(cov._property_subscriptions) == 1
+        handle = next(iter(cov._property_subscriptions.values())).expiry_handle
+        assert handle is not None
+
+        cov.shutdown()
+
+        assert len(cov._property_subscriptions) == 0
+        assert handle.cancelled()
+
+
+class TestCOVEdgeCases:
+    """Tests for edge cases in COV logic."""
+
+    def test_encode_status_flags_fallback(self):
+        """_encode_status_flags with non-StatusFlags/non-BitString value returns all-clear."""
+        from bac_py.encoding.primitives import decode_bit_string
+        from bac_py.encoding.tags import decode_tag
+
+        _app, _db, cov = _make_cov_manager()
+
+        # Pass a plain integer (not StatusFlags or BitString)
+        result = cov._encode_status_flags(42)
+        assert isinstance(result, bytes)
+        assert len(result) > 0
+
+        # Decode and verify it is all-clear
+        tag, offset = decode_tag(result, 0)
+        bs = decode_bit_string(result[offset : offset + tag.length])
+        assert bs.unused_bits == 4
+        assert bs.data == bytes([0x00])
+
+    def test_read_present_value_bacnet_error_returns_none(self):
+        """_read_present_value returns None when object raises BACnetError."""
+        _app, _db, cov = _make_cov_manager()
+
+        obj = MagicMock()
+        obj.read_property = MagicMock(
+            side_effect=BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
+        )
+        result = cov._read_present_value(obj)
+        assert result is None
+
+    def test_read_status_flags_bacnet_error_returns_none(self):
+        """_read_status_flags returns None when object raises BACnetError."""
+        _app, _db, cov = _make_cov_manager()
+
+        obj = MagicMock()
+        obj.read_property = MagicMock(
+            side_effect=BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
+        )
+        result = cov._read_status_flags(obj)
+        assert result is None
+
+    def test_read_cov_increment_bacnet_error_returns_none(self):
+        """_read_cov_increment returns None when object raises BACnetError."""
+        _app, _db, cov = _make_cov_manager()
+
+        obj = MagicMock()
+        obj.read_property = MagicMock(
+            side_effect=BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
+        )
+        result = cov._read_cov_increment(obj)
+        assert result is None
+
+    def test_read_property_value_exception_returns_none(self):
+        """_read_property_value returns None on BACnetError or ValueError."""
+        _app, _db, cov = _make_cov_manager()
+
+        obj = MagicMock()
+        obj.read_property = MagicMock(
+            side_effect=BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
+        )
+        result = cov._read_property_value(obj, int(PropertyIdentifier.PRESENT_VALUE))
+        assert result is None
+
+        # Also test ValueError
+        obj.read_property = MagicMock(side_effect=ValueError("bad value"))
+        result = cov._read_property_value(obj, int(PropertyIdentifier.PRESENT_VALUE))
+        assert result is None
+
+    def test_should_notify_analog_none_last_value(self):
+        """_should_notify with analog subscription where last_present_value is None."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        av.write_property(PropertyIdentifier.COV_INCREMENT, 5.0)
+
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=av.object_identifier,
+            issue_confirmed_notifications=False,
+            lifetime=None,
+        )
+        _subscribe_and_reset(app, cov, SUBSCRIBER, request, db)
+
+        # Force last_present_value to None
+        sub = next(iter(cov._subscriptions.values()))
+        sub.last_present_value = None
+
+        # Any non-None present value should trigger
+        av.write_property(PropertyIdentifier.PRESENT_VALUE, 1.0)
+        cov.check_and_notify(av, PropertyIdentifier.PRESENT_VALUE)
+
+        app.unconfirmed_request.assert_called_once()
+
+    def test_should_notify_analog_numeric_comparison(self):
+        """_should_notify with analog subscription performs numeric |delta| >= increment."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        av.write_property(PropertyIdentifier.COV_INCREMENT, 10.0)
+
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=av.object_identifier,
+            issue_confirmed_notifications=False,
+            lifetime=None,
+        )
+        _subscribe_and_reset(app, cov, SUBSCRIBER, request, db)
+
+        # Change by 9.9, below increment -- no notification
+        av.write_property(PropertyIdentifier.PRESENT_VALUE, 9.9)
+        cov.check_and_notify(av, PropertyIdentifier.PRESENT_VALUE)
+        app.unconfirmed_request.assert_not_called()
+
+        # Change to 10.0, exactly at increment from last reported (0.0)
+        av.write_property(PropertyIdentifier.PRESENT_VALUE, 10.0)
+        cov.check_and_notify(av, PropertyIdentifier.PRESENT_VALUE)
+        app.unconfirmed_request.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_on_subscription_expired_logging(self):
+        """_on_subscription_expired logs and removes the subscription."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=av.object_identifier,
+            issue_confirmed_notifications=False,
+            lifetime=1,
+        )
+        cov.subscribe(SUBSCRIBER, request, db)
+        assert len(cov.get_active_subscriptions(av.object_identifier)) == 1
+
+        # Wait for expiry
+        await asyncio.sleep(1.1)
+
+        assert len(cov.get_active_subscriptions(av.object_identifier)) == 0
+
+    @pytest.mark.asyncio
+    async def test_subscribe_replaces_existing_cancels_timer(self):
+        """subscribe() replacing an existing subscription cancels the old timer."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        # First subscription with lifetime
+        request1 = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=obj_id,
+            issue_confirmed_notifications=False,
+            lifetime=300,
+        )
+        cov.subscribe(SUBSCRIBER, request1, db)
+
+        sub1 = next(iter(cov._subscriptions.values()))
+        handle1 = sub1.expiry_handle
+        assert handle1 is not None
+
+        # Replace
+        request2 = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=obj_id,
+            issue_confirmed_notifications=False,
+            lifetime=600,
+        )
+        cov.subscribe(SUBSCRIBER, request2, db)
+
+        # First timer should have been cancelled
+        assert handle1.cancelled()
+        assert len(cov.get_active_subscriptions(obj_id)) == 1
+
+        sub2 = next(iter(cov._subscriptions.values()))
+        assert sub2.lifetime == 600.0
+
+        # Clean up
+        if sub2.expiry_handle:
+            sub2.expiry_handle.cancel()
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_cancels_timer(self):
+        """unsubscribe() cancels the expiry timer."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=obj_id,
+            issue_confirmed_notifications=False,
+            lifetime=300,
+        )
+        cov.subscribe(SUBSCRIBER, request, db)
+
+        sub = next(iter(cov._subscriptions.values()))
+        handle = sub.expiry_handle
+        assert handle is not None
+
+        cov.unsubscribe(SUBSCRIBER, 42, obj_id)
+
+        assert len(cov.get_active_subscriptions(obj_id)) == 0
+        assert handle.cancelled()
+
+    @pytest.mark.asyncio
+    async def test_shutdown_cancels_regular_timers(self):
+        """shutdown() cancels timers on regular subscriptions."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=av.object_identifier,
+            issue_confirmed_notifications=False,
+            lifetime=300,
+        )
+        cov.subscribe(SUBSCRIBER, request, db)
+
+        handle = next(iter(cov._subscriptions.values())).expiry_handle
+        assert handle is not None
+
+        cov.shutdown()
+
+        assert len(cov.get_active_subscriptions()) == 0
+        assert handle.cancelled()

@@ -1,3 +1,5 @@
+import asyncio
+import struct
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -6,13 +8,64 @@ from bac_py.app.application import (
     BACnetApplication,
     DeviceConfig,
     DeviceInfo,
+    ForeignDeviceStatus,
     RouterConfig,
     RouterPortConfig,
 )
+from bac_py.encoding.apdu import (
+    AbortPDU,
+    ComplexAckPDU,
+    ConfirmedRequestPDU,
+    ErrorPDU,
+    RejectPDU,
+    SimpleAckPDU,
+    UnconfirmedRequestPDU,
+    encode_apdu,
+)
 from bac_py.network.address import BACnetAddress
+from bac_py.services.errors import BACnetAbortError, BACnetError, BACnetRejectError
 from bac_py.services.who_is import IAmRequest
-from bac_py.types.enums import ObjectType, Segmentation
+from bac_py.types.enums import (
+    AbortReason,
+    ConfirmedServiceChoice,
+    EnableDisable,
+    ObjectType,
+    RejectReason,
+    Segmentation,
+    UnconfirmedServiceChoice,
+)
 from bac_py.types.primitives import ObjectIdentifier
+
+
+def _make_mock_transport():
+    """Create a mock BIPTransport with required attributes."""
+    transport = MagicMock()
+    transport.start = AsyncMock()
+    transport.stop = AsyncMock()
+    transport.local_mac = b"\x7f\x00\x00\x01\xba\xc0"
+    transport.max_npdu_length = 1497
+    transport.on_receive = MagicMock()
+    transport.foreign_device = None
+    transport.attach_foreign_device = AsyncMock()
+    return transport
+
+
+def _make_started_app():
+    """Create a BACnetApplication with mocked internal state (no real start)."""
+    cfg = DeviceConfig(instance_number=1)
+    app = BACnetApplication(cfg)
+    # Set up mocked internals as if start() completed
+    app._network = MagicMock()
+    app._network.send = MagicMock()
+    app._client_tsm = MagicMock()
+    app._client_tsm.send_request = AsyncMock(return_value=b"\x00")
+    app._client_tsm.active_transactions = MagicMock(return_value=[])
+    app._server_tsm = MagicMock()
+    app._server_tsm.receive_confirmed_request = MagicMock()
+    app._server_tsm.complete_transaction = MagicMock()
+    app._server_tsm.start_segmented_response = MagicMock()
+    app._running = True
+    return app
 
 
 class TestRouterPortConfig:
@@ -419,3 +472,1299 @@ class TestDeviceInfoCache:
 
         await app._handle_i_am_for_cache(8, b"\x00", source)
         assert app.get_device_info(source) is None
+
+
+# ==================== Section 1A: Property Getters & State Management ====================
+
+
+class TestPropertyGettersAndState:
+    """Test property accessors and DCC state management."""
+
+    def test_cov_manager_none_before_start(self):
+        """COV manager is None before start."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        assert app.cov_manager is None
+
+    def test_event_engine_none_before_start(self):
+        """Event engine is None before start."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        assert app.event_engine is None
+
+    def test_dcc_state_default_enable(self):
+        """DCC state defaults to ENABLE."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        assert app.dcc_state == EnableDisable.ENABLE
+
+    def test_device_object_identifier(self):
+        """Device object identifier uses config instance number."""
+        app = BACnetApplication(DeviceConfig(instance_number=42))
+        oid = app.device_object_identifier
+        assert oid == ObjectIdentifier(ObjectType.DEVICE, 42)
+
+    def test_set_dcc_state_no_duration(self):
+        """Set DCC state without duration."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app.set_dcc_state(EnableDisable.DISABLE)
+        assert app.dcc_state == EnableDisable.DISABLE
+        assert app._dcc_timer is None
+
+    async def test_set_dcc_state_with_duration(self):
+        """Set DCC state with duration creates timer."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app.set_dcc_state(EnableDisable.DISABLE, duration=5)
+        assert app.dcc_state == EnableDisable.DISABLE
+        assert app._dcc_timer is not None
+        # Clean up timer
+        app._dcc_timer.cancel()
+
+    async def test_set_dcc_state_enable_with_duration_no_timer(self):
+        """Setting ENABLE with duration does not create timer."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app.set_dcc_state(EnableDisable.ENABLE, duration=5)
+        assert app.dcc_state == EnableDisable.ENABLE
+        assert app._dcc_timer is None
+
+    async def test_set_dcc_state_cancels_previous_timer(self):
+        """Setting DCC state cancels any existing timer."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        # Set initial timer
+        app.set_dcc_state(EnableDisable.DISABLE, duration=10)
+        first_timer = app._dcc_timer
+        assert first_timer is not None
+
+        # Set new state, should cancel previous timer
+        app.set_dcc_state(EnableDisable.DISABLE_INITIATION, duration=5)
+        assert first_timer.cancelled()
+        assert app._dcc_timer is not first_timer
+        # Clean up
+        app._dcc_timer.cancel()
+
+    def test_dcc_timer_expired(self):
+        """DCC timer expiration re-enables communication."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._dcc_state = EnableDisable.DISABLE
+        app._dcc_timer = MagicMock()
+        app._dcc_timer_expired()
+        assert app.dcc_state == EnableDisable.ENABLE
+        assert app._dcc_timer is None
+
+    def test_is_foreign_device_false_no_transport(self):
+        """is_foreign_device is False when transport is None."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        assert app.is_foreign_device is False
+
+    def test_is_foreign_device_false_no_fd(self):
+        """is_foreign_device is False when foreign_device is None."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        app._transport.foreign_device = None
+        assert app.is_foreign_device is False
+
+    def test_is_foreign_device_false_not_registered(self):
+        """is_foreign_device is False when FD exists but not registered."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        app._transport.foreign_device.is_registered = False
+        assert app.is_foreign_device is False
+
+    def test_is_foreign_device_true_when_registered(self):
+        """is_foreign_device is True when FD is registered."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        app._transport.foreign_device.is_registered = True
+        assert app.is_foreign_device is True
+
+    def test_foreign_device_status_none_no_transport(self):
+        """Foreign device status is None when transport is None."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        assert app.foreign_device_status is None
+
+    def test_foreign_device_status_none_no_fd(self):
+        """Foreign device status is None when no FD manager."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        app._transport.foreign_device = None
+        assert app.foreign_device_status is None
+
+    def test_foreign_device_status_constructs_status(self):
+        """Foreign device status constructs ForeignDeviceStatus from FD manager."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        fd = MagicMock()
+        fd.bbmd_address.host = "192.168.1.1"
+        fd.bbmd_address.port = 47808
+        fd.ttl = 60
+        fd.is_registered = True
+        fd.last_result.name = "SUCCESS"
+        app._transport.foreign_device = fd
+
+        status = app.foreign_device_status
+        assert isinstance(status, ForeignDeviceStatus)
+        assert status.bbmd_address == "192.168.1.1:47808"
+        assert status.ttl == 60
+        assert status.is_registered is True
+        assert status.last_result == "SUCCESS"
+
+    def test_foreign_device_status_last_result_none(self):
+        """Foreign device status handles None last_result."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        fd = MagicMock()
+        fd.bbmd_address.host = "10.0.0.1"
+        fd.bbmd_address.port = 47808
+        fd.ttl = 30
+        fd.is_registered = False
+        fd.last_result = None
+        app._transport.foreign_device = fd
+
+        status = app.foreign_device_status
+        assert status is not None
+        assert status.last_result is None
+
+
+# ==================== Section 1B: Error Validation Paths ====================
+
+
+class TestErrorValidationPaths:
+    """Test error paths and validation in BACnetApplication."""
+
+    async def test_start_router_mode_raises_without_config(self):
+        """_start_router_mode raises when router_config is None."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        with pytest.raises(RuntimeError, match="Router config is required"):
+            await app._start_router_mode()
+
+    async def test_register_foreign_device_no_transport(self):
+        """register_as_foreign_device raises when not started."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        with pytest.raises(RuntimeError, match="not started"):
+            await app.register_as_foreign_device("192.168.1.1")
+
+    async def test_register_foreign_device_router_mode(self):
+        """register_as_foreign_device raises in router mode."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._router = MagicMock()  # Simulate router mode
+        with pytest.raises(RuntimeError, match="not supported in router mode"):
+            await app.register_as_foreign_device("192.168.1.1")
+
+    async def test_register_foreign_device_already_registered(self):
+        """register_as_foreign_device raises when already registered."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        app._transport.foreign_device = MagicMock()  # Already has FD
+        with pytest.raises(RuntimeError, match="Already registered"):
+            await app.register_as_foreign_device("192.168.1.1")
+
+    async def test_register_foreign_device_success(self):
+        """register_as_foreign_device attaches FD manager."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        app._transport.foreign_device = None
+        app._transport.attach_foreign_device = AsyncMock()
+
+        await app.register_as_foreign_device("192.168.1.1", ttl=30)
+        app._transport.attach_foreign_device.assert_called_once()
+        call_args = app._transport.attach_foreign_device.call_args
+        assert call_args[0][1] == 30  # ttl
+
+    async def test_deregister_foreign_device_not_registered(self):
+        """deregister_foreign_device raises when not registered."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        with pytest.raises(RuntimeError, match="Not registered"):
+            await app.deregister_foreign_device()
+
+    async def test_deregister_foreign_device_no_fd(self):
+        """deregister_foreign_device raises when transport has no FD."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        app._transport.foreign_device = None
+        with pytest.raises(RuntimeError, match="Not registered"):
+            await app.deregister_foreign_device()
+
+    async def test_deregister_foreign_device_success(self):
+        """deregister_foreign_device stops FD and clears reference."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        fd = MagicMock()
+        fd.stop = AsyncMock()
+        app._transport.foreign_device = fd
+
+        await app.deregister_foreign_device()
+        fd.stop.assert_called_once()
+
+    def test_send_network_message_no_network(self):
+        """send_network_message raises when network is None."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        with pytest.raises(RuntimeError, match="not available"):
+            app.send_network_message(0, b"\x00")
+
+    def test_send_network_message_success(self):
+        """send_network_message delegates to network layer."""
+        app = _make_started_app()
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        app.send_network_message(1, b"\x00", dest)
+        app._network.send_network_message.assert_called_once_with(1, b"\x00", dest)
+
+    def test_register_network_message_handler_no_network(self):
+        """register_network_message_handler raises when network is None."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        with pytest.raises(RuntimeError, match="not available"):
+            app.register_network_message_handler(0, lambda: None)
+
+    def test_register_network_message_handler_success(self):
+        """register_network_message_handler delegates to network layer."""
+        app = _make_started_app()
+        handler = MagicMock()
+        app.register_network_message_handler(5, handler)
+        app._network.register_network_message_handler.assert_called_once_with(5, handler)
+
+    def test_unregister_network_message_handler_no_network(self):
+        """unregister_network_message_handler is no-op when network is None."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        handler = MagicMock()
+        # Should not raise
+        app.unregister_network_message_handler(0, handler)
+
+    def test_unregister_network_message_handler_success(self):
+        """unregister_network_message_handler delegates to network layer."""
+        app = _make_started_app()
+        handler = MagicMock()
+        app.unregister_network_message_handler(5, handler)
+        app._network.unregister_network_message_handler.assert_called_once_with(5, handler)
+
+    async def test_wait_for_registration_no_transport(self):
+        """wait_for_registration returns False when transport is None."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        assert await app.wait_for_registration() is False
+
+    async def test_wait_for_registration_no_fd(self):
+        """wait_for_registration returns False when no FD manager."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        app._transport.foreign_device = None
+        assert await app.wait_for_registration() is False
+
+    async def test_wait_for_registration_timeout(self):
+        """wait_for_registration returns False on timeout."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        fd = MagicMock()
+        fd._registered = asyncio.Event()  # Never set
+        fd.is_registered = False
+        app._transport.foreign_device = fd
+
+        result = await app.wait_for_registration(timeout=0.01)
+        assert result is False
+
+    async def test_wait_for_registration_success(self):
+        """wait_for_registration returns True when registered."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app._transport = MagicMock()
+        fd = MagicMock()
+        fd._registered = asyncio.Event()
+        fd._registered.set()
+        fd.is_registered = True
+        app._transport.foreign_device = fd
+
+        result = await app.wait_for_registration(timeout=1.0)
+        assert result is True
+
+
+# ==================== Section 1C: DCC Enforcement ====================
+
+
+class TestDCCEnforcement:
+    """Test DeviceCommunicationControl enforcement on requests."""
+
+    def test_unconfirmed_request_suppressed_disable(self):
+        """Unconfirmed request is suppressed when DCC is DISABLE."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        app.unconfirmed_request(dest, 8, b"\x00")
+        app._network.send.assert_not_called()
+
+    def test_unconfirmed_request_suppressed_disable_initiation(self):
+        """Unconfirmed request is suppressed when DCC is DISABLE_INITIATION."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE_INITIATION
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        app.unconfirmed_request(dest, 8, b"\x00")
+        app._network.send.assert_not_called()
+
+    def test_unconfirmed_request_allowed_enable(self):
+        """Unconfirmed request is sent when DCC is ENABLE."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.ENABLE
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        app.unconfirmed_request(dest, 8, b"\x00")
+        app._network.send.assert_called_once()
+
+    async def test_dispatch_drops_non_dcc_in_disable(self):
+        """Confirmed non-DCC request is dropped in DISABLE state."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE
+
+        txn = MagicMock()
+        txn.invoke_id = 1
+        # ReadProperty (not in DCC allowed list)
+        await app._dispatch_request(
+            txn, ConfirmedServiceChoice.READ_PROPERTY, b"\x00", MagicMock()
+        )
+        # Service registry should NOT be called
+        app._server_tsm.complete_transaction.assert_not_called()
+
+    async def test_dispatch_allows_dcc_service_in_disable(self):
+        """DCC service request is allowed in DISABLE state."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE
+
+        txn = MagicMock()
+        txn.invoke_id = 1
+        txn.client_max_apdu_length = 1476
+
+        app._service_registry.dispatch_confirmed = AsyncMock(return_value=None)
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        await app._dispatch_request(
+            txn,
+            ConfirmedServiceChoice.DEVICE_COMMUNICATION_CONTROL,
+            b"\x00",
+            source,
+        )
+        app._service_registry.dispatch_confirmed.assert_called_once()
+
+    async def test_dispatch_allows_reinitialize_in_disable(self):
+        """ReinitializeDevice is allowed in DISABLE state."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE
+
+        txn = MagicMock()
+        txn.invoke_id = 1
+        txn.client_max_apdu_length = 1476
+
+        app._service_registry.dispatch_confirmed = AsyncMock(return_value=None)
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        await app._dispatch_request(
+            txn,
+            ConfirmedServiceChoice.REINITIALIZE_DEVICE,
+            b"\x00",
+            source,
+        )
+        app._service_registry.dispatch_confirmed.assert_called_once()
+
+    async def test_unconfirmed_handler_allows_who_is_disable_initiation(self):
+        """WHO-IS is allowed when DCC is DISABLE_INITIATION."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE_INITIATION
+        app._service_registry.dispatch_unconfirmed = AsyncMock()
+
+        pdu = UnconfirmedRequestPDU(
+            service_choice=UnconfirmedServiceChoice.WHO_IS,
+            service_request=b"\x00",
+        )
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        await app._handle_unconfirmed_request(pdu, source)
+        app._service_registry.dispatch_unconfirmed.assert_called_once()
+
+    async def test_unconfirmed_handler_allows_who_has_disable_initiation(self):
+        """WHO-HAS is allowed when DCC is DISABLE_INITIATION."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE_INITIATION
+        app._service_registry.dispatch_unconfirmed = AsyncMock()
+
+        pdu = UnconfirmedRequestPDU(
+            service_choice=UnconfirmedServiceChoice.WHO_HAS,
+            service_request=b"\x00",
+        )
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        await app._handle_unconfirmed_request(pdu, source)
+        app._service_registry.dispatch_unconfirmed.assert_called_once()
+
+    async def test_unconfirmed_handler_drops_others_disable(self):
+        """Non-WHO-IS unconfirmed requests are dropped when DCC is DISABLE."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE
+        app._service_registry.dispatch_unconfirmed = AsyncMock()
+
+        pdu = UnconfirmedRequestPDU(
+            service_choice=UnconfirmedServiceChoice.I_AM,
+            service_request=b"\x00",
+        )
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        await app._handle_unconfirmed_request(pdu, source)
+        app._service_registry.dispatch_unconfirmed.assert_not_called()
+
+    async def test_unconfirmed_handler_drops_non_who_in_disable_initiation(self):
+        """Non-WHO-IS/WHO-HAS dropped when DCC is DISABLE_INITIATION."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE_INITIATION
+        app._service_registry.dispatch_unconfirmed = AsyncMock()
+
+        pdu = UnconfirmedRequestPDU(
+            service_choice=UnconfirmedServiceChoice.I_AM,
+            service_request=b"\x00",
+        )
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        await app._handle_unconfirmed_request(pdu, source)
+        app._service_registry.dispatch_unconfirmed.assert_not_called()
+
+    async def test_unconfirmed_handler_rejects_non_pdu(self):
+        """_handle_unconfirmed_request returns early for non-PDU."""
+        app = _make_started_app()
+        app._service_registry.dispatch_unconfirmed = AsyncMock()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        await app._handle_unconfirmed_request("not a pdu", source)
+        app._service_registry.dispatch_unconfirmed.assert_not_called()
+
+
+# ==================== Section 1D: APDU Handling & Dispatch ====================
+
+
+class TestAPDUDispatch:
+    """Test APDU receive path and dispatch logic."""
+
+    def test_on_apdu_received_malformed_drops(self):
+        """Malformed APDU bytes are dropped with warning."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        # Single byte is not a valid APDU
+        app._on_apdu_received(b"\xff", source)
+        # No crash, just logged
+
+    def test_on_apdu_received_simple_ack(self):
+        """SimpleAck is routed to client TSM."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        pdu = SimpleAckPDU(invoke_id=5, service_choice=15)
+        apdu_bytes = encode_apdu(pdu)
+        app._on_apdu_received(apdu_bytes, source)
+        app._client_tsm.handle_simple_ack.assert_called_once_with(source, 5, 15)
+
+    def test_on_apdu_received_complex_ack(self):
+        """Non-segmented ComplexAck is routed to client TSM."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        pdu = ComplexAckPDU(
+            segmented=False,
+            more_follows=False,
+            invoke_id=7,
+            sequence_number=None,
+            proposed_window_size=None,
+            service_choice=12,
+            service_ack=b"\x01\x02",
+        )
+        apdu_bytes = encode_apdu(pdu)
+        app._on_apdu_received(apdu_bytes, source)
+        app._client_tsm.handle_complex_ack.assert_called_once_with(source, 7, 12, b"\x01\x02")
+
+    def test_on_apdu_received_error_pdu(self):
+        """ErrorPDU is routed to client TSM."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        pdu = ErrorPDU(
+            invoke_id=3,
+            service_choice=12,
+            error_class=2,
+            error_code=31,
+            error_data=None,
+        )
+        apdu_bytes = encode_apdu(pdu)
+        app._on_apdu_received(apdu_bytes, source)
+        app._client_tsm.handle_error.assert_called_once()
+
+    def test_on_apdu_received_reject_pdu(self):
+        """RejectPDU is routed to client TSM."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        pdu = RejectPDU(invoke_id=4, reject_reason=3)
+        apdu_bytes = encode_apdu(pdu)
+        app._on_apdu_received(apdu_bytes, source)
+        app._client_tsm.handle_reject.assert_called_once_with(source, 4, 3)
+
+    def test_on_apdu_received_abort_pdu(self):
+        """AbortPDU is routed to client TSM."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        pdu = AbortPDU(sent_by_server=True, invoke_id=6, abort_reason=0)
+        apdu_bytes = encode_apdu(pdu)
+        app._on_apdu_received(apdu_bytes, source)
+        app._client_tsm.handle_abort.assert_called_once_with(source, 6, 0)
+
+    def test_on_apdu_received_no_client_tsm(self):
+        """Response PDUs are ignored when client TSM is None."""
+        app = _make_started_app()
+        app._client_tsm = None
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        pdu = SimpleAckPDU(invoke_id=5, service_choice=15)
+        apdu_bytes = encode_apdu(pdu)
+        # Should not crash
+        app._on_apdu_received(apdu_bytes, source)
+
+    def test_handle_segmented_request_no_server_tsm(self):
+        """Segmented request is ignored when server TSM is None."""
+        app = _make_started_app()
+        app._server_tsm = None
+        pdu = MagicMock(spec=ConfirmedRequestPDU)
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        # Should not crash
+        app._handle_segmented_request(pdu, source)
+
+    def test_handle_segmented_request_returns_none(self):
+        """Segmented request where assembly returns None (waiting for more)."""
+        app = _make_started_app()
+        app._server_tsm.receive_confirmed_request.return_value = None
+        pdu = MagicMock(spec=ConfirmedRequestPDU)
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        app._handle_segmented_request(pdu, source)
+        # No dispatch should happen
+
+    async def test_handle_confirmed_request_no_server_tsm(self):
+        """Confirmed request returns early when server TSM is None."""
+        app = _make_started_app()
+        app._server_tsm = None
+        pdu = MagicMock(spec=ConfirmedRequestPDU)
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        await app._handle_confirmed_request(pdu, source)
+
+    async def test_handle_confirmed_request_duplicate(self):
+        """Confirmed request returns early when TSM says duplicate."""
+        app = _make_started_app()
+        app._server_tsm.receive_confirmed_request.return_value = None
+        pdu = MagicMock(spec=ConfirmedRequestPDU)
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        await app._handle_confirmed_request(pdu, source)
+
+    async def test_handle_confirmed_request_no_service_data(self):
+        """Confirmed request returns early when service_data is None."""
+        app = _make_started_app()
+        txn = MagicMock()
+        app._server_tsm.receive_confirmed_request.return_value = (txn, None)
+        pdu = MagicMock(spec=ConfirmedRequestPDU)
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        await app._handle_confirmed_request(pdu, source)
+
+    async def test_dispatch_sends_simple_ack_for_none_result(self):
+        """Dispatch sends SimpleAck when handler returns None."""
+        app = _make_started_app()
+        txn = MagicMock()
+        txn.invoke_id = 10
+        txn.client_max_apdu_length = 1476
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        app._service_registry.dispatch_confirmed = AsyncMock(return_value=None)
+
+        await app._dispatch_request(txn, 15, b"\x00", source)
+
+        app._network.send.assert_called_once()
+        sent_bytes = app._network.send.call_args[0][0]
+        # Should be a SimpleAck (PDU type 0x20)
+        assert (sent_bytes[0] >> 4) & 0x0F == 2  # PduType.SIMPLE_ACK
+
+    async def test_dispatch_sends_complex_ack_for_result(self):
+        """Dispatch sends ComplexAck when handler returns data."""
+        app = _make_started_app()
+        txn = MagicMock()
+        txn.invoke_id = 10
+        txn.client_max_apdu_length = 1476
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        app._service_registry.dispatch_confirmed = AsyncMock(return_value=b"\x01\x02\x03")
+
+        await app._dispatch_request(txn, 12, b"\x00", source)
+
+        app._network.send.assert_called_once()
+        sent_bytes = app._network.send.call_args[0][0]
+        # Should be a ComplexAck (PDU type 0x30)
+        assert (sent_bytes[0] >> 4) & 0x0F == 3  # PduType.COMPLEX_ACK
+
+    async def test_dispatch_handles_bacnet_error(self):
+        """Dispatch sends ErrorPDU on BACnetError."""
+        app = _make_started_app()
+        txn = MagicMock()
+        txn.invoke_id = 10
+        txn.client_max_apdu_length = 1476
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        from bac_py.types.enums import ErrorClass, ErrorCode
+
+        app._service_registry.dispatch_confirmed = AsyncMock(
+            side_effect=BACnetError(
+                error_class=ErrorClass.PROPERTY, error_code=ErrorCode.UNKNOWN_PROPERTY
+            )
+        )
+
+        await app._dispatch_request(txn, 12, b"\x00", source)
+
+        app._network.send.assert_called_once()
+        sent_bytes = app._network.send.call_args[0][0]
+        # Should be an Error PDU (PDU type 0x50)
+        assert (sent_bytes[0] >> 4) & 0x0F == 5  # PduType.ERROR
+
+    async def test_dispatch_handles_reject_error(self):
+        """Dispatch sends RejectPDU on BACnetRejectError."""
+        app = _make_started_app()
+        txn = MagicMock()
+        txn.invoke_id = 10
+        txn.client_max_apdu_length = 1476
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        app._service_registry.dispatch_confirmed = AsyncMock(
+            side_effect=BACnetRejectError(reason=RejectReason.INVALID_PARAMETER_DATA_TYPE)
+        )
+
+        await app._dispatch_request(txn, 12, b"\x00", source)
+
+        app._network.send.assert_called_once()
+        sent_bytes = app._network.send.call_args[0][0]
+        # Should be a Reject PDU (PDU type 0x60)
+        assert (sent_bytes[0] >> 4) & 0x0F == 6  # PduType.REJECT
+
+    async def test_dispatch_handles_abort_error(self):
+        """Dispatch sends AbortPDU on BACnetAbortError."""
+        app = _make_started_app()
+        txn = MagicMock()
+        txn.invoke_id = 10
+        txn.client_max_apdu_length = 1476
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        app._service_registry.dispatch_confirmed = AsyncMock(
+            side_effect=BACnetAbortError(reason=AbortReason.BUFFER_OVERFLOW)
+        )
+
+        await app._dispatch_request(txn, 12, b"\x00", source)
+
+        app._network.send.assert_called_once()
+        sent_bytes = app._network.send.call_args[0][0]
+        # Should be an Abort PDU (PDU type 0x70)
+        assert (sent_bytes[0] >> 4) & 0x0F == 7  # PduType.ABORT
+
+    async def test_dispatch_handles_value_error(self):
+        """Dispatch sends RejectPDU on ValueError (malformed data)."""
+        app = _make_started_app()
+        txn = MagicMock()
+        txn.invoke_id = 10
+        txn.client_max_apdu_length = 1476
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        app._service_registry.dispatch_confirmed = AsyncMock(side_effect=ValueError("bad data"))
+
+        await app._dispatch_request(txn, 12, b"\x00", source)
+
+        app._network.send.assert_called_once()
+        sent_bytes = app._network.send.call_args[0][0]
+        assert (sent_bytes[0] >> 4) & 0x0F == 6  # PduType.REJECT
+
+    async def test_dispatch_handles_struct_error(self):
+        """Dispatch sends RejectPDU on struct.error (truncated data)."""
+        app = _make_started_app()
+        txn = MagicMock()
+        txn.invoke_id = 10
+        txn.client_max_apdu_length = 1476
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        app._service_registry.dispatch_confirmed = AsyncMock(
+            side_effect=struct.error("unpack failed")
+        )
+
+        await app._dispatch_request(txn, 12, b"\x00", source)
+
+        app._network.send.assert_called_once()
+        sent_bytes = app._network.send.call_args[0][0]
+        assert (sent_bytes[0] >> 4) & 0x0F == 6  # PduType.REJECT
+
+    async def test_dispatch_handles_index_error(self):
+        """Dispatch sends RejectPDU on IndexError."""
+        app = _make_started_app()
+        txn = MagicMock()
+        txn.invoke_id = 10
+        txn.client_max_apdu_length = 1476
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        app._service_registry.dispatch_confirmed = AsyncMock(
+            side_effect=IndexError("out of range")
+        )
+
+        await app._dispatch_request(txn, 12, b"\x00", source)
+
+        app._network.send.assert_called_once()
+        sent_bytes = app._network.send.call_args[0][0]
+        assert (sent_bytes[0] >> 4) & 0x0F == 6  # PduType.REJECT
+
+    async def test_dispatch_handles_generic_exception(self):
+        """Dispatch sends AbortPDU on unhandled Exception."""
+        app = _make_started_app()
+        txn = MagicMock()
+        txn.invoke_id = 10
+        txn.client_max_apdu_length = 1476
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        app._service_registry.dispatch_confirmed = AsyncMock(
+            side_effect=RuntimeError("unexpected")
+        )
+
+        await app._dispatch_request(txn, 12, b"\x00", source)
+
+        app._network.send.assert_called_once()
+        sent_bytes = app._network.send.call_args[0][0]
+        assert (sent_bytes[0] >> 4) & 0x0F == 7  # PduType.ABORT
+
+    async def test_dispatch_no_server_tsm_returns(self):
+        """Dispatch returns early when server TSM is None."""
+        app = _make_started_app()
+        app._server_tsm = None
+        txn = MagicMock()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        await app._dispatch_request(txn, 12, b"\x00", source)
+
+    async def test_dispatch_no_network_returns(self):
+        """Dispatch returns early when network is None."""
+        app = _make_started_app()
+        app._network = None
+        app._router = None
+        txn = MagicMock()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        await app._dispatch_request(txn, 12, b"\x00", source)
+
+    async def test_dispatch_segmented_response(self):
+        """Dispatch starts segmented response for large results."""
+        app = _make_started_app()
+        txn = MagicMock()
+        txn.invoke_id = 10
+        txn.client_max_apdu_length = 50  # Very small max APDU
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        # Return data larger than max payload
+        large_data = b"\x00" * 200
+        app._service_registry.dispatch_confirmed = AsyncMock(return_value=large_data)
+
+        await app._dispatch_request(txn, 12, b"\x00", source)
+
+        app._server_tsm.start_segmented_response.assert_called_once_with(txn, 12, large_data)
+
+    def test_broadcast_i_am_no_device_object(self):
+        """_broadcast_i_am falls back to Segmentation.BOTH when no device object."""
+        app = _make_started_app()
+        # No device object in the DB
+        app._network.send.reset_mock()
+        app._broadcast_i_am()
+        app._network.send.assert_called_once()
+
+    def test_broadcast_i_am_with_device_object(self):
+        """_broadcast_i_am reads segmentation from device object."""
+        from bac_py.types.enums import PropertyIdentifier
+
+        app = _make_started_app()
+        device_obj = MagicMock()
+        device_obj.read_property.return_value = Segmentation.NONE
+        oid = ObjectIdentifier(ObjectType.DEVICE, 1)
+        app._object_db._objects = {oid: device_obj}
+        app._object_db.get = MagicMock(return_value=device_obj)
+
+        app._network.send.reset_mock()
+        app._broadcast_i_am()
+        app._network.send.assert_called_once()
+        device_obj.read_property.assert_called_once_with(PropertyIdentifier.SEGMENTATION_SUPPORTED)
+
+    def test_broadcast_i_am_read_property_fails(self):
+        """_broadcast_i_am falls back to Segmentation.BOTH on read failure."""
+        app = _make_started_app()
+        device_obj = MagicMock()
+        device_obj.read_property.side_effect = Exception("read failed")
+        app._object_db.get = MagicMock(return_value=device_obj)
+
+        app._network.send.reset_mock()
+        app._broadcast_i_am()
+        app._network.send.assert_called_once()
+
+    async def test_confirmed_request_uses_cached_max_apdu(self):
+        """Confirmed request constrains max APDU using cache."""
+        app = _make_started_app()
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        # Cache says peer only accepts 480 bytes
+        app._device_info_cache[dest] = DeviceInfo(
+            max_apdu_length=480,
+            segmentation_supported=int(Segmentation.NONE),
+        )
+
+        await app.confirmed_request(dest, 12, b"\x00")
+        call_kwargs = app._client_tsm.send_request.call_args[1]
+        assert call_kwargs["max_apdu_override"] == 480
+
+    async def test_confirmed_request_no_cache_no_override(self):
+        """Confirmed request with no cache entry uses None override."""
+        app = _make_started_app()
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        await app.confirmed_request(dest, 12, b"\x00")
+        call_kwargs = app._client_tsm.send_request.call_args[1]
+        assert call_kwargs["max_apdu_override"] is None
+
+    async def test_confirmed_request_cache_min_of_local_and_remote(self):
+        """Confirmed request uses min(local, remote) max APDU."""
+        cfg = DeviceConfig(instance_number=1, max_apdu_length=1476)
+        app = BACnetApplication(cfg)
+        app._client_tsm = MagicMock()
+        app._client_tsm.send_request = AsyncMock(return_value=b"\x00")
+
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        # Remote accepts more than local
+        app._device_info_cache[dest] = DeviceInfo(
+            max_apdu_length=2000,
+            segmentation_supported=int(Segmentation.BOTH),
+        )
+
+        await app.confirmed_request(dest, 12, b"\x00")
+        call_kwargs = app._client_tsm.send_request.call_args[1]
+        assert call_kwargs["max_apdu_override"] == 1476  # min(1476, 2000)
+
+    async def test_confirmed_request_with_timeout(self):
+        """Confirmed request passes timeout to asyncio.wait_for."""
+        app = _make_started_app()
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        result = await app.confirmed_request(dest, 12, b"\x00", timeout=5.0)
+        assert result == b"\x00"
+
+    async def test_unconfirmed_handler_dispatches_to_listeners(self):
+        """Unconfirmed handler dispatches to temporary listeners."""
+        app = _make_started_app()
+        app._service_registry.dispatch_unconfirmed = AsyncMock()
+
+        callback = MagicMock()
+        app._unconfirmed_listeners[8] = [callback]
+
+        pdu = UnconfirmedRequestPDU(service_choice=8, service_request=b"\x01\x02")
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        await app._handle_unconfirmed_request(pdu, source)
+
+        callback.assert_called_once_with(b"\x01\x02", source)
+
+    async def test_unconfirmed_handler_listener_error_caught(self):
+        """Errors in temporary listeners are caught."""
+        app = _make_started_app()
+        app._service_registry.dispatch_unconfirmed = AsyncMock()
+
+        callback = MagicMock(side_effect=RuntimeError("listener error"))
+        app._unconfirmed_listeners[8] = [callback]
+
+        pdu = UnconfirmedRequestPDU(service_choice=8, service_request=b"\x01")
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        # Should not raise
+        await app._handle_unconfirmed_request(pdu, source)
+
+    def test_on_apdu_received_segment_ack_server(self):
+        """SegmentAck from server routes to client TSM."""
+        from bac_py.encoding.apdu import SegmentAckPDU
+
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        pdu = SegmentAckPDU(
+            sent_by_server=True,
+            negative_ack=False,
+            invoke_id=1,
+            actual_window_size=4,
+            sequence_number=0,
+        )
+        apdu_bytes = encode_apdu(pdu)
+        app._on_apdu_received(apdu_bytes, source)
+        app._client_tsm.handle_segment_ack.assert_called_once()
+
+    def test_on_apdu_received_segment_ack_client(self):
+        """SegmentAck from client routes to server TSM."""
+        from bac_py.encoding.apdu import SegmentAckPDU
+
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        pdu = SegmentAckPDU(
+            sent_by_server=False,
+            negative_ack=False,
+            invoke_id=1,
+            actual_window_size=4,
+            sequence_number=0,
+        )
+        apdu_bytes = encode_apdu(pdu)
+        app._on_apdu_received(apdu_bytes, source)
+        app._server_tsm.handle_segment_ack_for_response.assert_called_once()
+
+
+# ==================== Section 1E: Context Manager & Lifecycle ====================
+
+
+class TestLifecycle:
+    """Test context manager, run(), stop() lifecycle methods."""
+
+    async def test_aenter_calls_start(self):
+        """__aenter__ starts the application."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            result = await app.__aenter__()
+            try:
+                assert result is app
+                assert app._running is True
+            finally:
+                await app.__aexit__(None, None, None)
+
+    async def test_aexit_calls_stop(self):
+        """__aexit__ stops the application."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            await app.__aenter__()
+            await app.__aexit__(None, None, None)
+            assert app._running is False
+
+    async def test_stop_idempotent(self):
+        """stop() is idempotent -- multiple calls are safe."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            await app.start()
+            await app.stop()
+            await app.stop()  # Should not raise
+
+    async def test_stop_cancels_dcc_timer(self):
+        """stop() cancels active DCC timer."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            await app.start()
+            app.set_dcc_state(EnableDisable.DISABLE, duration=10)
+            assert app._dcc_timer is not None
+            timer = app._dcc_timer
+            await app.stop()
+            assert timer.cancelled()
+            assert app._dcc_timer is None
+
+    async def test_stop_stops_event_engine(self):
+        """stop() calls event_engine.stop()."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            await app.start()
+            assert app._event_engine is not None
+            await app.stop()
+            assert app._event_engine is None
+
+    async def test_stop_shuts_down_cov_manager(self):
+        """stop() calls cov_manager.shutdown()."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            await app.start()
+            assert app._cov_manager is not None
+            await app.stop()
+            assert app._cov_manager is None
+
+    async def test_stop_cancels_client_transactions(self):
+        """stop() cancels pending client transactions."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            await app.start()
+            # Add a fake pending transaction
+            mock_future = asyncio.get_event_loop().create_future()
+            mock_txn = MagicMock()
+            mock_txn.future = mock_future
+            app._client_tsm._transactions = {1: mock_txn}
+            app._client_tsm.active_transactions = MagicMock(return_value=[mock_txn])
+
+            await app.stop()
+            assert mock_future.cancelled()
+
+    async def test_stop_cancels_background_tasks(self):
+        """stop() cancels all background tasks."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            await app.start()
+
+            # Create a long-running background task
+            async def long_task():
+                await asyncio.sleep(100)
+
+            app._spawn_task(long_task())
+            assert len(app._background_tasks) == 1
+
+            await app.stop()
+            assert len(app._background_tasks) == 0
+
+    async def test_stop_transport_in_non_router(self):
+        """stop() calls transport.stop() in non-router mode."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            await app.start()
+            await app.stop()
+            mock_t.stop.assert_called_once()
+
+    async def test_run_starts_and_waits(self):
+        """run() starts the app and waits for stop event."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            # Run in background and stop it after a short delay
+            async def stop_after_delay():
+                await asyncio.sleep(0.05)
+                await app.stop()
+
+            task = asyncio.create_task(stop_after_delay())
+            await app.run()
+            await task
+            assert app._running is False
+
+    def test_parse_bip_address_host_only(self):
+        """Parse BIP address with host only (default port)."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        addr = app._parse_bip_address("192.168.1.1")
+        assert addr.host == "192.168.1.1"
+        assert addr.port == 0xBAC0
+
+    def test_parse_bip_address_host_and_port(self):
+        """Parse BIP address with host:port."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        addr = app._parse_bip_address("192.168.1.1:47809")
+        assert addr.host == "192.168.1.1"
+        assert addr.port == 47809
+
+    async def test_start_initializes_cov_manager(self):
+        """start() creates a COVManager."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            await app.start()
+            try:
+                assert app.cov_manager is not None
+            finally:
+                await app.stop()
+
+    async def test_start_initializes_event_engine(self):
+        """start() creates and starts an EventEngine."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            await app.start()
+            try:
+                assert app.event_engine is not None
+            finally:
+                await app.stop()
+
+    async def test_start_registers_cov_handlers(self):
+        """start() registers COV notification handlers."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            await app.start()
+            try:
+                # Check that confirmed COV handler is registered
+                confirmed_handler = app._service_registry._confirmed.get(
+                    ConfirmedServiceChoice.CONFIRMED_COV_NOTIFICATION
+                )
+                assert confirmed_handler is not None
+            finally:
+                await app.stop()
+
+    async def test_start_broadcasts_i_am(self):
+        """start() broadcasts I-Am on startup."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
+            mock_network = MagicMock()
+            with patch("bac_py.app.application.NetworkLayer", return_value=mock_network):
+                await app.start()
+                try:
+                    # Network.send should be called at least once (I-Am broadcast)
+                    mock_network.send.assert_called()
+                finally:
+                    await app.stop()
+
+
+# ==================== Section 1F: COV & Task Management ====================
+
+
+class TestCOVAndTaskManagement:
+    """Test COV callback management and task spawning."""
+
+    def test_register_cov_callback(self):
+        """Register a COV callback."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        callback = MagicMock()
+        app.register_cov_callback(42, callback)
+        assert 42 in app._cov_callbacks
+        assert app._cov_callbacks[42] is callback
+
+    def test_unregister_cov_callback(self):
+        """Unregister a COV callback."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        callback = MagicMock()
+        app.register_cov_callback(42, callback)
+        app.unregister_cov_callback(42)
+        assert 42 not in app._cov_callbacks
+
+    def test_unregister_cov_callback_missing(self):
+        """Unregistering a missing callback is a no-op."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app.unregister_cov_callback(99)  # Should not raise
+
+    async def test_spawn_task_creates_and_tracks(self):
+        """_spawn_task creates an asyncio task and tracks it."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        completed = False
+
+        async def simple_coro():
+            nonlocal completed
+            completed = True
+
+        app._spawn_task(simple_coro())
+        assert len(app._background_tasks) == 1
+
+        # Let the task complete
+        await asyncio.sleep(0.01)
+        assert completed
+        # Task should clean up via done callback
+        assert len(app._background_tasks) == 0
+
+    async def test_dispatch_cov_notification_invokes_callback(self):
+        """_dispatch_cov_notification calls registered callback."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        callback = MagicMock()
+        app._cov_callbacks[10] = callback
+
+        # Build a minimal COV notification
+        from bac_py.services.cov import COVNotificationRequest
+
+        notif = COVNotificationRequest(
+            subscriber_process_identifier=10,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            time_remaining=300,
+            list_of_values=[],
+        )
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        app._dispatch_cov_notification(notif.encode(), source)
+
+        callback.assert_called_once()
+        call_args = callback.call_args[0]
+        assert call_args[0].subscriber_process_identifier == 10
+        assert call_args[1] is source
+
+    async def test_dispatch_cov_notification_no_callback(self):
+        """_dispatch_cov_notification is silent when no callback registered."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        from bac_py.services.cov import COVNotificationRequest
+
+        notif = COVNotificationRequest(
+            subscriber_process_identifier=99,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            time_remaining=300,
+            list_of_values=[],
+        )
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        # Should not raise
+        app._dispatch_cov_notification(notif.encode(), source)
+
+    async def test_dispatch_cov_notification_callback_error(self):
+        """_dispatch_cov_notification catches callback errors."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        callback = MagicMock(side_effect=RuntimeError("callback error"))
+        app._cov_callbacks[10] = callback
+
+        from bac_py.services.cov import COVNotificationRequest
+
+        notif = COVNotificationRequest(
+            subscriber_process_identifier=10,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            time_remaining=300,
+            list_of_values=[],
+        )
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        # Should not raise
+        app._dispatch_cov_notification(notif.encode(), source)
+
+    async def test_handle_confirmed_cov_notification(self):
+        """Confirmed COV notification handler dispatches and returns None."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        callback = MagicMock()
+        app._cov_callbacks[10] = callback
+
+        from bac_py.services.cov import COVNotificationRequest
+
+        notif = COVNotificationRequest(
+            subscriber_process_identifier=10,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            time_remaining=300,
+            list_of_values=[],
+        )
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        result = await app._handle_confirmed_cov_notification(1, notif.encode(), source)
+        assert result is None
+        callback.assert_called_once()
+
+    async def test_handle_unconfirmed_cov_notification(self):
+        """Unconfirmed COV notification handler dispatches."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        callback = MagicMock()
+        app._cov_callbacks[10] = callback
+
+        from bac_py.services.cov import COVNotificationRequest
+
+        notif = COVNotificationRequest(
+            subscriber_process_identifier=10,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            time_remaining=300,
+            list_of_values=[],
+        )
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        await app._handle_unconfirmed_cov_notification(2, notif.encode(), source)
+        callback.assert_called_once()
+
+    async def test_send_confirmed_cov_notification_spawns_task(self):
+        """send_confirmed_cov_notification creates a background task."""
+        app = _make_started_app()
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        app.send_confirmed_cov_notification(b"\x00", dest, 1)
+        assert len(app._background_tasks) == 1
+        # Let the task complete
+        await asyncio.sleep(0.01)
+
+    async def test_send_confirmed_cov_failure_logged(self):
+        """_send_confirmed_cov logs failure without propagating."""
+        app = _make_started_app()
+        app._client_tsm.send_request = AsyncMock(side_effect=RuntimeError("network error"))
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        # Should not raise
+        await app._send_confirmed_cov(b"\x00", dest, 1)
