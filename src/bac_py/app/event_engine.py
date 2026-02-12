@@ -592,6 +592,25 @@ def evaluate_change_of_timer(
     return None
 
 
+def evaluate_change_of_discrete_value(
+    current_value: Any,
+    previous_value: Any,
+) -> EventState | None:
+    """Evaluate CHANGE_OF_DISCRETE_VALUE (Clause 13.3.21, new in 2020).
+
+    Fires OFFNORMAL when the monitored property's discrete value changes.
+    Applies to Integer, Unsigned, Large-Analog, and other discrete-valued
+    objects.
+
+    :param current_value: Current monitored property value.
+    :param previous_value: Previous monitored property value.
+    :returns: ``OFFNORMAL`` if values differ, else ``None``.
+    """
+    if current_value != previous_value:
+        return EventState.OFFNORMAL
+    return None
+
+
 # ---------------------------------------------------------------------------
 # EventEngine -- Async integration layer (Clause 13)
 # ---------------------------------------------------------------------------
@@ -1059,6 +1078,10 @@ class EventEngine:
             if not isinstance(alarm_values, tuple):
                 alarm_values = tuple(alarm_values)
             return evaluate_change_of_timer(monitored_value, alarm_values)
+
+        if event_type == EventType.CHANGE_OF_DISCRETE_VALUE and isinstance(params, dict):
+            previous_value = params.get("previous_value", monitored_value)
+            return evaluate_change_of_discrete_value(monitored_value, previous_value)
 
         # Unsupported or no params -- no alarm
         return None

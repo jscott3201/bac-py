@@ -120,6 +120,15 @@ class BACnetDateTime:
             "time": self.time.to_dict(),
         }
 
+    def encode(self) -> bytes:
+        """Encode as application-tagged Date followed by Time.
+
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import encode_application_date, encode_application_time
+
+        return encode_application_date(self.date) + encode_application_time(self.time)
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BACnetDateTime:
         """Reconstruct from a JSON-friendly dictionary.
@@ -282,6 +291,15 @@ class BACnetDateRange:
     end_date: BACnetDate
     """Inclusive end of the date range."""
 
+    def encode(self) -> bytes:
+        """Encode as two application-tagged Dates.
+
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import encode_application_date
+
+        return encode_application_date(self.start_date) + encode_application_date(self.end_date)
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
 
@@ -365,6 +383,33 @@ class BACnetCalendarEntry:
     value: BACnetDate | BACnetDateRange | BACnetWeekNDay
     """The typed value corresponding to the choice discriminator."""
 
+    def encode(self) -> bytes:
+        """Encode as context-tagged CHOICE per Clause 21.
+
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import (
+            encode_application_date,
+            encode_context_date,
+            encode_context_octet_string,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        if self.choice == 0:
+            assert isinstance(self.value, BACnetDate)
+            return encode_context_date(0, self.value)
+        if self.choice == 1:
+            assert isinstance(self.value, BACnetDateRange)
+            buf = encode_opening_tag(1)
+            buf += encode_application_date(self.value.start_date)
+            buf += encode_application_date(self.value.end_date)
+            buf += encode_closing_tag(1)
+            return buf
+        assert isinstance(self.value, BACnetWeekNDay)
+        return encode_context_octet_string(
+            2, bytes([self.value.month, self.value.week_of_month, self.value.day_of_week])
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
 
@@ -411,6 +456,18 @@ class BACnetTimeValue:
     value: Any
     """The primitive application-tagged value (any type)."""
 
+    def encode(self, *, int_as_real: bool = False) -> bytes:
+        """Encode as application-tagged Time followed by value.
+
+        :param int_as_real: If ``True``, encode int values as Real.
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import encode_application_time, encode_property_value
+
+        return encode_application_time(self.time) + encode_property_value(
+            self.value, int_as_real=int_as_real
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
 
@@ -455,6 +512,35 @@ class BACnetSpecialEvent:
     event_priority: int
     """Priority level (1--16) for schedule resolution. Lower values
     take precedence."""
+
+    def encode(self, *, int_as_real: bool = False) -> bytes:
+        """Encode as context-tagged SEQUENCE per Clause 21.
+
+        :param int_as_real: If ``True``, encode int time-values as Real.
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import (
+            encode_application_time,
+            encode_context_object_id,
+            encode_context_unsigned,
+            encode_property_value,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        if isinstance(self.period, BACnetCalendarEntry):
+            buf = encode_opening_tag(0)
+            buf += self.period.encode()
+            buf += encode_closing_tag(0)
+        else:
+            buf = encode_context_object_id(1, self.period)
+        buf += encode_opening_tag(2)
+        for tv in self.list_of_time_values:
+            buf += encode_application_time(tv.time) + encode_property_value(
+                tv.value, int_as_real=int_as_real
+            )
+        buf += encode_closing_tag(2)
+        buf += encode_context_unsigned(3, self.event_priority)
+        return buf
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
@@ -657,6 +743,23 @@ class BACnetObjectPropertyReference:
     property_array_index: int | None = None
     """Optional array index within the property."""
 
+    def encode(self) -> bytes:
+        """Encode as context-tagged SEQUENCE per Clause 21.
+
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import (
+            encode_context_enumerated,
+            encode_context_object_id,
+            encode_context_unsigned,
+        )
+
+        buf = encode_context_object_id(0, self.object_identifier)
+        buf += encode_context_enumerated(1, self.property_identifier)
+        if self.property_array_index is not None:
+            buf += encode_context_unsigned(2, self.property_array_index)
+        return buf
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
 
@@ -700,6 +803,17 @@ class BACnetAddress:
     mac_address: bytes
     """MAC-layer address bytes."""
 
+    def encode(self) -> bytes:
+        """Encode as context-tagged SEQUENCE per Clause 21.
+
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import encode_context_octet_string, encode_context_unsigned
+
+        return encode_context_unsigned(0, self.network_number) + encode_context_octet_string(
+            1, self.mac_address
+        )
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
 
@@ -736,6 +850,25 @@ class BACnetRecipient:
 
     address: BACnetAddress | None = None
     """Target network address, or ``None`` if using *device*."""
+
+    def encode(self) -> bytes:
+        """Encode as context-tagged CHOICE per Clause 21.
+
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import encode_context_object_id
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        if self.device is not None:
+            return encode_context_object_id(0, self.device)
+        if self.address is not None:
+            buf = encode_opening_tag(1)
+            buf += self.address.encode()
+            buf += encode_closing_tag(1)
+            return buf
+        from bac_py.types.enums import ObjectType
+
+        return encode_context_object_id(0, ObjectIdentifier(ObjectType(0), 0))
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
@@ -792,6 +925,27 @@ class BACnetDestination:
     transitions: BitString
     """3-bit BitString for event transitions: to-offnormal, to-fault,
     to-normal."""
+
+    def encode(self) -> bytes:
+        """Encode as application-tagged SEQUENCE per Clause 21.
+
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import (
+            encode_application_bit_string,
+            encode_application_boolean,
+            encode_application_time,
+            encode_application_unsigned,
+        )
+
+        buf = encode_application_bit_string(self.valid_days)
+        buf += encode_application_time(self.from_time)
+        buf += encode_application_time(self.to_time)
+        buf += self.recipient.encode()
+        buf += encode_application_unsigned(self.process_identifier)
+        buf += encode_application_boolean(self.issue_confirmed_notifications)
+        buf += encode_application_bit_string(self.transitions)
+        return buf
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
@@ -915,6 +1069,26 @@ class BACnetLogRecord:
     status_flags: StatusFlags | None = None
     """Optional status flags at the time of logging."""
 
+    def encode(self, *, int_as_real: bool = False) -> bytes:
+        """Encode as application-tagged SEQUENCE per Clause 12.25.
+
+        :param int_as_real: If ``True``, encode int log_datum as Real.
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import (
+            encode_application_date,
+            encode_application_time,
+            encode_context_bit_string,
+            encode_property_value,
+        )
+
+        buf = encode_application_date(self.timestamp.date)
+        buf += encode_application_time(self.timestamp.time)
+        buf += encode_property_value(self.log_datum, int_as_real=int_as_real)
+        if self.status_flags is not None:
+            buf += encode_context_bit_string(1, self.status_flags.to_bit_string())
+        return buf
+
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
 
@@ -962,6 +1136,20 @@ class BACnetRecipientProcess:
 
     process_identifier: int
     """The subscriber's process ID."""
+
+    def encode(self) -> bytes:
+        """Encode as context-tagged SEQUENCE per Clause 12.11.39.
+
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import encode_context_unsigned
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = encode_opening_tag(0)
+        buf += self.recipient.encode()
+        buf += encode_closing_tag(0)
+        buf += encode_context_unsigned(1, self.process_identifier)
+        return buf
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
@@ -1090,6 +1278,22 @@ class BACnetPriorityArray:
 
     def __getitem__(self, index: int) -> BACnetPriorityValue:
         return self.slots[index]
+
+    def encode(self, *, int_as_real: bool = False) -> bytes:
+        """Encode the 16-element priority array as application-tagged values.
+
+        :param int_as_real: If ``True``, encode int values as Real.
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import encode_application_null, encode_property_value
+
+        parts: list[bytes] = []
+        for slot in self.slots:
+            if slot.value is None:
+                parts.append(encode_application_null())
+            else:
+                parts.append(encode_property_value(slot.value, int_as_real=int_as_real))
+        return b"".join(parts)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.

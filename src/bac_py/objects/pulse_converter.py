@@ -116,6 +116,14 @@ class PulseConverterObject(BACnetObject):
         **intrinsic_reporting_properties(include_limit=True),
     }
 
-    def __init__(self, instance_number: int, **initial_properties: Any) -> None:
+    def __init__(
+        self,
+        instance_number: int,
+        *,
+        commandable: bool = False,
+        **initial_properties: Any,
+    ) -> None:
         super().__init__(instance_number, **initial_properties)
+        if commandable:
+            self._init_commandable(0.0)
         self._init_status_flags()

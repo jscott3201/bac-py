@@ -183,6 +183,27 @@ class TestPropertyIdentifier:
     def test_egress_active(self) -> None:
         assert PropertyIdentifier.EGRESS_ACTIVE == 386
 
+    def test_vendor_property_id_accepted(self) -> None:
+        """Vendor-proprietary property IDs beyond defined range should create pseudo-members."""
+        prop = PropertyIdentifier(600)
+        assert prop == 600
+        assert prop.name == "VENDOR_600"
+
+    def test_vendor_property_id_large(self) -> None:
+        """Max 22-bit property namespace value should be accepted."""
+        prop = PropertyIdentifier(4194303)
+        assert prop == 4194303
+        assert prop.name == "VENDOR_4194303"
+
+    def test_vendor_property_id_out_of_range(self) -> None:
+        """Values above the 22-bit namespace should still raise."""
+        with pytest.raises(ValueError):
+            PropertyIdentifier(4194304)
+
+    def test_known_property_still_resolves(self) -> None:
+        """Standard property IDs should resolve to their named members."""
+        assert PropertyIdentifier(85) is PropertyIdentifier.PRESENT_VALUE
+
 
 # ---------------------------------------------------------------------------
 # ErrorClass

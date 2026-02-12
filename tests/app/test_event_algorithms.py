@@ -14,6 +14,7 @@ from bac_py.app.event_engine import (
     evaluate_buffer_ready,
     evaluate_change_of_bitstring,
     evaluate_change_of_characterstring,
+    evaluate_change_of_discrete_value,
     evaluate_change_of_life_safety,
     evaluate_change_of_reliability,
     evaluate_change_of_state,
@@ -971,3 +972,39 @@ class TestEvaluateChangeOfTimer:
         assert running is EventState.OFFNORMAL
         expired = evaluate_change_of_timer(TimerState.EXPIRED, alarm_values)
         assert expired is EventState.OFFNORMAL
+
+
+class TestEvaluateChangeOfDiscreteValue:
+    """Tests for evaluate_change_of_discrete_value (Clause 13.3.21)."""
+
+    def test_same_int_value_returns_none(self):
+        result = evaluate_change_of_discrete_value(42, 42)
+        assert result is None
+
+    def test_different_int_value_returns_offnormal(self):
+        result = evaluate_change_of_discrete_value(43, 42)
+        assert result is EventState.OFFNORMAL
+
+    def test_same_string_value_returns_none(self):
+        result = evaluate_change_of_discrete_value("active", "active")
+        assert result is None
+
+    def test_different_string_value_returns_offnormal(self):
+        result = evaluate_change_of_discrete_value("active", "inactive")
+        assert result is EventState.OFFNORMAL
+
+    def test_same_enum_value_returns_none(self):
+        result = evaluate_change_of_discrete_value(EventState.NORMAL, EventState.NORMAL)
+        assert result is None
+
+    def test_different_enum_value_returns_offnormal(self):
+        result = evaluate_change_of_discrete_value(EventState.OFFNORMAL, EventState.NORMAL)
+        assert result is EventState.OFFNORMAL
+
+    def test_zero_to_nonzero_returns_offnormal(self):
+        result = evaluate_change_of_discrete_value(1, 0)
+        assert result is EventState.OFFNORMAL
+
+    def test_none_to_value_returns_offnormal(self):
+        result = evaluate_change_of_discrete_value(1, None)
+        assert result is EventState.OFFNORMAL

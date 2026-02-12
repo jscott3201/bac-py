@@ -92,10 +92,22 @@ class PropertyIdentifier(IntEnum):
 
     This enum covers commonly encountered property IDs but does not
     include every value defined in the standard (e.g. deprecated IDs
-    like 18, 51, 55, 95, 101 and some newer additions).  Constructing
-    a ``PropertyIdentifier`` with an unlisted integer will raise
-    ``ValueError``.
+    like 18, 51, 55, 95, 101 and some newer additions).
+
+    Vendor-proprietary property IDs (512+) and any other values in the
+    22-bit property namespace (0--4194303) are accepted as pseudo-members
+    via ``_missing_`` so that devices with non-standard property IDs do
+    not cause a ``ValueError`` during decoding.
     """
+
+    @classmethod
+    def _missing_(cls, value: object) -> PropertyIdentifier | None:
+        if isinstance(value, int) and 0 <= value <= 4194303:
+            member = int.__new__(cls, value)
+            member._name_ = f"VENDOR_{value}"
+            member._value_ = value
+            return member
+        return None
 
     ACKED_TRANSITIONS = 0
     ACK_REQUIRED = 1

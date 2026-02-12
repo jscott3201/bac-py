@@ -13,12 +13,14 @@ from bac_py.encoding.primitives import (
     decode_character_string,
     decode_object_identifier,
     decode_unsigned,
+    decode_unsigned64,
     encode_character_string,
     encode_context_enumerated,
     encode_context_object_id,
     encode_context_octet_string,
     encode_context_tagged,
     encode_context_unsigned,
+    encode_unsigned64,
 )
 from bac_py.encoding.tags import (
     TagClass,
@@ -475,7 +477,7 @@ class BACnetAuditLogRecord:
         """Encode BACnetAuditLogRecord."""
         buf = bytearray()
         # [0] sequence-number (Unsigned64)
-        buf.extend(encode_context_unsigned(0, self.sequence_number))
+        buf.extend(encode_context_tagged(0, encode_unsigned64(self.sequence_number)))
         # [1] notification (constructed)
         buf.extend(encode_opening_tag(1))
         buf.extend(self.notification.encode())
@@ -488,9 +490,9 @@ class BACnetAuditLogRecord:
         data = as_memoryview(data)
         offset = 0
 
-        # [0] sequence-number
+        # [0] sequence-number (Unsigned64)
         tag, offset = decode_tag(data, offset)
-        sequence_number = decode_unsigned(data[offset : offset + tag.length])
+        sequence_number = decode_unsigned64(data[offset : offset + tag.length])
         offset += tag.length
 
         # [1] notification (constructed)

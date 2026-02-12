@@ -15,6 +15,7 @@ from bac_py.encoding.primitives import (
     decode_signed,
     decode_time,
     decode_unsigned,
+    decode_unsigned64,
     encode_application_bit_string,
     encode_application_boolean,
     encode_application_character_string,
@@ -39,6 +40,7 @@ from bac_py.encoding.primitives import (
     encode_signed,
     encode_time,
     encode_unsigned,
+    encode_unsigned64,
 )
 from bac_py.encoding.tags import TagClass, decode_tag
 from bac_py.types.primitives import BACnetDate, BACnetTime, BitString
@@ -90,6 +92,68 @@ class TestUnsigned:
     def test_round_trip(self):
         for val in [0, 1, 127, 128, 255, 256, 65535, 65536, 0xFFFFFF, 0xFFFFFFFF]:
             assert decode_unsigned(encode_unsigned(val)) == val
+
+
+class TestUnsigned64:
+    def test_encode_zero(self):
+        assert encode_unsigned64(0) == b"\x00"
+
+    def test_encode_small_uses_minimum_bytes(self):
+        """Values <= 0xFFFFFFFF should use minimum bytes (same as encode_unsigned)."""
+        assert encode_unsigned64(255) == b"\xff"
+        assert encode_unsigned64(256) == b"\x01\x00"
+        assert encode_unsigned64(0xFFFFFFFF) == b"\xff\xff\xff\xff"
+
+    def test_encode_5_bytes(self):
+        val = 0x0100000000  # Just above 4-byte max
+        result = encode_unsigned64(val)
+        assert len(result) == 5
+        assert result == b"\x01\x00\x00\x00\x00"
+
+    def test_encode_6_bytes(self):
+        val = 0x010000000000
+        result = encode_unsigned64(val)
+        assert len(result) == 6
+
+    def test_encode_7_bytes(self):
+        val = 0x01000000000000
+        result = encode_unsigned64(val)
+        assert len(result) == 7
+
+    def test_encode_8_bytes(self):
+        val = 0xFFFFFFFFFFFFFFFF
+        result = encode_unsigned64(val)
+        assert len(result) == 8
+        assert result == b"\xff\xff\xff\xff\xff\xff\xff\xff"
+
+    def test_encode_negative_raises(self):
+        with pytest.raises(ValueError, match="Unsigned64 integer must be >= 0"):
+            encode_unsigned64(-1)
+
+    def test_encode_over_8_bytes_raises(self):
+        with pytest.raises(ValueError, match="Unsigned64 integer exceeds 8-byte maximum"):
+            encode_unsigned64(0x10000000000000000)
+
+    def test_round_trip(self):
+        for val in [
+            0,
+            1,
+            255,
+            0xFFFFFFFF,
+            0x100000000,
+            0xFFFFFFFFFF,
+            0xFFFFFFFFFFFFFF,
+            0xFFFFFFFFFFFFFFFF,
+        ]:
+            assert decode_unsigned64(encode_unsigned64(val)) == val
+
+    def test_decode_5_byte_value(self):
+        data = b"\x01\x00\x00\x00\x00"
+        assert decode_unsigned64(data) == 0x0100000000
+
+    def test_decode_8_byte_value(self):
+        data = b"\xff\xff\xff\xff\xff\xff\xff\xff"
+        assert decode_unsigned64(data) == 0xFFFFFFFFFFFFFFFF
 
 
 class TestSigned:
@@ -210,9 +274,15 @@ class TestCharacterString:
         with pytest.raises(ValueError, match="Unsupported BACnet character set"):
             encode_character_string("hello", charset=0x06)
 
-    def test_unsupported_charset_decode_raises(self):
-        with pytest.raises(ValueError, match="Unsupported BACnet character set"):
-            decode_character_string(b"\x06hello")
+    def test_unknown_charset_decode_falls_back_to_latin1(self):
+        """Unknown charset bytes should fall back to latin-1 decode."""
+        result = decode_character_string(b"\x06hello")
+        assert result == "hello"
+
+    def test_unknown_charset_decode_preserves_high_bytes(self):
+        """Latin-1 fallback should preserve high-byte characters."""
+        result = decode_character_string(b"\x09\xe9\xe0\xfc")
+        assert result == "\u00e9\u00e0\u00fc"
 
     def test_iso_8859_1(self):
         encoded = encode_character_string("caf\u00e9", charset=0x05)

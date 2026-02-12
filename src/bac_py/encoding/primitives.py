@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import enum
+import logging
 import struct
 
 from bac_py.encoding.tags import TagClass, encode_closing_tag, encode_opening_tag, encode_tag
@@ -14,6 +15,8 @@ from bac_py.types.primitives import (
     BitString,
     ObjectIdentifier,
 )
+
+logger = logging.getLogger(__name__)
 
 # Application tag numbers for primitive types
 _TAG_NULL = 0
@@ -76,6 +79,37 @@ def encode_unsigned(value: int) -> bytes:
 
 def decode_unsigned(data: memoryview | bytes) -> int:
     """Decode an unsigned integer from big-endian bytes.
+
+    :param data: One or more bytes encoding a big-endian unsigned integer.
+    :returns: The decoded non-negative integer.
+    """
+    return int.from_bytes(data, "big")
+
+
+# --- Unsigned64 Integer (Clause 20.2.4, extended for Unsigned64 fields) ---
+
+
+def encode_unsigned64(value: int) -> bytes:
+    """Encode an unsigned integer using the minimum number of octets, up to 8 bytes.
+
+    Used for BACnet Unsigned64 fields such as audit log sequence numbers.
+
+    :param value: Non-negative integer to encode (0--18,446,744,073,709,551,615).
+    :returns: Big-endian encoded bytes (1--8 bytes).
+    :raises ValueError: If *value* is negative or exceeds the 8-byte maximum.
+    """
+    if value < 0:
+        msg = f"Unsigned64 integer must be >= 0, got {value}"
+        raise ValueError(msg)
+    if value > 0xFFFFFFFFFFFFFFFF:
+        msg = f"Unsigned64 integer exceeds 8-byte maximum, got {value}"
+        raise ValueError(msg)
+    n = _min_unsigned_bytes(value)
+    return value.to_bytes(n, "big")
+
+
+def decode_unsigned64(data: memoryview | bytes) -> int:
+    """Decode an unsigned integer from big-endian bytes (up to 8 bytes).
 
     :param data: One or more bytes encoding a big-endian unsigned integer.
     :returns: The decoded non-negative integer.
@@ -206,11 +240,13 @@ def encode_character_string(value: str, charset: int = 0) -> bytes:
 def decode_character_string(data: memoryview | bytes) -> str:
     """Decode a character string from contents octets.
 
-    The first byte is the character set identifier.
+    The first byte is the character set identifier. Unknown charsets
+    fall back to latin-1 decoding with a warning log rather than
+    raising, to preserve data from devices using non-standard charsets.
 
     :param data: Contents octets with leading charset byte.
     :returns: The decoded Python string.
-    :raises ValueError: If *data* is empty or the charset is unsupported.
+    :raises ValueError: If *data* is empty.
     """
     if len(data) < 1:
         msg = "CharacterString data too short: need at least 1 byte for charset"
@@ -218,8 +254,11 @@ def decode_character_string(data: memoryview | bytes) -> str:
     charset = data[0]
     encoding = _CHARSET_DECODERS.get(charset)
     if encoding is None:
-        msg = f"Unsupported BACnet character set: 0x{charset:02x}"
-        raise ValueError(msg)
+        logger.warning(
+            "Unknown BACnet character set 0x%02x; falling back to latin-1",
+            charset,
+        )
+        encoding = "iso-8859-1"
     return bytes(data[1:]).decode(encoding)
 
 

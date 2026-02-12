@@ -12,9 +12,12 @@ from typing import Self
 from bac_py.encoding.primitives import (
     decode_object_identifier,
     decode_unsigned,
+    decode_unsigned64,
     encode_context_boolean,
     encode_context_object_id,
+    encode_context_tagged,
     encode_context_unsigned,
+    encode_unsigned64,
 )
 from bac_py.encoding.tags import (
     TagClass,
@@ -69,9 +72,9 @@ class AuditLogQueryRequest:
             buf.extend(encode_opening_tag(2))
             buf.extend(self.query_parameters.encode())
             buf.extend(encode_closing_tag(2))
-        # [3] start-at-sequence-number OPTIONAL
+        # [3] start-at-sequence-number OPTIONAL (Unsigned64)
         if self.start_at_sequence_number is not None:
-            buf.extend(encode_context_unsigned(3, self.start_at_sequence_number))
+            buf.extend(encode_context_tagged(3, encode_unsigned64(self.start_at_sequence_number)))
         # [4] requested-count
         buf.extend(encode_context_unsigned(4, self.requested_count))
         return bytes(buf)
@@ -144,7 +147,7 @@ class AuditLogQueryRequest:
             if tag.cls != TagClass.CONTEXT:
                 break
             if tag.number == 3:
-                start_at_sequence_number = decode_unsigned(
+                start_at_sequence_number = decode_unsigned64(
                     data[new_offset : new_offset + tag.length]
                 )
                 offset = new_offset + tag.length
