@@ -1,4 +1,4 @@
-"""BACnet Accumulator object per ASHRAE 135-2016 Clause 12.2."""
+"""BACnet Accumulator object per ASHRAE 135-2020 Clause 12.2."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ from bac_py.objects.base import (
 from bac_py.types.constructed import BACnetDateTime, BACnetPrescale, BACnetScale
 from bac_py.types.enums import (
     EngineeringUnits,
+    EventType,
     ObjectType,
     PropertyIdentifier,
 )
@@ -30,6 +31,7 @@ class AccumulatorObject(BACnetObject):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.ACCUMULATOR
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.UNSIGNED_RANGE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),
@@ -106,6 +108,24 @@ class AccumulatorObject(BACnetObject):
         PropertyIdentifier.EVENT_ENABLE: PropertyDefinition(
             PropertyIdentifier.EVENT_ENABLE,
             list,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.HIGH_LIMIT: PropertyDefinition(
+            PropertyIdentifier.HIGH_LIMIT,
+            int,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.LOW_LIMIT: PropertyDefinition(
+            PropertyIdentifier.LOW_LIMIT,
+            int,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.TIME_DELAY: PropertyDefinition(
+            PropertyIdentifier.TIME_DELAY,
+            int,
             PropertyAccess.READ_WRITE,
             required=False,
         ),

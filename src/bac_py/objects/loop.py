@@ -1,4 +1,4 @@
-"""BACnet Loop object per ASHRAE 135-2016 Clause 12.17."""
+"""BACnet Loop object per ASHRAE 135-2020 Clause 12.17."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from bac_py.types.constructed import BACnetObjectPropertyReference
 from bac_py.types.enums import (
     Action,
     EngineeringUnits,
+    EventType,
     ObjectType,
     PropertyIdentifier,
 )
@@ -31,6 +32,7 @@ class LoopObject(BACnetObject):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.LOOP
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.FLOATING_LIMIT
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),
@@ -174,6 +176,36 @@ class LoopObject(BACnetObject):
         PropertyIdentifier.COV_INCREMENT: PropertyDefinition(
             PropertyIdentifier.COV_INCREMENT,
             float,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.ERROR_LIMIT: PropertyDefinition(
+            PropertyIdentifier.ERROR_LIMIT,
+            float,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.DEADBAND: PropertyDefinition(
+            PropertyIdentifier.DEADBAND,
+            float,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.NOTIFICATION_CLASS: PropertyDefinition(
+            PropertyIdentifier.NOTIFICATION_CLASS,
+            int,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.EVENT_ENABLE: PropertyDefinition(
+            PropertyIdentifier.EVENT_ENABLE,
+            list,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.TIME_DELAY: PropertyDefinition(
+            PropertyIdentifier.TIME_DELAY,
+            int,
             PropertyAccess.READ_WRITE,
             required=False,
         ),

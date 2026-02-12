@@ -1,4 +1,4 @@
-"""BACnet Life Safety object types per ASHRAE 135-2016 Clause 12.15-12.16."""
+"""BACnet Life Safety object types per ASHRAE 135-2020 Clause 12.15-12.16."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from bac_py.objects.base import (
     status_properties,
 )
 from bac_py.types.enums import (
+    EventType,
     LifeSafetyMode,
     LifeSafetyOperation,
     LifeSafetyState,
@@ -32,6 +33,7 @@ class LifeSafetyPointObject(BACnetObject):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.LIFE_SAFETY_POINT
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.CHANGE_OF_LIFE_SAFETY
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),
@@ -128,6 +130,18 @@ class LifeSafetyPointObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
+        PropertyIdentifier.EVENT_ENABLE: PropertyDefinition(
+            PropertyIdentifier.EVENT_ENABLE,
+            list,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.TIME_DELAY: PropertyDefinition(
+            PropertyIdentifier.TIME_DELAY,
+            int,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
     }
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
@@ -144,6 +158,7 @@ class LifeSafetyZoneObject(BACnetObject):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.LIFE_SAFETY_ZONE
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.CHANGE_OF_LIFE_SAFETY
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),
@@ -225,6 +240,18 @@ class LifeSafetyZoneObject(BACnetObject):
         ),
         PropertyIdentifier.NOTIFICATION_CLASS: PropertyDefinition(
             PropertyIdentifier.NOTIFICATION_CLASS,
+            int,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.EVENT_ENABLE: PropertyDefinition(
+            PropertyIdentifier.EVENT_ENABLE,
+            list,
+            PropertyAccess.READ_WRITE,
+            required=False,
+        ),
+        PropertyIdentifier.TIME_DELAY: PropertyDefinition(
+            PropertyIdentifier.TIME_DELAY,
             int,
             PropertyAccess.READ_WRITE,
             required=False,

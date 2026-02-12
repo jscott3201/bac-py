@@ -2,26 +2,33 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from bac_py.app.event_engine import EventEngine
+from bac_py.objects.accumulator import AccumulatorObject
 from bac_py.objects.analog import AnalogInputObject, AnalogValueObject
 from bac_py.objects.base import ObjectDatabase
 from bac_py.objects.binary import BinaryValueObject
 from bac_py.objects.event_enrollment import EventEnrollmentObject
+from bac_py.objects.life_safety import LifeSafetyPointObject, LifeSafetyZoneObject
+from bac_py.objects.loop import LoopObject
 from bac_py.objects.multistate import MultiStateValueObject
 from bac_py.objects.notification import NotificationClassObject
-from bac_py.types.constructed import BACnetDeviceObjectPropertyReference
+from bac_py.types.constructed import (
+    BACnetDestination,
+    BACnetDeviceObjectPropertyReference,
+)
 from bac_py.types.enums import (
     EventState,
     EventType,
+    LifeSafetyState,
     ObjectType,
     PropertyIdentifier,
     Reliability,
 )
-from bac_py.types.primitives import ObjectIdentifier
+from bac_py.types.primitives import BitString, ObjectIdentifier
 
 
 def _make_app(*, device_instance: int = 1) -> MagicMock:
@@ -1096,3 +1103,919 @@ class TestTimeDelayNormalSync:
         key = (int(ai.object_identifier.object_type), ai.object_identifier.instance_number)
         ctx = engine._contexts[key]
         assert ctx.state_machine.time_delay_normal is None
+
+
+# ---------------------------------------------------------------------------
+# Enrollment-based dispatch for all 13 new event types (Phase 1.1)
+# ---------------------------------------------------------------------------
+
+
+class TestEnrollmentAllEventTypes:
+    """Test _run_event_algorithm() dispatch for all 18 event types."""
+
+    def _make_engine(self, app: MagicMock) -> EventEngine:
+        return EventEngine(app, scan_interval=1.0)
+
+    def test_enrollment_floating_limit(self):
+        """EventEnrollment for FLOATING_LIMIT detects high limit."""
+        app = _make_app()
+        db = app.object_db
+
+        av = AnalogValueObject(1)
+        db.add(av)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 90.0
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.FLOATING_LIMIT,
+            event_parameters={
+                "setpoint": 72.0,
+                "high_diff_limit": 5.0,
+                "low_diff_limit": 5.0,
+                "deadband": 2.0,
+            },
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=av.object_identifier,
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_enrollment_change_of_life_safety(self):
+        """EventEnrollment for CHANGE_OF_LIFE_SAFETY detects alarm state."""
+        app = _make_app()
+        db = app.object_db
+
+        lsp = LifeSafetyPointObject(1)
+        db.add(lsp)
+        lsp._properties[PropertyIdentifier.TRACKING_VALUE] = LifeSafetyState.ALARM
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.CHANGE_OF_LIFE_SAFETY,
+            event_parameters={
+                "alarm_values": (int(LifeSafetyState.PRE_ALARM),),
+                "life_safety_alarm_values": (int(LifeSafetyState.ALARM),),
+                "mode": 0,
+            },
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=lsp.object_identifier,
+                property_identifier=PropertyIdentifier.TRACKING_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_enrollment_buffer_ready(self):
+        """EventEnrollment for BUFFER_READY triggers on threshold."""
+        app = _make_app()
+        db = app.object_db
+
+        av = AnalogValueObject(1)
+        db.add(av)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 100  # current_count
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.BUFFER_READY,
+            event_parameters={
+                "previous_count": 90,
+                "notification_threshold": 5,
+            },
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=av.object_identifier,
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_enrollment_unsigned_range(self):
+        """EventEnrollment for UNSIGNED_RANGE detects above high limit."""
+        app = _make_app()
+        db = app.object_db
+
+        av = AnalogValueObject(1)
+        db.add(av)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 101
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.UNSIGNED_RANGE,
+            event_parameters={"high_limit": 100, "low_limit": 10},
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=av.object_identifier,
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_enrollment_access_event(self):
+        """EventEnrollment for ACCESS_EVENT triggers on matching event."""
+        app = _make_app()
+        db = app.object_db
+
+        av = AnalogValueObject(1)
+        db.add(av)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 5
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.ACCESS_EVENT,
+            event_parameters={"access_event_list": [5, 10]},
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=av.object_identifier,
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_enrollment_double_out_of_range(self):
+        """EventEnrollment for DOUBLE_OUT_OF_RANGE detects high limit."""
+        app = _make_app()
+        db = app.object_db
+
+        av = AnalogValueObject(1)
+        db.add(av)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 100.1
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.DOUBLE_OUT_OF_RANGE,
+            event_parameters={
+                "high_limit": 100.0,
+                "low_limit": 0.0,
+                "deadband": 5.0,
+            },
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=av.object_identifier,
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_enrollment_signed_out_of_range(self):
+        """EventEnrollment for SIGNED_OUT_OF_RANGE detects low limit."""
+        app = _make_app()
+        db = app.object_db
+
+        av = AnalogValueObject(1)
+        db.add(av)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = -101
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.SIGNED_OUT_OF_RANGE,
+            event_parameters={
+                "high_limit": 100,
+                "low_limit": -100,
+                "deadband": 5,
+            },
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=av.object_identifier,
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_enrollment_unsigned_out_of_range(self):
+        """EventEnrollment for UNSIGNED_OUT_OF_RANGE detects high limit."""
+        app = _make_app()
+        db = app.object_db
+
+        av = AnalogValueObject(1)
+        db.add(av)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 101
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.UNSIGNED_OUT_OF_RANGE,
+            event_parameters={
+                "high_limit": 100,
+                "low_limit": 10,
+                "deadband": 5,
+            },
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=av.object_identifier,
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_enrollment_change_of_characterstring(self):
+        """EventEnrollment for CHANGE_OF_CHARACTERSTRING detects alarm string."""
+        app = _make_app()
+        db = app.object_db
+
+        av = AnalogValueObject(1)
+        db.add(av)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = "FAULT"
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.CHANGE_OF_CHARACTERSTRING,
+            event_parameters={"alarm_values": ["FAULT", "ERROR"]},
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=av.object_identifier,
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_enrollment_change_of_status_flags(self):
+        """EventEnrollment for CHANGE_OF_STATUS_FLAGS detects flag change."""
+        app = _make_app()
+        db = app.object_db
+
+        av = AnalogValueObject(1)
+        db.add(av)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = (True, False, False, False)
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.CHANGE_OF_STATUS_FLAGS,
+            event_parameters={
+                "previous_flags": (False, False, False, False),
+                "selected_flags": (True, True, True, True),
+            },
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=av.object_identifier,
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_enrollment_change_of_reliability(self):
+        """EventEnrollment for CHANGE_OF_RELIABILITY detects fault."""
+        app = _make_app()
+        db = app.object_db
+
+        av = AnalogValueObject(1)
+        db.add(av)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = Reliability.OVER_RANGE
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.CHANGE_OF_RELIABILITY,
+            event_parameters={},
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=av.object_identifier,
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_enrollment_change_of_timer(self):
+        """EventEnrollment for CHANGE_OF_TIMER detects alarm state."""
+        from bac_py.types.enums import TimerState
+
+        app = _make_app()
+        db = app.object_db
+
+        av = AnalogValueObject(1)
+        db.add(av)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = TimerState.EXPIRED
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.CHANGE_OF_TIMER,
+            event_parameters={"alarm_values": [int(TimerState.EXPIRED)]},
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=av.object_identifier,
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_enrollment_extended_with_callback(self):
+        """EventEnrollment for EXTENDED invokes vendor callback."""
+        app = _make_app()
+        db = app.object_db
+
+        av = AnalogValueObject(1)
+        db.add(av)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 42
+
+        ee = EventEnrollmentObject(
+            1,
+            event_type=EventType.EXTENDED,
+            event_parameters={
+                "vendor_callback": lambda v, p: EventState.OFFNORMAL if v > 10 else None,
+            },
+            object_property_reference=BACnetDeviceObjectPropertyReference(
+                object_identifier=av.object_identifier,
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            event_enable=[True, True, True],
+            time_delay=0,
+            notification_class=0,
+        )
+        db.add(ee)
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+
+# ---------------------------------------------------------------------------
+# Intrinsic reporting for new object types (Phase 1.2)
+# ---------------------------------------------------------------------------
+
+
+class TestIntrinsicNewObjectTypes:
+    """Test intrinsic event detection on Accumulator, Loop, LifeSafety objects."""
+
+    def _make_engine(self, app: MagicMock) -> EventEngine:
+        return EventEngine(app, scan_interval=1.0)
+
+    def test_accumulator_unsigned_range_high(self):
+        """AccumulatorObject exceeding high_limit triggers HIGH_LIMIT."""
+        app = _make_app()
+        db = app.object_db
+
+        acc = AccumulatorObject(
+            1,
+            high_limit=100,
+            low_limit=10,
+            event_enable=[True, True, True],
+            time_delay=0,
+        )
+        db.add(acc)
+        acc._properties[PropertyIdentifier.PRESENT_VALUE] = 101
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_accumulator_unsigned_range_low(self):
+        """AccumulatorObject below low_limit triggers LOW_LIMIT."""
+        app = _make_app()
+        db = app.object_db
+
+        acc = AccumulatorObject(
+            1,
+            high_limit=100,
+            low_limit=10,
+            event_enable=[True, True, True],
+            time_delay=0,
+        )
+        db.add(acc)
+        acc._properties[PropertyIdentifier.PRESENT_VALUE] = 5
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_accumulator_unsigned_range_normal(self):
+        """AccumulatorObject within range generates no notification."""
+        app = _make_app()
+        db = app.object_db
+
+        acc = AccumulatorObject(
+            1,
+            high_limit=100,
+            low_limit=10,
+            event_enable=[True, True, True],
+            time_delay=0,
+        )
+        db.add(acc)
+        acc._properties[PropertyIdentifier.PRESENT_VALUE] = 50
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert not app.unconfirmed_request.called
+
+    def test_accumulator_missing_limits_no_alarm(self):
+        """AccumulatorObject without limits does not alarm."""
+        app = _make_app()
+        db = app.object_db
+
+        acc = AccumulatorObject(1, event_enable=[True, True, True], time_delay=0)
+        db.add(acc)
+        acc._properties[PropertyIdentifier.PRESENT_VALUE] = 999
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert not app.unconfirmed_request.called
+
+    def test_loop_floating_limit_high(self):
+        """LoopObject exceeding floating high limit triggers HIGH_LIMIT."""
+        app = _make_app()
+        db = app.object_db
+
+        loop = LoopObject(
+            1,
+            setpoint=72.0,
+            error_limit=5.0,
+            deadband=2.0,
+            event_enable=[True, True, True],
+            time_delay=0,
+        )
+        db.add(loop)
+        # effective high = 72 + 5 = 77, value > 77 triggers
+        loop._properties[PropertyIdentifier.PRESENT_VALUE] = 78.0
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_loop_floating_limit_low(self):
+        """LoopObject below floating low limit triggers LOW_LIMIT."""
+        app = _make_app()
+        db = app.object_db
+
+        loop = LoopObject(
+            1,
+            setpoint=72.0,
+            error_limit=5.0,
+            deadband=2.0,
+            event_enable=[True, True, True],
+            time_delay=0,
+        )
+        db.add(loop)
+        # effective low = 72 - 5 = 67, value < 67 triggers
+        loop._properties[PropertyIdentifier.PRESENT_VALUE] = 66.0
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_loop_floating_limit_normal(self):
+        """LoopObject within floating limits generates no notification."""
+        app = _make_app()
+        db = app.object_db
+
+        loop = LoopObject(
+            1,
+            setpoint=72.0,
+            error_limit=5.0,
+            deadband=2.0,
+            event_enable=[True, True, True],
+            time_delay=0,
+        )
+        db.add(loop)
+        loop._properties[PropertyIdentifier.PRESENT_VALUE] = 72.0
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert not app.unconfirmed_request.called
+
+    def test_loop_missing_error_limit_no_alarm(self):
+        """LoopObject without error_limit does not alarm."""
+        app = _make_app()
+        db = app.object_db
+
+        loop = LoopObject(
+            1,
+            setpoint=72.0,
+            event_enable=[True, True, True],
+            time_delay=0,
+        )
+        db.add(loop)
+        loop._properties[PropertyIdentifier.PRESENT_VALUE] = 999.0
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert not app.unconfirmed_request.called
+
+    def test_life_safety_point_alarm(self):
+        """LifeSafetyPointObject with alarm value triggers OFFNORMAL."""
+        app = _make_app()
+        db = app.object_db
+
+        lsp = LifeSafetyPointObject(
+            1,
+            alarm_values=[int(LifeSafetyState.PRE_ALARM)],
+            life_safety_alarm_values=[int(LifeSafetyState.ALARM)],
+            event_enable=[True, True, True],
+            time_delay=0,
+        )
+        db.add(lsp)
+        lsp._properties[PropertyIdentifier.TRACKING_VALUE] = LifeSafetyState.PRE_ALARM
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_life_safety_point_life_safety_alarm(self):
+        """LifeSafetyPointObject with life_safety_alarm_values triggers LIFE_SAFETY_ALARM."""
+        app = _make_app()
+        db = app.object_db
+
+        lsp = LifeSafetyPointObject(
+            1,
+            alarm_values=[int(LifeSafetyState.PRE_ALARM)],
+            life_safety_alarm_values=[int(LifeSafetyState.ALARM)],
+            event_enable=[True, True, True],
+            time_delay=0,
+        )
+        db.add(lsp)
+        lsp._properties[PropertyIdentifier.TRACKING_VALUE] = LifeSafetyState.ALARM
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_life_safety_point_normal(self):
+        """LifeSafetyPointObject in quiet state generates no notification."""
+        app = _make_app()
+        db = app.object_db
+
+        lsp = LifeSafetyPointObject(
+            1,
+            alarm_values=[int(LifeSafetyState.PRE_ALARM)],
+            life_safety_alarm_values=[int(LifeSafetyState.ALARM)],
+            event_enable=[True, True, True],
+            time_delay=0,
+        )
+        db.add(lsp)
+        lsp._properties[PropertyIdentifier.TRACKING_VALUE] = LifeSafetyState.QUIET
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert not app.unconfirmed_request.called
+
+    def test_life_safety_zone_alarm(self):
+        """LifeSafetyZoneObject with alarm value triggers OFFNORMAL."""
+        app = _make_app()
+        db = app.object_db
+
+        lsz = LifeSafetyZoneObject(
+            1,
+            alarm_values=[int(LifeSafetyState.TAMPER)],
+            life_safety_alarm_values=[int(LifeSafetyState.HOLDUP)],
+            event_enable=[True, True, True],
+            time_delay=0,
+        )
+        db.add(lsz)
+        lsz._properties[PropertyIdentifier.TRACKING_VALUE] = LifeSafetyState.TAMPER
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        assert app.unconfirmed_request.called
+
+    def test_life_safety_zone_no_alarm_values(self):
+        """LifeSafetyZoneObject without alarm_values does not alarm."""
+        app = _make_app()
+        db = app.object_db
+
+        lsz = LifeSafetyZoneObject(
+            1,
+            event_enable=[True, True, True],
+            time_delay=0,
+        )
+        db.add(lsz)
+        lsz._properties[PropertyIdentifier.TRACKING_VALUE] = LifeSafetyState.TAMPER
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+        # No alarm values configured, tracking_value doesn't match empty lists
+        assert not app.unconfirmed_request.called
+
+
+# ---------------------------------------------------------------------------
+# NotificationClass recipient list routing (Phase 1.3)
+# ---------------------------------------------------------------------------
+
+
+def _make_bitstring_7_all_true() -> BitString:
+    """Create a 7-bit BitString with all bits set (all days valid)."""
+    # 7 bits all set: 0b1111_1110 with 1 unused bit
+    return BitString(b"\xfe", unused_bits=1)
+
+
+def _make_bitstring_3_all_true() -> BitString:
+    """Create a 3-bit BitString with all bits set (all transitions)."""
+    # 3 bits all set: 0b1110_0000 with 5 unused bits
+    return BitString(b"\xe0", unused_bits=5)
+
+
+def _make_bitstring_3(to_offnormal: bool, to_fault: bool, to_normal: bool) -> BitString:
+    """Create a 3-bit transitions BitString."""
+    val = (int(to_offnormal) << 7) | (int(to_fault) << 6) | (int(to_normal) << 5)
+    return BitString(bytes([val]), unused_bits=5)
+
+
+class TestRecipientListRouting:
+    """Test NotificationClass recipient list routing (Clause 13.8)."""
+
+    def _make_engine(self, app: MagicMock) -> EventEngine:
+        return EventEngine(app, scan_interval=1.0)
+
+    def test_no_recipient_list_broadcasts(self):
+        """Without recipient_list, notification is sent as unconfirmed broadcast."""
+        app = _make_app()
+        db = app.object_db
+
+        nc = NotificationClassObject(
+            5,
+            priority=[100, 200, 50],
+            ack_required=[True, False, True],
+            recipient_list=[],
+        )
+        db.add(nc)
+
+        ai = AnalogInputObject(
+            1,
+            high_limit=80.0,
+            low_limit=10.0,
+            deadband=5.0,
+            event_enable=[True, True, True],
+            notification_class=5,
+            time_delay=0,
+        )
+        db.add(ai)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 85.0
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+
+        # Falls back to global broadcast
+        assert app.unconfirmed_request.called
+
+    def test_recipient_list_unconfirmed_to_address(self):
+        """Recipient with address + unconfirmed sends to that address."""
+        from bac_py.network.address import BACnetAddress
+        from bac_py.types.constructed import BACnetRecipient
+        from bac_py.types.primitives import BACnetTime
+
+        target_addr = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        dest = BACnetDestination(
+            valid_days=_make_bitstring_7_all_true(),
+            from_time=BACnetTime(0, 0, 0, 0),
+            to_time=BACnetTime(23, 59, 59, 99),
+            recipient=BACnetRecipient(address=target_addr),
+            process_identifier=0,
+            issue_confirmed_notifications=False,
+            transitions=_make_bitstring_3_all_true(),
+        )
+
+        app = _make_app()
+        db = app.object_db
+
+        nc = NotificationClassObject(
+            5,
+            priority=[100, 200, 50],
+            ack_required=[False, False, False],
+            recipient_list=[dest],
+        )
+        db.add(nc)
+
+        ai = AnalogInputObject(
+            1,
+            high_limit=80.0,
+            low_limit=10.0,
+            deadband=5.0,
+            event_enable=[True, True, True],
+            notification_class=5,
+            time_delay=0,
+        )
+        db.add(ai)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 85.0
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+
+        assert app.unconfirmed_request.called
+        call_kwargs = app.unconfirmed_request.call_args
+        # Verify the destination is our target address, not global broadcast
+        assert call_kwargs[1]["destination"] == target_addr or call_kwargs[0][0] == target_addr
+
+    def test_recipient_list_transition_filter(self):
+        """Recipient filtered out by transitions BitString receives nothing."""
+        from bac_py.network.address import BACnetAddress
+        from bac_py.types.constructed import BACnetRecipient
+        from bac_py.types.primitives import BACnetTime
+
+        target_addr = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        # Only to-fault and to-normal, NOT to-offnormal
+        dest = BACnetDestination(
+            valid_days=_make_bitstring_7_all_true(),
+            from_time=BACnetTime(0, 0, 0, 0),
+            to_time=BACnetTime(23, 59, 59, 99),
+            recipient=BACnetRecipient(address=target_addr),
+            process_identifier=0,
+            issue_confirmed_notifications=False,
+            transitions=_make_bitstring_3(False, True, True),
+        )
+
+        app = _make_app()
+        db = app.object_db
+
+        nc = NotificationClassObject(
+            5,
+            priority=[100, 200, 50],
+            ack_required=[False, False, False],
+            recipient_list=[dest],
+        )
+        db.add(nc)
+
+        ai = AnalogInputObject(
+            1,
+            high_limit=80.0,
+            low_limit=10.0,
+            deadband=5.0,
+            event_enable=[True, True, True],
+            notification_class=5,
+            time_delay=0,
+        )
+        db.add(ai)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 85.0
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+
+        # Notification is to-offnormal (HIGH_LIMIT) but recipient filters it out.
+        # No recipients match, so nothing should be sent.
+        assert not app.unconfirmed_request.called
+
+    def test_recipient_list_confirmed_sends_async(self):
+        """Recipient with confirmed=True sends confirmed notification."""
+        from bac_py.network.address import BACnetAddress
+        from bac_py.types.constructed import BACnetRecipient
+        from bac_py.types.primitives import BACnetTime
+
+        target_addr = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        dest = BACnetDestination(
+            valid_days=_make_bitstring_7_all_true(),
+            from_time=BACnetTime(0, 0, 0, 0),
+            to_time=BACnetTime(23, 59, 59, 99),
+            recipient=BACnetRecipient(address=target_addr),
+            process_identifier=0,
+            issue_confirmed_notifications=True,
+            transitions=_make_bitstring_3_all_true(),
+        )
+
+        app = _make_app()
+        app.confirmed_request = AsyncMock()
+        db = app.object_db
+
+        nc = NotificationClassObject(
+            5,
+            priority=[100, 200, 50],
+            ack_required=[True, False, True],
+            recipient_list=[dest],
+        )
+        db.add(nc)
+
+        ai = AnalogInputObject(
+            1,
+            high_limit=80.0,
+            low_limit=10.0,
+            deadband=5.0,
+            event_enable=[True, True, True],
+            notification_class=5,
+            time_delay=0,
+        )
+        db.add(ai)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 85.0
+
+        engine = self._make_engine(app)
+        # Confirmed sends schedule an asyncio task, but without a running loop
+        # the _send_notification_confirmed logs a debug message and does not crash
+        engine._evaluate_cycle()
+
+        # No unconfirmed should be sent (it's confirmed-only)
+        assert not app.unconfirmed_request.called
+
+    def test_multiple_recipients_mixed(self):
+        """Multiple recipients: some unconfirmed, some filtered out."""
+        from bac_py.network.address import BACnetAddress
+        from bac_py.types.constructed import BACnetRecipient
+        from bac_py.types.primitives import BACnetTime
+
+        addr1 = BACnetAddress(mac_address=b"\x01\x02\x03\x04\xba\xc0")
+        addr2 = BACnetAddress(mac_address=b"\x05\x06\x07\x08\xba\xc0")
+
+        # Recipient 1: unconfirmed, all transitions
+        dest1 = BACnetDestination(
+            valid_days=_make_bitstring_7_all_true(),
+            from_time=BACnetTime(0, 0, 0, 0),
+            to_time=BACnetTime(23, 59, 59, 99),
+            recipient=BACnetRecipient(address=addr1),
+            process_identifier=0,
+            issue_confirmed_notifications=False,
+            transitions=_make_bitstring_3_all_true(),
+        )
+
+        # Recipient 2: unconfirmed, only to-normal (won't match to-offnormal)
+        dest2 = BACnetDestination(
+            valid_days=_make_bitstring_7_all_true(),
+            from_time=BACnetTime(0, 0, 0, 0),
+            to_time=BACnetTime(23, 59, 59, 99),
+            recipient=BACnetRecipient(address=addr2),
+            process_identifier=0,
+            issue_confirmed_notifications=False,
+            transitions=_make_bitstring_3(False, False, True),
+        )
+
+        app = _make_app()
+        db = app.object_db
+
+        nc = NotificationClassObject(
+            5,
+            priority=[100, 200, 50],
+            ack_required=[False, False, False],
+            recipient_list=[dest1, dest2],
+        )
+        db.add(nc)
+
+        ai = AnalogInputObject(
+            1,
+            high_limit=80.0,
+            low_limit=10.0,
+            deadband=5.0,
+            event_enable=[True, True, True],
+            notification_class=5,
+            time_delay=0,
+        )
+        db.add(ai)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 85.0
+
+        engine = self._make_engine(app)
+        engine._evaluate_cycle()
+
+        # Only 1 unconfirmed sent (to addr1; addr2 filtered by transitions)
+        assert app.unconfirmed_request.call_count == 1

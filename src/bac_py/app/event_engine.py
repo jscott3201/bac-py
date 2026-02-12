@@ -634,6 +634,8 @@ class EventEngine:
         self._task: asyncio.Task[None] | None = None
         # Keyed by (object_type, instance_number) for both enrollment and intrinsic
         self._contexts: dict[tuple[int, int], _EnrollmentContext] = {}
+        # Track fire-and-forget confirmed notification tasks to prevent GC
+        self._pending_confirmed_tasks: set[asyncio.Task[None]] = set()
 
     # --- Lifecycle ---
 
@@ -856,6 +858,51 @@ class EventEngine:
                 alarm_values = tuple(alarm_values)
             return evaluate_change_of_state(present_value, alarm_values)
 
+        if event_type == EventType.UNSIGNED_RANGE:
+            high_limit = obj._properties.get(PropertyIdentifier.HIGH_LIMIT)
+            low_limit = obj._properties.get(PropertyIdentifier.LOW_LIMIT)
+            if high_limit is None or low_limit is None:
+                return None
+            return evaluate_unsigned_range(int(present_value), int(high_limit), int(low_limit))
+
+        if event_type == EventType.FLOATING_LIMIT:
+            setpoint = obj._properties.get(PropertyIdentifier.SETPOINT)
+            error_limit = obj._properties.get(PropertyIdentifier.ERROR_LIMIT)
+            deadband = obj._properties.get(PropertyIdentifier.DEADBAND, 0.0)
+            if setpoint is None or error_limit is None:
+                return None
+            # Per Clause 13.3.5: for Loop, error_limit is used symmetrically
+            # as both high_diff_limit and low_diff_limit
+            return evaluate_floating_limit(
+                float(present_value),
+                float(setpoint),
+                float(error_limit),
+                float(error_limit),
+                float(deadband),
+                current_state=ctx.state_machine.event_state,
+            )
+
+        if event_type == EventType.CHANGE_OF_LIFE_SAFETY:
+            tracking_value = obj._properties.get(PropertyIdentifier.TRACKING_VALUE)
+            if tracking_value is None:
+                tracking_value = present_value
+            mode = obj._properties.get(PropertyIdentifier.MODE, 0)
+            alarm_values = obj._properties.get(PropertyIdentifier.ALARM_VALUES, ())
+            life_safety_alarm_values = obj._properties.get(
+                PropertyIdentifier.LIFE_SAFETY_ALARM_VALUES, ()
+            )
+            if not isinstance(alarm_values, tuple):
+                alarm_values = tuple(int(v) for v in alarm_values)
+            else:
+                alarm_values = tuple(int(v) for v in alarm_values)
+            if not isinstance(life_safety_alarm_values, tuple):
+                life_safety_alarm_values = tuple(int(v) for v in life_safety_alarm_values)
+            else:
+                life_safety_alarm_values = tuple(int(v) for v in life_safety_alarm_values)
+            return evaluate_change_of_life_safety(
+                tracking_value, int(mode), alarm_values, life_safety_alarm_values
+            )
+
         return None
 
     # --- Event algorithm dispatch ---
@@ -903,6 +950,111 @@ class EventEngine:
             feedback = params.get("feedback_value")
             return evaluate_command_failure(feedback, monitored_value)
 
+        if event_type == EventType.FLOATING_LIMIT and isinstance(params, dict):
+            return evaluate_floating_limit(
+                float(monitored_value),
+                params.get("setpoint", 0.0),
+                params.get("high_diff_limit", 0.0),
+                params.get("low_diff_limit", 0.0),
+                params.get("deadband", 0.0),
+                current_state=current_state,
+            )
+
+        if event_type == EventType.CHANGE_OF_LIFE_SAFETY and isinstance(params, dict):
+            alarm_values = params.get("alarm_values", ())
+            life_safety_alarm_values = params.get("life_safety_alarm_values", ())
+            if not isinstance(alarm_values, tuple):
+                alarm_values = tuple(alarm_values)
+            if not isinstance(life_safety_alarm_values, tuple):
+                life_safety_alarm_values = tuple(life_safety_alarm_values)
+            mode = params.get("mode", 0)
+            return evaluate_change_of_life_safety(
+                monitored_value, mode, alarm_values, life_safety_alarm_values
+            )
+
+        if event_type == EventType.EXTENDED and isinstance(params, dict):
+            vendor_callback = params.get("vendor_callback")
+            return evaluate_extended(monitored_value, params, vendor_callback=vendor_callback)
+
+        if event_type == EventType.BUFFER_READY and isinstance(params, dict):
+            previous_count = params.get("previous_count", 0)
+            notification_threshold = params.get("notification_threshold", 1)
+            return evaluate_buffer_ready(
+                int(monitored_value), previous_count, notification_threshold
+            )
+
+        if event_type == EventType.UNSIGNED_RANGE and isinstance(params, dict):
+            return evaluate_unsigned_range(
+                int(monitored_value),
+                params.get("high_limit", 0),
+                params.get("low_limit", 0),
+            )
+
+        if event_type == EventType.ACCESS_EVENT and isinstance(params, dict):
+            access_event_list = params.get("access_event_list", ())
+            if not isinstance(access_event_list, tuple):
+                access_event_list = tuple(access_event_list)
+            return evaluate_access_event(int(monitored_value), access_event_list)
+
+        if event_type == EventType.DOUBLE_OUT_OF_RANGE and isinstance(params, dict):
+            return evaluate_double_out_of_range(
+                float(monitored_value),
+                params.get("high_limit", float("inf")),
+                params.get("low_limit", float("-inf")),
+                params.get("deadband", 0.0),
+                current_state=current_state,
+            )
+
+        if event_type == EventType.SIGNED_OUT_OF_RANGE and isinstance(params, dict):
+            return evaluate_signed_out_of_range(
+                int(monitored_value),
+                params.get("high_limit", 0),
+                params.get("low_limit", 0),
+                params.get("deadband", 0),
+                current_state=current_state,
+            )
+
+        if event_type == EventType.UNSIGNED_OUT_OF_RANGE and isinstance(params, dict):
+            return evaluate_unsigned_out_of_range(
+                int(monitored_value),
+                params.get("high_limit", 0),
+                params.get("low_limit", 0),
+                params.get("deadband", 0),
+                current_state=current_state,
+            )
+
+        if event_type == EventType.CHANGE_OF_CHARACTERSTRING and isinstance(params, dict):
+            alarm_values = params.get("alarm_values", ())
+            if not isinstance(alarm_values, tuple):
+                alarm_values = tuple(alarm_values)
+            return evaluate_change_of_characterstring(str(monitored_value), alarm_values)
+
+        if event_type == EventType.CHANGE_OF_STATUS_FLAGS and isinstance(params, dict):
+            current_flags = monitored_value
+            previous_flags = params.get("previous_flags", ())
+            selected_flags = params.get("selected_flags", ())
+            if not isinstance(current_flags, tuple):
+                current_flags = tuple(current_flags)
+            if not isinstance(previous_flags, tuple):
+                previous_flags = tuple(previous_flags)
+            if not isinstance(selected_flags, tuple):
+                selected_flags = tuple(selected_flags)
+            return evaluate_change_of_status_flags(
+                current_flags, previous_flags, selected_flags
+            )
+
+        if event_type == EventType.CHANGE_OF_RELIABILITY and isinstance(params, dict):
+            reliability = monitored_value
+            if not isinstance(reliability, Reliability):
+                reliability = Reliability(int(reliability))
+            return evaluate_change_of_reliability(reliability)
+
+        if event_type == EventType.CHANGE_OF_TIMER and isinstance(params, dict):
+            alarm_values = params.get("alarm_values", ())
+            if not isinstance(alarm_values, tuple):
+                alarm_values = tuple(alarm_values)
+            return evaluate_change_of_timer(monitored_value, alarm_values)
+
         # Unsupported or no params -- no alarm
         return None
 
@@ -946,7 +1098,7 @@ class EventEngine:
             from_state=transition.from_state,
         )
 
-        self._send_notification(notification)
+        self._route_notification(notification, notification_class_num, transition.to_state)
 
         # Update event_time_stamps on the enrollment
         self._update_event_timestamps(enrollment, transition)
@@ -981,7 +1133,7 @@ class EventEngine:
             from_state=transition.from_state,
         )
 
-        self._send_notification(notification)
+        self._route_notification(notification, notification_class_num, transition.to_state)
 
         # Update event_state on the object itself
         obj._properties[PropertyIdentifier.EVENT_STATE] = transition.to_state
@@ -989,8 +1141,52 @@ class EventEngine:
         # Update event_time_stamps if present
         self._update_event_timestamps(obj, transition)
 
-    def _send_notification(self, notification: Any) -> None:
-        """Encode and send an event notification via the application."""
+    def _route_notification(
+        self,
+        notification: Any,
+        notification_class_num: int,
+        to_state: EventState,
+    ) -> None:
+        """Route a notification through the NotificationClass recipient list.
+
+        Per ASHRAE 135-2020 Clause 13.8: look up the NotificationClass
+        object's ``RECIPIENT_LIST``, filter by current day-of-week and
+        time window, and send to each matching recipient using confirmed
+        or unconfirmed as specified.  Falls back to an unconfirmed global
+        broadcast if no NotificationClass exists or the recipient list
+        is empty.
+        """
+        from bac_py.types.primitives import ObjectIdentifier
+
+        nc_oid = ObjectIdentifier(ObjectType.NOTIFICATION_CLASS, notification_class_num)
+        nc_obj = self._app.object_db.get(nc_oid)
+
+        recipients = None
+        if nc_obj is not None:
+            recipients = nc_obj._properties.get(PropertyIdentifier.RECIPIENT_LIST)
+
+        if not recipients:
+            # Fallback: unconfirmed global broadcast
+            self._send_notification_unconfirmed(notification, destination=None)
+            return
+
+        # Filter recipients and send
+        trans_idx = _transition_index(to_state)
+
+        for dest in recipients:
+            if not _recipient_matches(dest, trans_idx):
+                continue
+
+            if _dest_issue_confirmed(dest):
+                self._send_notification_confirmed(notification, dest)
+            else:
+                address = _dest_address(dest)
+                self._send_notification_unconfirmed(notification, destination=address)
+
+    def _send_notification_unconfirmed(
+        self, notification: Any, *, destination: Any
+    ) -> None:
+        """Encode and send an unconfirmed event notification."""
         from bac_py.types.enums import UnconfirmedServiceChoice
 
         try:
@@ -1002,13 +1198,53 @@ class EventEngine:
         try:
             from bac_py.network.address import GLOBAL_BROADCAST
 
+            dest = destination if destination is not None else GLOBAL_BROADCAST
             self._app.unconfirmed_request(
-                destination=GLOBAL_BROADCAST,
+                destination=dest,
                 service_choice=UnconfirmedServiceChoice.UNCONFIRMED_EVENT_NOTIFICATION,
                 service_data=encoded,
             )
         except Exception:
-            logger.debug("Failed to send event notification", exc_info=True)
+            logger.debug("Failed to send unconfirmed event notification", exc_info=True)
+
+    def _send_notification_confirmed(self, notification: Any, dest: Any) -> None:
+        """Encode and send a confirmed event notification.
+
+        Because confirmed requests are async and the engine evaluation
+        cycle is synchronous, we schedule the send as an asyncio task.
+        """
+        try:
+            encoded = notification.encode()
+        except Exception:
+            logger.debug("Failed to encode event notification", exc_info=True)
+            return
+
+        address = _dest_address(dest)
+        if address is None:
+            logger.debug("Cannot send confirmed notification: no address for recipient")
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+            _task = loop.create_task(self._send_confirmed_async(encoded, address))
+            # Store reference to prevent GC of the fire-and-forget task
+            self._pending_confirmed_tasks.add(_task)
+            _task.add_done_callback(self._pending_confirmed_tasks.discard)
+        except RuntimeError:
+            logger.debug("No running event loop for confirmed notification")
+
+    async def _send_confirmed_async(self, encoded: bytes, address: Any) -> None:
+        """Send a confirmed event notification asynchronously."""
+        from bac_py.types.enums import ConfirmedServiceChoice
+
+        try:
+            await self._app.confirmed_request(
+                destination=address,
+                service_choice=ConfirmedServiceChoice.CONFIRMED_EVENT_NOTIFICATION,
+                service_data=encoded,
+            )
+        except Exception:
+            logger.debug("Failed to send confirmed event notification", exc_info=True)
 
     # --- Helper methods ---
 
@@ -1119,3 +1355,88 @@ def _limit_enable_bits(limit_enable: Any) -> tuple[bool, bool]:
     if isinstance(limit_enable, (list, tuple)) and len(limit_enable) >= 2:
         return (bool(limit_enable[0]), bool(limit_enable[1]))
     return (True, True)
+
+
+# ---------------------------------------------------------------------------
+# Recipient routing helpers (Clause 13.8)
+# ---------------------------------------------------------------------------
+
+
+def _recipient_matches(dest: Any, transition_index: int) -> bool:
+    """Check if a BACnetDestination matches the current day/time and transition.
+
+    :param dest: A :class:`BACnetDestination` object.
+    :param transition_index: 0=to-offnormal, 1=to-fault, 2=to-normal.
+    :returns: ``True`` if the recipient should receive this notification.
+    """
+    from datetime import UTC, datetime
+
+    from bac_py.types.constructed import BACnetDestination
+
+    if not isinstance(dest, BACnetDestination):
+        return True  # Non-typed entry: send by default
+
+    # Check transitions filter
+    transitions = dest.transitions
+    try:
+        if not transitions[transition_index]:
+            return False
+    except (IndexError, TypeError):
+        pass  # No transitions filter or malformed: allow
+
+    # Check day-of-week filter
+    now = datetime.now(tz=UTC)
+    # Python: Monday=0..Sunday=6; BACnet valid_days: Monday=bit0..Sunday=bit6
+    day_index = now.weekday()
+    try:
+        if not dest.valid_days[day_index]:
+            return False
+    except (IndexError, TypeError):
+        pass  # No day filter or malformed: allow
+
+    # Check time window
+    try:
+        current_time_tuple = (now.hour, now.minute, now.second)
+        from_t = dest.from_time
+        to_t = dest.to_time
+
+        from_tuple = (
+            from_t.hour if from_t.hour != 0xFF else 0,
+            from_t.minute if from_t.minute != 0xFF else 0,
+            from_t.second if from_t.second != 0xFF else 0,
+        )
+        to_tuple = (
+            to_t.hour if to_t.hour != 0xFF else 23,
+            to_t.minute if to_t.minute != 0xFF else 59,
+            to_t.second if to_t.second != 0xFF else 59,
+        )
+
+        if not (from_tuple <= current_time_tuple <= to_tuple):
+            return False
+    except (AttributeError, TypeError):
+        pass  # No time filter or malformed: allow
+
+    return True
+
+
+def _dest_issue_confirmed(dest: Any) -> bool:
+    """Return True if the destination requests confirmed notifications."""
+    try:
+        return bool(dest.issue_confirmed_notifications)
+    except AttributeError:
+        return False
+
+
+def _dest_address(dest: Any) -> Any:
+    """Extract the BACnetAddress from a BACnetDestination."""
+    try:
+        recipient = dest.recipient
+        if recipient.address is not None:
+            return recipient.address
+        if recipient.device is not None:
+            # For device-type recipients, we'd need a device-to-address resolver.
+            # Fall back to None (caller should use broadcast or skip).
+            return None
+    except AttributeError:
+        return None
+    return None
