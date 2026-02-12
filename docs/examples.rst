@@ -778,17 +778,20 @@ Build and run all scenarios:
    # Build the Alpine-based Docker image
    make docker-build
 
-   # Run all four integration scenarios
+   # Run all eight integration scenarios
    make docker-test
 
 Run individual scenarios:
 
 .. code-block:: bash
 
-   make docker-test-client    # Client/server: read, write, discover, RPM, WPM
-   make docker-test-bbmd      # BBMD: foreign device registration + forwarding
-   make docker-test-router    # Router: cross-network discovery and reads
-   make docker-test-stress    # Stress: concurrent and sequential throughput
+   make docker-test-client       # Client/server: read, write, discover, RPM, WPM
+   make docker-test-bbmd         # BBMD: foreign device registration + forwarding
+   make docker-test-router       # Router: cross-network discovery and reads
+   make docker-test-stress       # Stress: concurrent and sequential throughput
+   make docker-test-device-mgmt  # Device management: DCC, time sync, text message
+   make docker-test-cov-advanced # COV: concurrent subscriptions, property-level COV
+   make docker-test-events       # Events: alarm reporting, acknowledgment, queries
 
 Run the standalone stress test with JSON output:
 
@@ -826,6 +829,14 @@ BinaryValue) and registers ``DefaultServerHandlers``.
      - Who-Is-Router, cross-network discovery, cross-network reads
    * - Stress
      - 10 concurrent clients, 100 sequential reads, throughput measurement
+   * - Device Management
+     - DCC disable/enable, time synchronization, text messages, private transfer
+   * - COV Advanced
+     - Concurrent COV subscriptions, property-level COV, lifetime expiration
+   * - Events
+     - Alarm reporting, acknowledgment, event queries, enrollment summaries
+   * - Demo
+     - Interactive client/server demonstration with reads, writes, and discovery
 
 Clean up Docker resources:
 

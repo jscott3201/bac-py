@@ -518,7 +518,7 @@ sockets between separate application instances running in containers. The
 infrastructure lives under ``docker/`` and uses Docker Compose with isolated
 bridge networks to simulate realistic BACnet/IP topologies.
 
-Four scenarios are provided:
+Eight scenarios are provided:
 
 - **Client/Server** -- ReadProperty, WriteProperty, ReadPropertyMultiple,
   WritePropertyMultiple, Who-Is discovery, and object list enumeration over
@@ -531,6 +531,17 @@ Four scenarios are provided:
 - **Stress** -- Concurrent client reads (10 parallel clients) and rapid
   sequential reads (100 in a row) for throughput validation. A standalone
   stress runner produces structured JSON reports with latency percentiles.
+- **Device Management** -- DeviceCommunicationControl disable/enable cycles,
+  time synchronization, confirmed text messages, and private transfer
+  round-trips.
+- **COV Advanced** -- Concurrent COV subscriptions from multiple clients,
+  property-level COV subscriptions, lifetime expiration, and confirmed vs
+  unconfirmed notification delivery.
+- **Events** -- Alarm reporting triggered by out-of-range writes,
+  GetAlarmSummary, GetEventInformation, AcknowledgeAlarm, and
+  GetEnrollmentSummary queries.
+- **Demo** -- Interactive demonstration of client/server capabilities
+  including reads, writes, discovery, and COV subscriptions.
 
 Run with ``make docker-test`` (all scenarios) or individual targets like
 ``make docker-test-client``. See :ref:`docker-testing-example` for details.

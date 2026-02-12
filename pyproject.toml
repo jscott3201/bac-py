@@ -1,6 +1,6 @@
 [project]
 name = "bac-py"
-version = "0.1.0"
+version = "1.0.0"
 description = "Asynchronous BACnet/IP protocol library for Python"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -18,7 +18,7 @@ keywords = [
     "bms",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",

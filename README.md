@@ -424,7 +424,7 @@ from bac_py.encoding.primitives import (
 ## Testing
 
 ```bash
-# Run the unit test suite (3,952+ tests)
+# Run the unit test suite (4,779+ tests)
 make test
 
 # With coverage
@@ -459,10 +459,13 @@ make docker-build
 make docker-test
 
 # Individual scenarios
-make docker-test-client    # Client/server: read, write, discover, RPM, WPM
-make docker-test-bbmd      # BBMD: foreign device registration + forwarding
-make docker-test-router    # Router: cross-network discovery and reads
-make docker-test-stress    # Stress: concurrent and sequential throughput
+make docker-test-client       # Client/server: read, write, discover, RPM, WPM
+make docker-test-bbmd         # BBMD: foreign device registration + forwarding
+make docker-test-router       # Router: cross-network discovery and reads
+make docker-test-stress       # Stress: concurrent and sequential throughput
+make docker-test-device-mgmt  # Device management: DCC, time sync, text message
+make docker-test-cov-advanced # COV: concurrent subscriptions, property-level COV
+make docker-test-events       # Events: alarm reporting, acknowledgment, queries
 
 # Full stress test with JSON throughput report
 make docker-stress
@@ -474,12 +477,16 @@ make docker-clean
 The Docker infrastructure is under `docker/` and uses Docker Compose with
 separate bridge networks to simulate realistic BACnet/IP topologies:
 
-| Scenario       | What it tests                                            |
-| -------------- | -------------------------------------------------------- |
-| Client/Server  | ReadProperty, WriteProperty, RPM, WPM, Who-Is, discover |
-| BBMD           | Foreign device registration, BDT/FDT reads, forwarding  |
-| Router         | Who-Is-Router, cross-network discovery and reads         |
-| Stress         | 10 concurrent clients, 100 sequential reads, throughput  |
+| Scenario          | What it tests                                            |
+| ----------------- | -------------------------------------------------------- |
+| Client/Server     | ReadProperty, WriteProperty, RPM, WPM, Who-Is, discover |
+| BBMD              | Foreign device registration, BDT/FDT reads, forwarding  |
+| Router            | Who-Is-Router, cross-network discovery and reads         |
+| Stress            | 10 concurrent clients, 100 sequential reads, throughput  |
+| Device Management | DCC, time synchronization, text messages, private transfer |
+| COV Advanced      | Concurrent COV subscriptions, property-level COV, lifetimes |
+| Events            | Alarm reporting, acknowledgment, event queries           |
+| Demo              | Interactive demonstration of client/server capabilities  |
 
 ## Requirements
 
