@@ -444,7 +444,7 @@ class TestUnconfirmedServiceChoice:
         assert UnconfirmedServiceChoice.UNCONFIRMED_COV_NOTIFICATION_MULTIPLE == 11
 
     def test_member_count(self) -> None:
-        assert len(UnconfirmedServiceChoice) == 12
+        assert len(UnconfirmedServiceChoice) == 14
 
 
 # ---------------------------------------------------------------------------

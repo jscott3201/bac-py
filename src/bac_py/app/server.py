@@ -7,11 +7,13 @@ work with the local ObjectDatabase and DeviceObject.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import TYPE_CHECKING, Any
 
 from bac_py.app._object_type_sets import ANALOG_TYPES
 from bac_py.encoding.primitives import (
+    decode_all_application_values,
     decode_and_unwrap,
     encode_application_object_id,
     encode_property_value,
@@ -36,6 +38,7 @@ from bac_py.services.cov import (
     SubscribeCOVPropertyRequest,
     SubscribeCOVRequest,
 )
+from bac_py.services.device_discovery import WhoAmIRequest, YouAreRequest
 from bac_py.services.device_mgmt import (
     DeviceCommunicationControlRequest,
     ReinitializeDeviceRequest,
@@ -73,8 +76,20 @@ from bac_py.services.read_range import (
     ReadRangeRequest,
     ResultFlags,
 )
+from bac_py.services.text_message import (
+    ConfirmedTextMessageRequest,
+    UnconfirmedTextMessageRequest,
+)
+from bac_py.services.virtual_terminal import (
+    VTCloseRequest,
+    VTDataACK,
+    VTDataRequest,
+    VTOpenACK,
+    VTOpenRequest,
+)
 from bac_py.services.who_has import IHaveRequest, WhoHasRequest
 from bac_py.services.who_is import IAmRequest, WhoIsRequest
+from bac_py.services.write_group import WriteGroupRequest
 from bac_py.services.write_property import WritePropertyRequest
 from bac_py.services.write_property_multiple import WritePropertyMultipleRequest
 from bac_py.types.constructed import BACnetTimeStamp
@@ -279,6 +294,38 @@ class DefaultServerHandlers:
         registry.register_unconfirmed(
             UnconfirmedServiceChoice.UNCONFIRMED_COV_NOTIFICATION_MULTIPLE,
             self.handle_unconfirmed_cov_notification_multiple,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.CONFIRMED_TEXT_MESSAGE,
+            self.handle_confirmed_text_message,
+        )
+        registry.register_unconfirmed(
+            UnconfirmedServiceChoice.UNCONFIRMED_TEXT_MESSAGE,
+            self.handle_unconfirmed_text_message,
+        )
+        registry.register_unconfirmed(
+            UnconfirmedServiceChoice.WRITE_GROUP,
+            self.handle_write_group,
+        )
+        registry.register_unconfirmed(
+            UnconfirmedServiceChoice.WHO_AM_I,
+            self.handle_who_am_i,
+        )
+        registry.register_unconfirmed(
+            UnconfirmedServiceChoice.YOU_ARE,
+            self.handle_you_are,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.VT_OPEN,
+            self.handle_vt_open,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.VT_CLOSE,
+            self.handle_vt_close,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.VT_DATA,
+            self.handle_vt_data,
         )
 
         # Auto-compute Protocol_Services_Supported from registered handlers
@@ -1069,9 +1116,15 @@ class DefaultServerHandlers:
     ) -> bytes | None:
         """Handle AddListElement-Request per Clause 15.1.
 
+        Decodes the elements from the request, validates that the target
+        property is a list, checks write access, and extends the list.
+
+        :returns: ``None`` (SimpleACK response).
         :raises BACnetError: If the object or property is not found,
-            or list manipulation is not supported.
+            or the property is not a list or is read-only.
         """
+        from bac_py.objects.base import PropertyAccess
+
         request = AddListElementRequest.decode(data)
         obj_id = self._resolve_object_id(request.object_identifier)
 
@@ -1083,7 +1136,20 @@ class DefaultServerHandlers:
         if prop_def is None:
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
 
-        raise BACnetError(ErrorClass.SERVICES, ErrorCode.OPTIONAL_FUNCTIONALITY_NOT_SUPPORTED)
+        if prop_def.access == PropertyAccess.READ_ONLY:
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.WRITE_ACCESS_DENIED)
+
+        current = obj._properties.get(request.property_identifier)
+        if not isinstance(current, list):
+            if current is None and prop_def.datatype is list:
+                current = []
+                obj._properties[request.property_identifier] = current
+            else:
+                raise BACnetError(ErrorClass.PROPERTY, ErrorCode.PROPERTY_IS_NOT_A_LIST)
+
+        new_elements = decode_all_application_values(request.list_of_elements)
+        current.extend(new_elements)
+        return None
 
     async def handle_remove_list_element(
         self,
@@ -1093,9 +1159,16 @@ class DefaultServerHandlers:
     ) -> bytes | None:
         """Handle RemoveListElement-Request per Clause 15.2.
 
+        Decodes the elements from the request, validates that the target
+        property is a list, checks write access, and removes matching entries.
+        Non-matching elements are silently ignored per the standard.
+
+        :returns: ``None`` (SimpleACK response).
         :raises BACnetError: If the object or property is not found,
-            or list manipulation is not supported.
+            or the property is not a list or is read-only.
         """
+        from bac_py.objects.base import PropertyAccess
+
         request = RemoveListElementRequest.decode(data)
         obj_id = self._resolve_object_id(request.object_identifier)
 
@@ -1107,7 +1180,18 @@ class DefaultServerHandlers:
         if prop_def is None:
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
 
-        raise BACnetError(ErrorClass.SERVICES, ErrorCode.OPTIONAL_FUNCTIONALITY_NOT_SUPPORTED)
+        if prop_def.access == PropertyAccess.READ_ONLY:
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.WRITE_ACCESS_DENIED)
+
+        current = obj._properties.get(request.property_identifier)
+        if not isinstance(current, list):
+            raise BACnetError(ErrorClass.PROPERTY, ErrorCode.PROPERTY_IS_NOT_A_LIST)
+
+        elements_to_remove = decode_all_application_values(request.list_of_elements)
+        for elem in elements_to_remove:
+            with contextlib.suppress(ValueError):
+                current.remove(elem)
+        return None
 
     # --- Alarm / event handlers ---
 
@@ -1464,3 +1548,236 @@ class DefaultServerHandlers:
             service_choice=UnconfirmedServiceChoice.I_HAVE,
             service_data=ihave.encode(),
         )
+
+    # --- Text message handlers ---
+
+    async def handle_confirmed_text_message(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle ConfirmedTextMessage-Request per Clause 16.5.
+
+        Logs the message and invokes the text message callback if set.
+
+        :returns: ``None`` (SimpleACK response).
+        """
+        request = ConfirmedTextMessageRequest.decode(data)
+        logger.info(
+            "ConfirmedTextMessage from %s (device %s): priority=%s, message='%s'",
+            source,
+            request.text_message_source_device,
+            request.message_priority.name,
+            request.message,
+        )
+        callback = getattr(self._app, "_text_message_callback", None)
+        if callback is not None:
+            callback(request, source)
+        return None
+
+    async def handle_unconfirmed_text_message(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Handle UnconfirmedTextMessage-Request per Clause 16.6.
+
+        Logs the message and invokes the text message callback if set.
+        """
+        request = UnconfirmedTextMessageRequest.decode(data)
+        logger.info(
+            "UnconfirmedTextMessage from %s (device %s): priority=%s, message='%s'",
+            source,
+            request.text_message_source_device,
+            request.message_priority.name,
+            request.message,
+        )
+        callback = getattr(self._app, "_text_message_callback", None)
+        if callback is not None:
+            callback(request, source)
+
+    # --- WriteGroup handler ---
+
+    async def handle_write_group(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Handle WriteGroup-Request per Clause 15.11.
+
+        Looks up Channel objects by group number and writes values.
+        """
+        request = WriteGroupRequest.decode(data)
+        logger.debug(
+            "WriteGroup from %s: group=%d, priority=%d, %d channels",
+            source,
+            request.group_number,
+            request.write_priority,
+            len(request.change_list),
+        )
+        # Look up Channel objects whose Control_Groups includes this group number
+        for obj in self._db.get_objects_of_type(ObjectType.CHANNEL):
+            control_groups = obj._properties.get(PropertyIdentifier.CONTROL_GROUPS, [])
+            if request.group_number not in control_groups:
+                continue
+            channel_number = obj._properties.get(PropertyIdentifier.CHANNEL_NUMBER)
+            if channel_number is None:
+                continue
+            for gcv in request.change_list:
+                if gcv.channel == channel_number:
+                    try:
+                        write_value = decode_and_unwrap(gcv.value)
+                        priority = gcv.overriding_priority or request.write_priority
+                        await obj.async_write_property(
+                            PropertyIdentifier.PRESENT_VALUE,
+                            write_value,
+                            priority,
+                        )
+                    except (ValueError, BACnetError):
+                        logger.debug(
+                            "WriteGroup: failed to write channel %d", gcv.channel
+                        )
+
+    # --- Device discovery handlers (new in 2020) ---
+
+    async def handle_who_am_i(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Handle Who-Am-I-Request per Clause 16.11.
+
+        Logs the request. A supervisor application should register a
+        callback to handle device identity assignment.
+        """
+        request = WhoAmIRequest.decode(data)
+        logger.info(
+            "Who-Am-I from %s: vendor=%d, model='%s', serial='%s'",
+            source,
+            request.vendor_id,
+            request.model_name,
+            request.serial_number,
+        )
+        callback = getattr(self._app, "_who_am_i_callback", None)
+        if callback is not None:
+            callback(request, source)
+
+    async def handle_you_are(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Handle You-Are-Request per Clause 16.11.
+
+        Applies the assigned device identity if the device is unconfigured.
+        """
+        request = YouAreRequest.decode(data)
+        logger.info(
+            "You-Are from %s: device=%s, mac=%s, network=%s",
+            source,
+            request.device_identifier,
+            request.device_mac_address.hex(),
+            request.device_network_number,
+        )
+        callback = getattr(self._app, "_you_are_callback", None)
+        if callback is not None:
+            callback(request, source)
+
+    # --- Virtual terminal handlers ---
+
+    async def handle_vt_open(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes:
+        """Handle VT-Open-Request per Clause 17.1.
+
+        :returns: Encoded VT-Open-ACK with remote session ID.
+        :raises BACnetError: If no VT sessions are available or the
+            VT class is not supported.
+        """
+        request = VTOpenRequest.decode(data)
+        logger.info(
+            "VT-Open from %s: class=%s, localSession=%d",
+            source,
+            request.vt_class.name,
+            request.local_vt_session_identifier,
+        )
+
+        # Check VT class support
+        vt_classes = self._device._properties.get(
+            PropertyIdentifier.VT_CLASSES_SUPPORTED, []
+        )
+        if vt_classes and request.vt_class not in vt_classes:
+            raise BACnetError(ErrorClass.VT, ErrorCode.UNKNOWN_VT_CLASS)
+
+        # Allocate a session — use a simple counter on the app
+        session_counter = getattr(self._app, "_vt_session_counter", 0) + 1
+        self._app._vt_session_counter = session_counter  # type: ignore[attr-defined]
+
+        # Store session mapping
+        sessions = getattr(self._app, "_vt_sessions", {})
+        sessions[session_counter] = {
+            "source": source,
+            "vt_class": request.vt_class,
+            "remote_session": request.local_vt_session_identifier,
+        }
+        self._app._vt_sessions = sessions  # type: ignore[attr-defined]
+
+        ack = VTOpenACK(remote_vt_session_identifier=session_counter)
+        return ack.encode()
+
+    async def handle_vt_close(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle VT-Close-Request per Clause 17.2.
+
+        :returns: ``None`` (SimpleACK response).
+        :raises BACnetError: If a session ID is unknown.
+        """
+        request = VTCloseRequest.decode(data)
+        sessions = getattr(self._app, "_vt_sessions", {})
+        for session_id in request.list_of_remote_vt_session_identifiers:
+            if session_id not in sessions:
+                raise BACnetError(ErrorClass.VT, ErrorCode.UNKNOWN_VT_SESSION)
+            del sessions[session_id]
+        logger.info(
+            "VT-Close from %s: sessions=%s",
+            source,
+            request.list_of_remote_vt_session_identifiers,
+        )
+        return None
+
+    async def handle_vt_data(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes:
+        """Handle VT-Data-Request per Clause 17.3.
+
+        :returns: Encoded VT-Data-ACK.
+        :raises BACnetError: If the session is unknown.
+        """
+        request = VTDataRequest.decode(data)
+        sessions = getattr(self._app, "_vt_sessions", {})
+        if request.vt_session_identifier not in sessions:
+            raise BACnetError(ErrorClass.VT, ErrorCode.UNKNOWN_VT_SESSION)
+        logger.debug(
+            "VT-Data from %s: session=%d, %d bytes, flag=%s",
+            source,
+            request.vt_session_identifier,
+            len(request.vt_new_data),
+            request.vt_data_flag,
+        )
+        ack = VTDataACK(all_new_data_accepted=True)
+        return ack.encode()

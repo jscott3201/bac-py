@@ -341,8 +341,8 @@ class TestDefaultServerHandlersRegister:
         handlers.register()
 
         registry = app.service_registry
-        assert registry.register_confirmed.call_count == 22
-        assert registry.register_unconfirmed.call_count == 6
+        assert registry.register_confirmed.call_count == 26
+        assert registry.register_unconfirmed.call_count == 10
 
 
 class TestHandleReadPropertyMultiple:
@@ -1361,7 +1361,7 @@ class TestHandleListElement:
 
         asyncio.get_event_loop().run_until_complete(run())
 
-    def test_add_list_element_not_supported(self):
+    def test_add_list_element_read_only_raises(self):
         from bac_py.services.list_element import AddListElementRequest
 
         app, db, device = _make_app()
@@ -1376,7 +1376,7 @@ class TestHandleListElement:
         async def run():
             with pytest.raises(BACnetError) as exc_info:
                 await handlers.handle_add_list_element(8, request.encode(), SOURCE)
-            assert exc_info.value.error_code == ErrorCode.OPTIONAL_FUNCTIONALITY_NOT_SUPPORTED
+            assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
 
         asyncio.get_event_loop().run_until_complete(run())
 

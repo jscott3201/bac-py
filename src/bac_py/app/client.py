@@ -38,6 +38,7 @@ from bac_py.services.cov import (
     SubscribeCOVPropertyRequest,
     SubscribeCOVRequest,
 )
+from bac_py.services.device_discovery import WhoAmIRequest, YouAreRequest
 from bac_py.services.device_mgmt import (
     DeviceCommunicationControlRequest,
     ReinitializeDeviceRequest,
@@ -78,8 +79,20 @@ from bac_py.services.read_range import (
     ReadRangeACK,
     ReadRangeRequest,
 )
+from bac_py.services.text_message import (
+    ConfirmedTextMessageRequest,
+    UnconfirmedTextMessageRequest,
+)
+from bac_py.services.virtual_terminal import (
+    VTCloseRequest,
+    VTDataACK,
+    VTDataRequest,
+    VTOpenACK,
+    VTOpenRequest,
+)
 from bac_py.services.who_has import IHaveRequest, WhoHasRequest
 from bac_py.services.who_is import IAmRequest, WhoIsRequest
+from bac_py.services.write_group import GroupChannelValue, WriteGroupRequest
 from bac_py.services.write_property import WritePropertyRequest
 from bac_py.services.write_property_multiple import (
     WriteAccessSpecification,
@@ -91,11 +104,13 @@ from bac_py.types.enums import (
     EnableDisable,
     EventState,
     EventType,
+    MessagePriority,
     ObjectType,
     PropertyIdentifier,
     ReinitializedState,
     Segmentation,
     UnconfirmedServiceChoice,
+    VTClass,
 )
 from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
 from bac_py.types.primitives import BACnetDate, BACnetTime, ObjectIdentifier
@@ -1964,3 +1979,248 @@ class BACnetClient:
         if result != BvlcResultCode.SUCCESSFUL_COMPLETION:
             msg = f"BBMD rejected Delete-FDT-Entry: {result.name}"
             raise RuntimeError(msg)
+
+    # --- Text message ---
+
+    async def send_confirmed_text_message(
+        self,
+        address: BACnetAddress,
+        source_device: ObjectIdentifier,
+        message: str,
+        message_priority: MessagePriority = MessagePriority.NORMAL,
+        message_class_numeric: int | None = None,
+        message_class_character: str | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        """Send ConfirmedTextMessage-Request per Clause 16.5.
+
+        :param address: Target device address.
+        :param source_device: Object identifier of the sending device.
+        :param message: Text message content.
+        :param message_priority: Message priority (NORMAL or URGENT).
+        :param message_class_numeric: Optional numeric message class.
+        :param message_class_character: Optional character message class.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
+        """
+        request = ConfirmedTextMessageRequest(
+            text_message_source_device=source_device,
+            message_priority=message_priority,
+            message=message,
+            message_class_numeric=message_class_numeric,
+            message_class_character=message_class_character,
+        )
+        await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.CONFIRMED_TEXT_MESSAGE,
+            service_data=request.encode(),
+            timeout=timeout,
+        )
+
+    def send_unconfirmed_text_message(
+        self,
+        destination: BACnetAddress,
+        source_device: ObjectIdentifier,
+        message: str,
+        message_priority: MessagePriority = MessagePriority.NORMAL,
+        message_class_numeric: int | None = None,
+        message_class_character: str | None = None,
+    ) -> None:
+        """Send UnconfirmedTextMessage-Request per Clause 16.6.
+
+        This is an unconfirmed service (fire-and-forget).
+
+        :param destination: Target device or broadcast address.
+        :param source_device: Object identifier of the sending device.
+        :param message: Text message content.
+        :param message_priority: Message priority (NORMAL or URGENT).
+        :param message_class_numeric: Optional numeric message class.
+        :param message_class_character: Optional character message class.
+        """
+        request = UnconfirmedTextMessageRequest(
+            text_message_source_device=source_device,
+            message_priority=message_priority,
+            message=message,
+            message_class_numeric=message_class_numeric,
+            message_class_character=message_class_character,
+        )
+        self._app.unconfirmed_request(
+            destination=destination,
+            service_choice=UnconfirmedServiceChoice.UNCONFIRMED_TEXT_MESSAGE,
+            service_data=request.encode(),
+        )
+
+    # --- WriteGroup ---
+
+    def write_group(
+        self,
+        destination: BACnetAddress,
+        group_number: int,
+        write_priority: int,
+        change_list: list[GroupChannelValue],
+    ) -> None:
+        """Send WriteGroup-Request per Clause 15.11.
+
+        This is an unconfirmed service (fire-and-forget).
+
+        :param destination: Target device or broadcast address.
+        :param group_number: Channel group number (Unsigned32).
+        :param write_priority: Write priority (1-16).
+        :param change_list: List of channel values to write.
+        """
+        request = WriteGroupRequest(
+            group_number=group_number,
+            write_priority=write_priority,
+            change_list=change_list,
+        )
+        self._app.unconfirmed_request(
+            destination=destination,
+            service_choice=UnconfirmedServiceChoice.WRITE_GROUP,
+            service_data=request.encode(),
+        )
+
+    # --- Device discovery (new in 2020) ---
+
+    def who_am_i(
+        self,
+        destination: BACnetAddress,
+        vendor_id: int,
+        model_name: str,
+        serial_number: str,
+    ) -> None:
+        """Send Who-Am-I-Request per Clause 16.11.
+
+        This is an unconfirmed service (fire-and-forget).
+        Sent by unconfigured devices to request identity assignment.
+
+        :param destination: Target address (typically global broadcast).
+        :param vendor_id: Device vendor identifier.
+        :param model_name: Device model name.
+        :param serial_number: Device serial number.
+        """
+        request = WhoAmIRequest(
+            vendor_id=vendor_id,
+            model_name=model_name,
+            serial_number=serial_number,
+        )
+        self._app.unconfirmed_request(
+            destination=destination,
+            service_choice=UnconfirmedServiceChoice.WHO_AM_I,
+            service_data=request.encode(),
+        )
+
+    def you_are(
+        self,
+        destination: BACnetAddress,
+        device_identifier: ObjectIdentifier,
+        device_mac_address: bytes,
+        device_network_number: int | None = None,
+    ) -> None:
+        """Send You-Are-Request per Clause 16.11.
+
+        This is an unconfirmed service (fire-and-forget).
+        Sent by a supervisor to assign identity to an unconfigured device.
+
+        :param destination: Target device address.
+        :param device_identifier: Assigned device object identifier.
+        :param device_mac_address: MAC address of the target device.
+        :param device_network_number: Optional network number.
+        """
+        request = YouAreRequest(
+            device_identifier=device_identifier,
+            device_mac_address=device_mac_address,
+            device_network_number=device_network_number,
+        )
+        self._app.unconfirmed_request(
+            destination=destination,
+            service_choice=UnconfirmedServiceChoice.YOU_ARE,
+            service_data=request.encode(),
+        )
+
+    # --- Virtual terminal ---
+
+    async def vt_open(
+        self,
+        address: BACnetAddress,
+        vt_class: VTClass,
+        local_vt_session_identifier: int,
+        timeout: float | None = None,
+    ) -> VTOpenACK:
+        """Send VT-Open-Request per Clause 17.1.
+
+        :param address: Target device address.
+        :param vt_class: Virtual terminal class to open.
+        :param local_vt_session_identifier: Local session ID (0-255).
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`VTOpenACK` with remote session ID.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
+        """
+        request = VTOpenRequest(
+            vt_class=vt_class,
+            local_vt_session_identifier=local_vt_session_identifier,
+        )
+        response_data = await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.VT_OPEN,
+            service_data=request.encode(),
+            timeout=timeout,
+        )
+        return VTOpenACK.decode(response_data)
+
+    async def vt_close(
+        self,
+        address: BACnetAddress,
+        session_identifiers: list[int],
+        timeout: float | None = None,
+    ) -> None:
+        """Send VT-Close-Request per Clause 17.2.
+
+        :param address: Target device address.
+        :param session_identifiers: List of remote VT session IDs to close.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
+        """
+        request = VTCloseRequest(
+            list_of_remote_vt_session_identifiers=session_identifiers,
+        )
+        await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.VT_CLOSE,
+            service_data=request.encode(),
+            timeout=timeout,
+        )
+
+    async def vt_data(
+        self,
+        address: BACnetAddress,
+        vt_session_identifier: int,
+        vt_new_data: bytes,
+        vt_data_flag: bool = False,
+        timeout: float | None = None,
+    ) -> VTDataACK:
+        """Send VT-Data-Request per Clause 17.3.
+
+        :param address: Target device address.
+        :param vt_session_identifier: Remote VT session ID.
+        :param vt_new_data: Data to send to the virtual terminal.
+        :param vt_data_flag: ``True`` if this is the last data segment.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`VTDataACK`.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
+        """
+        request = VTDataRequest(
+            vt_session_identifier=vt_session_identifier,
+            vt_new_data=vt_new_data,
+            vt_data_flag=vt_data_flag,
+        )
+        response_data = await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.VT_DATA,
+            service_data=request.encode(),
+            timeout=timeout,
+        )
+        return VTDataACK.decode(response_data)

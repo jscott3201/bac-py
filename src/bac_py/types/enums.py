@@ -740,6 +740,8 @@ class UnconfirmedServiceChoice(IntEnum):
     UTC_TIME_SYNCHRONIZATION = 9
     WRITE_GROUP = 10
     UNCONFIRMED_COV_NOTIFICATION_MULTIPLE = 11
+    WHO_AM_I = 12
+    YOU_ARE = 13
 
 
 class NetworkPriority(IntEnum):
@@ -1275,3 +1277,22 @@ class TimerTransition(IntEnum):
     FORCED_TO_EXPIRED = 5
     EXPIRED_TO_IDLE = 6
     EXPIRED_TO_RUNNING = 7
+
+
+class MessagePriority(IntEnum):
+    """BACnet message priority for TextMessage services (Clause 16.5)."""
+
+    NORMAL = 0
+    URGENT = 1
+
+
+class VTClass(IntEnum):
+    """BACnet virtual terminal class (Clause 17.1)."""
+
+    DEFAULT_TERMINAL = 0
+    ANSI_X3_64 = 1
+    DEC_VT52 = 2
+    DEC_VT100 = 3
+    DEC_VT220 = 4
+    HP_700_94 = 5
+    IBM_3130 = 6
