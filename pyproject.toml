@@ -100,7 +100,8 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["D"] # don't require docstrings in tests
+"tests/**" = ["D"]
+"docker/**" = ["D"]
 
 [tool.coverage.run]
 source = ["src/bac_py"]

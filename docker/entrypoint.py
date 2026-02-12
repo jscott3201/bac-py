@@ -1,0 +1,278 @@
+"""Role-based container entrypoint for BACnet Docker testing."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import os
+import signal
+import subprocess
+import sys
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+)
+logger = logging.getLogger("entrypoint")
+
+
+async def run_server() -> None:
+    """Run a BACnet server with sample objects."""
+    from bac_py.app.application import BACnetApplication, DeviceConfig
+    from bac_py.app.server import DefaultServerHandlers
+    from bac_py.objects.analog import AnalogInputObject, AnalogOutputObject, AnalogValueObject
+    from bac_py.objects.binary import BinaryInputObject, BinaryValueObject
+    from bac_py.objects.device import DeviceObject
+    from bac_py.types.enums import EngineeringUnits
+
+    instance = int(os.environ.get("DEVICE_INSTANCE", "100"))
+    port = int(os.environ.get("BACNET_PORT", "47808"))
+
+    config = DeviceConfig(
+        instance_number=instance,
+        name=f"Docker-Device-{instance}",
+        port=port,
+    )
+    app = BACnetApplication(config)
+    await app.start()
+
+    # Create device object
+    device = DeviceObject(
+        instance,
+        object_name=f"Docker-Device-{instance}",
+        vendor_name="bac-py",
+        vendor_identifier=0,
+        model_name="bac-py-docker",
+        firmware_revision="0.1.0",
+        application_software_version="0.1.0",
+    )
+    app.object_db.add(device)
+
+    # Sample objects
+    ai = AnalogInputObject(
+        1,
+        object_name="Temperature",
+        present_value=72.5,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+    )
+    ao = AnalogOutputObject(
+        1,
+        object_name="Setpoint-Output",
+        present_value=68.0,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+    )
+    av = AnalogValueObject(
+        1,
+        object_name="Setpoint",
+        present_value=70.0,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+        commandable=True,
+    )
+    bi = BinaryInputObject(1, object_name="Occupancy")
+    bv = BinaryValueObject(1, object_name="Override", commandable=True)
+
+    for obj in (ai, ao, av, bi, bv):
+        app.object_db.add(obj)
+
+    # Register default handlers
+    handlers = DefaultServerHandlers(app, app.object_db, device)
+    handlers.register()
+
+    logger.info("Server running: device %d on port %d", instance, port)
+
+    # Write health marker
+    _write_healthy()
+
+    # Block until SIGTERM/SIGINT
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+    logger.info("Shutting down server...")
+    await app.stop()
+
+
+async def run_bbmd() -> None:
+    """Run a BACnet server with BBMD enabled."""
+    from bac_py.app.application import BACnetApplication, DeviceConfig
+    from bac_py.app.server import DefaultServerHandlers
+    from bac_py.objects.analog import AnalogInputObject
+    from bac_py.objects.device import DeviceObject
+    from bac_py.types.enums import EngineeringUnits
+
+    instance = int(os.environ.get("DEVICE_INSTANCE", "200"))
+    port = int(os.environ.get("BACNET_PORT", "47808"))
+
+    config = DeviceConfig(
+        instance_number=instance,
+        name=f"Docker-BBMD-{instance}",
+        port=port,
+    )
+    app = BACnetApplication(config)
+    await app.start()
+
+    # Attach BBMD functionality (empty BDT = foreign-device-only mode)
+    if app._transport is not None:
+        await app._transport.attach_bbmd()
+        logger.info("BBMD attached on port %d", port)
+
+    device = DeviceObject(
+        instance,
+        object_name=f"Docker-BBMD-{instance}",
+        vendor_name="bac-py",
+        vendor_identifier=0,
+        model_name="bac-py-docker-bbmd",
+        firmware_revision="0.1.0",
+        application_software_version="0.1.0",
+    )
+    app.object_db.add(device)
+
+    ai = AnalogInputObject(
+        1,
+        object_name="BBMD-Temperature",
+        present_value=65.0,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+    )
+    app.object_db.add(ai)
+
+    handlers = DefaultServerHandlers(app, app.object_db, device)
+    handlers.register()
+
+    logger.info("BBMD server running: device %d on port %d", instance, port)
+    _write_healthy()
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+    logger.info("Shutting down BBMD...")
+    await app.stop()
+
+
+async def run_router() -> None:
+    """Run a BACnet router bridging two networks."""
+    from bac_py.app.application import (
+        BACnetApplication,
+        DeviceConfig,
+        RouterConfig,
+        RouterPortConfig,
+    )
+    from bac_py.app.server import DefaultServerHandlers
+    from bac_py.objects.device import DeviceObject
+
+    instance = int(os.environ.get("DEVICE_INSTANCE", "300"))
+    net1 = int(os.environ.get("NETWORK_1", "1"))
+    net2 = int(os.environ.get("NETWORK_2", "2"))
+    iface1 = os.environ.get("INTERFACE_1", "0.0.0.0")
+    iface2 = os.environ.get("INTERFACE_2", "0.0.0.0")
+    port1 = int(os.environ.get("PORT_1", "47808"))
+    port2 = int(os.environ.get("PORT_2", "47809"))
+
+    router_config = RouterConfig(
+        ports=[
+            RouterPortConfig(port_id=1, network_number=net1, interface=iface1, port=port1),
+            RouterPortConfig(port_id=2, network_number=net2, interface=iface2, port=port2),
+        ],
+        application_port_id=1,
+    )
+
+    config = DeviceConfig(
+        instance_number=instance,
+        name=f"Docker-Router-{instance}",
+        router_config=router_config,
+    )
+    app = BACnetApplication(config)
+    await app.start()
+
+    device = DeviceObject(
+        instance,
+        object_name=f"Docker-Router-{instance}",
+        vendor_name="bac-py",
+        vendor_identifier=0,
+        model_name="bac-py-docker-router",
+        firmware_revision="0.1.0",
+        application_software_version="0.1.0",
+    )
+    app.object_db.add(device)
+
+    handlers = DefaultServerHandlers(app, app.object_db, device)
+    handlers.register()
+
+    logger.info(
+        "Router running: device %d, net %d (port %d) <-> net %d (port %d)",
+        instance,
+        net1,
+        port1,
+        net2,
+        port2,
+    )
+    _write_healthy()
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+    logger.info("Shutting down router...")
+    await app.stop()
+
+
+def run_test() -> None:
+    """Run pytest on a specific scenario file."""
+    test_file = os.environ.get("TEST_FILE", "")
+    if not test_file:
+        logger.error("TEST_FILE env var not set")
+        sys.exit(1)
+
+    test_path = f"docker/scenarios/{test_file}"
+    logger.info("Running tests: %s", test_path)
+
+    result = subprocess.run(
+        ["uv", "run", "pytest", test_path, "-v", "--tb=short", "-x"],
+        cwd="/app",
+    )
+    sys.exit(result.returncode)
+
+
+def run_stress() -> None:
+    """Run the stress test runner."""
+    logger.info("Running stress tests...")
+    result = subprocess.run(
+        ["uv", "run", "python", "docker/lib/stress_runner.py"],
+        cwd="/app",
+    )
+    sys.exit(result.returncode)
+
+
+def _write_healthy() -> None:
+    """Write health marker file for Docker healthcheck."""
+    with open("/tmp/healthy", "w") as f:
+        f.write("ok")
+
+
+def main() -> None:
+    """Dispatch based on ROLE env var."""
+    role = os.environ.get("ROLE", "").lower()
+
+    if role == "server":
+        asyncio.run(run_server())
+    elif role == "bbmd":
+        asyncio.run(run_bbmd())
+    elif role == "router":
+        asyncio.run(run_router())
+    elif role == "test":
+        run_test()
+    elif role == "stress":
+        run_stress()
+    else:
+        logger.error("Unknown ROLE: %r (expected: server, bbmd, router, test, stress)", role)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

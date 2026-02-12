@@ -1,0 +1,216 @@
+networks:
+  bacnet-main:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.1.0/24
+  bacnet-secondary:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.2.0/24
+  bacnet-foreign:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.3.0/24
+
+x-healthcheck: &healthcheck
+  healthcheck:
+    test: ["CMD", "test", "-f", "/tmp/healthy"]
+    interval: 2s
+    timeout: 3s
+    retries: 15
+    start_period: 5s
+
+x-build: &build
+  build:
+    context: ..
+    dockerfile: docker/Dockerfile
+
+# =============================================================================
+# Scenario 1: Client/Server (basic read/write/discover)
+# =============================================================================
+
+services:
+  server1:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-server1
+    environment:
+      ROLE: server
+      DEVICE_INSTANCE: "100"
+      BACNET_PORT: "47808"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.10
+    profiles: ["client-server", "all"]
+
+  test-client-server:
+    <<: *build
+    container_name: bacnet-test-client-server
+    environment:
+      ROLE: test
+      TEST_FILE: test_client_server.py
+      SERVER_ADDRESS: "172.30.1.10"
+      SERVER_INSTANCE: "100"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.20
+    depends_on:
+      server1:
+        condition: service_healthy
+    profiles: ["client-server", "all"]
+
+  # ===========================================================================
+  # Scenario 2: BBMD (foreign device registration + forwarding)
+  # ===========================================================================
+
+  bbmd1:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-bbmd1
+    environment:
+      ROLE: bbmd
+      DEVICE_INSTANCE: "200"
+      BACNET_PORT: "47808"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.30
+    profiles: ["bbmd", "all"]
+
+  server-on-bbmd-net:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-server-bbmd
+    environment:
+      ROLE: server
+      DEVICE_INSTANCE: "201"
+      BACNET_PORT: "47808"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.31
+    profiles: ["bbmd", "all"]
+
+  test-bbmd:
+    <<: *build
+    container_name: bacnet-test-bbmd
+    environment:
+      ROLE: test
+      TEST_FILE: test_bbmd.py
+      BBMD_ADDRESS: "172.30.1.30"
+      SERVER_ADDRESS: "172.30.1.31"
+      SERVER_INSTANCE: "201"
+      BBMD_INSTANCE: "200"
+    networks:
+      bacnet-foreign:
+        ipv4_address: 172.30.3.10
+    profiles: ["bbmd", "all"]
+    depends_on:
+      bbmd1:
+        condition: service_healthy
+      server-on-bbmd-net:
+        condition: service_healthy
+
+  # ===========================================================================
+  # Scenario 3: Router (cross-network communication)
+  # ===========================================================================
+
+  router1:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-router1
+    environment:
+      ROLE: router
+      DEVICE_INSTANCE: "300"
+      NETWORK_1: "1"
+      NETWORK_2: "2"
+      INTERFACE_1: "172.30.1.50"
+      INTERFACE_2: "172.30.2.50"
+      PORT_1: "47808"
+      PORT_2: "47808"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.50
+      bacnet-secondary:
+        ipv4_address: 172.30.2.50
+    profiles: ["router", "all"]
+
+  server-net2:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-server-net2
+    environment:
+      ROLE: server
+      DEVICE_INSTANCE: "301"
+      BACNET_PORT: "47808"
+    networks:
+      bacnet-secondary:
+        ipv4_address: 172.30.2.10
+    profiles: ["router", "all"]
+
+  test-router:
+    <<: *build
+    container_name: bacnet-test-router
+    environment:
+      ROLE: test
+      TEST_FILE: test_router.py
+      ROUTER_ADDRESS: "172.30.1.50"
+      SERVER_NET2_ADDRESS: "172.30.2.10"
+      SERVER_NET2_INSTANCE: "301"
+      ROUTER_INSTANCE: "300"
+      NETWORK_1: "1"
+      NETWORK_2: "2"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.60
+    depends_on:
+      router1:
+        condition: service_healthy
+      server-net2:
+        condition: service_healthy
+    profiles: ["router", "all"]
+
+  # ===========================================================================
+  # Scenario 4: Stress (throughput/latency)
+  # ===========================================================================
+
+  server-stress:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-server-stress
+    environment:
+      ROLE: server
+      DEVICE_INSTANCE: "400"
+      BACNET_PORT: "47808"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.70
+    profiles: ["stress", "all"]
+
+  test-stress:
+    <<: *build
+    container_name: bacnet-test-stress
+    environment:
+      ROLE: test
+      TEST_FILE: test_stress.py
+      SERVER_ADDRESS: "172.30.1.70"
+      SERVER_INSTANCE: "400"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.80
+    depends_on:
+      server-stress:
+        condition: service_healthy
+    profiles: ["stress", "all"]
+
+  stress-runner:
+    <<: *build
+    container_name: bacnet-stress-runner
+    environment:
+      ROLE: stress
+      SERVER_ADDRESS: "172.30.1.70"
+      SERVER_INSTANCE: "400"
+      NUM_CLIENTS: "10"
+      REQUESTS_PER_CLIENT: "500"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.81
+    depends_on:
+      server-stress:
+        condition: service_healthy
+    profiles: ["stress-runner"]
