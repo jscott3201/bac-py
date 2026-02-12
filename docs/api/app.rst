@@ -1,75 +1,10 @@
+:orphan:
+
 Application
 ===========
 
-.. automodule:: bac_py.app
-   :no-members:
+This page has moved. The Application API is now split across:
 
-High-Level Client
------------------
-
-.. automodule:: bac_py.client
-   :members:
-   :undoc-members:
-
-BACnet Application
-------------------
-
-.. automodule:: bac_py.app.application
-   :members:
-   :undoc-members:
-
-Protocol-Level Client
----------------------
-
-.. automodule:: bac_py.app.client
-   :members:
-   :undoc-members:
-
-Server
-------
-
-.. automodule:: bac_py.app.server
-   :members:
-   :undoc-members:
-
-Transaction State Machine
--------------------------
-
-.. automodule:: bac_py.app.tsm
-   :members:
-   :undoc-members:
-
-COV Manager
------------
-
-.. automodule:: bac_py.app.cov
-   :members:
-   :undoc-members:
-
-Event Engine
-------------
-
-.. automodule:: bac_py.app.event_engine
-   :members:
-   :undoc-members:
-
-Audit Manager
--------------
-
-.. automodule:: bac_py.app.audit
-   :members:
-   :undoc-members:
-
-Schedule Engine
----------------
-
-.. automodule:: bac_py.app.schedule_engine
-   :members:
-   :undoc-members:
-
-TrendLog Engine
----------------
-
-.. automodule:: bac_py.app.trendlog_engine
-   :members:
-   :undoc-members:
+- :doc:`app/client` -- High-level and protocol-level client
+- :doc:`app/server` -- Application, server, and TSM
+- :doc:`app/engines` -- COV, event, schedule, trend log, and audit engines

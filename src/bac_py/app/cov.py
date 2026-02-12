@@ -130,6 +130,12 @@ class COVManager:
             # (subscriber, process_id, object_id, property_id, array_index)
             PropertySubscription,
         ] = {}
+        # Secondary indices for O(k) lookup in check_and_notify (vs O(N) scan)
+        self._subs_by_object: dict[Any, dict[tuple[Any, int, Any], COVSubscription]] = {}
+        self._prop_subs_by_obj_prop: dict[
+            tuple[Any, int],  # (object_id, property_id)
+            dict[tuple[Any, int, Any, int, int | None], PropertySubscription],
+        ] = {}
 
     def subscribe(
         self,
@@ -173,6 +179,7 @@ class COVManager:
             last_status_flags=status_flags,
         )
         self._subscriptions[key] = sub
+        self._subs_by_object.setdefault(obj_id, {})[key] = sub
 
         # Start lifetime timer if applicable
         if lifetime is not None and lifetime > 0:
@@ -196,8 +203,14 @@ class COVManager:
         """
         key = (subscriber, process_id, monitored_object)
         sub = self._subscriptions.pop(key, None)
-        if sub and sub.expiry_handle:
-            sub.expiry_handle.cancel()
+        if sub:
+            if sub.expiry_handle:
+                sub.expiry_handle.cancel()
+            obj_bucket = self._subs_by_object.get(monitored_object)
+            if obj_bucket is not None:
+                obj_bucket.pop(key, None)
+                if not obj_bucket:
+                    del self._subs_by_object[monitored_object]
 
     def check_and_notify(
         self,
@@ -213,14 +226,14 @@ class COVManager:
         :param changed_property: The property that was written.
         """
         obj_id = obj.object_identifier
-        for _key, sub in list(self._subscriptions.items()):
-            if sub.monitored_object != obj_id:
-                continue
-            if self._should_notify(sub, obj):
-                self._send_notification(sub, obj)
-                # Update last-reported values
-                sub.last_present_value = self._read_present_value(obj)
-                sub.last_status_flags = self._read_status_flags(obj)
+        obj_bucket = self._subs_by_object.get(obj_id)
+        if obj_bucket:
+            for _key, sub in list(obj_bucket.items()):
+                if self._should_notify(sub, obj):
+                    self._send_notification(sub, obj)
+                    # Update last-reported values
+                    sub.last_present_value = self._read_present_value(obj)
+                    sub.last_status_flags = self._read_status_flags(obj)
 
         # Also check property-level subscriptions
         self.check_and_notify_property(obj, changed_property)
@@ -232,7 +245,8 @@ class COVManager:
         """Return active subscriptions, optionally filtered by object."""
         if object_id is None:
             return list(self._subscriptions.values())
-        return [sub for sub in self._subscriptions.values() if sub.monitored_object == object_id]
+        obj_bucket = self._subs_by_object.get(object_id)
+        return list(obj_bucket.values()) if obj_bucket else []
 
     def shutdown(self) -> None:
         """Cancel all subscription timers."""
@@ -240,11 +254,13 @@ class COVManager:
             if sub.expiry_handle:
                 sub.expiry_handle.cancel()
         self._subscriptions.clear()
+        self._subs_by_object.clear()
 
         for prop_sub in self._property_subscriptions.values():
             if prop_sub.expiry_handle:
                 prop_sub.expiry_handle.cancel()
         self._property_subscriptions.clear()
+        self._prop_subs_by_obj_prop.clear()
 
     def remove_object_subscriptions(self, object_id: ObjectIdentifier) -> None:
         """Remove all subscriptions for a deleted object.
@@ -252,23 +268,24 @@ class COVManager:
         Called when an object is removed from the database to clean
         up any outstanding COV subscriptions per Clause 13.1.
         """
-        keys_to_remove = [
-            key for key, sub in self._subscriptions.items() if sub.monitored_object == object_id
-        ]
-        for key in keys_to_remove:
-            sub = self._subscriptions.pop(key)
-            if sub.expiry_handle:
-                sub.expiry_handle.cancel()
+        # Use secondary index for O(k) cleanup of object-level subscriptions
+        obj_bucket = self._subs_by_object.pop(object_id, None)
+        if obj_bucket:
+            for key, sub in obj_bucket.items():
+                self._subscriptions.pop(key, None)
+                if sub.expiry_handle:
+                    sub.expiry_handle.cancel()
 
-        prop_keys_to_remove = [
-            pkey
-            for pkey, psub in self._property_subscriptions.items()
-            if psub.monitored_object == object_id
+        # Remove property subscriptions for this object
+        prop_idx_keys = [
+            idx_key for idx_key in self._prop_subs_by_obj_prop if idx_key[0] == object_id
         ]
-        for pkey in prop_keys_to_remove:
-            psub = self._property_subscriptions.pop(pkey)
-            if psub.expiry_handle:
-                psub.expiry_handle.cancel()
+        for idx_key in prop_idx_keys:
+            prop_bucket = self._prop_subs_by_obj_prop.pop(idx_key)
+            for pkey, psub in prop_bucket.items():
+                self._property_subscriptions.pop(pkey, None)
+                if psub.expiry_handle:
+                    psub.expiry_handle.cancel()
 
     def subscribe_property(
         self,
@@ -323,6 +340,7 @@ class COVManager:
             last_value=initial_value,
         )
         self._property_subscriptions[key] = sub
+        self._prop_subs_by_obj_prop.setdefault((obj_id, prop_id), {})[key] = sub
 
         # Start lifetime timer if applicable
         if lifetime is not None and lifetime > 0:
@@ -388,6 +406,7 @@ class COVManager:
                     last_value=initial_value,
                 )
                 self._property_subscriptions[key] = sub
+                self._prop_subs_by_obj_prop.setdefault((obj_id, prop_id), {})[key] = sub
 
                 # Start lifetime timer if applicable
                 if lifetime is not None and lifetime > 0:
@@ -425,8 +444,15 @@ class COVManager:
             array_index,
         )
         sub = self._property_subscriptions.pop(key, None)
-        if sub and sub.expiry_handle:
-            sub.expiry_handle.cancel()
+        if sub:
+            if sub.expiry_handle:
+                sub.expiry_handle.cancel()
+            idx_key = (obj_id, property_id)
+            prop_bucket = self._prop_subs_by_obj_prop.get(idx_key)
+            if prop_bucket is not None:
+                prop_bucket.pop(key, None)
+                if not prop_bucket:
+                    del self._prop_subs_by_obj_prop[idx_key]
 
     def check_and_notify_property(
         self,
@@ -447,12 +473,10 @@ class COVManager:
         obj_id = obj.object_identifier
         changed_prop_int = int(changed_property)
 
-        for _key, sub in list(self._property_subscriptions.items()):
-            if sub.monitored_object != obj_id:
-                continue
-            if sub.monitored_property != changed_prop_int:
-                continue
-
+        prop_bucket = self._prop_subs_by_obj_prop.get((obj_id, changed_prop_int))
+        if not prop_bucket:
+            return
+        for _key, sub in list(prop_bucket.items()):
             current_value = self._read_property_value(
                 obj, sub.monitored_property, sub.property_array_index
             )
@@ -572,6 +596,12 @@ class COVManager:
         """
         sub = self._property_subscriptions.pop(key, None)
         if sub:
+            idx_key = (sub.monitored_object, sub.monitored_property)
+            prop_bucket = self._prop_subs_by_obj_prop.get(idx_key)
+            if prop_bucket is not None:
+                prop_bucket.pop(key, None)
+                if not prop_bucket:
+                    del self._prop_subs_by_obj_prop[idx_key]
             logger.debug(
                 "Property COV subscription expired: process_id=%d, object=%s, property=%d",
                 sub.process_id,
@@ -696,6 +726,11 @@ class COVManager:
         """Remove expired subscription."""
         sub = self._subscriptions.pop(key, None)
         if sub:
+            obj_bucket = self._subs_by_object.get(sub.monitored_object)
+            if obj_bucket is not None:
+                obj_bucket.pop(key, None)
+                if not obj_bucket:
+                    del self._subs_by_object[sub.monitored_object]
             logger.debug(
                 "COV subscription expired: process_id=%d, object=%s",
                 sub.process_id,

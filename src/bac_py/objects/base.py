@@ -726,6 +726,7 @@ class ObjectDatabase:
     def __init__(self) -> None:
         self._objects: dict[ObjectIdentifier, BACnetObject] = {}
         self._names: dict[str, ObjectIdentifier] = {}
+        self._type_index: dict[ObjectType, dict[ObjectIdentifier, BACnetObject]] = {}
         self._change_callbacks: dict[
             tuple[ObjectIdentifier, PropertyIdentifier],
             list[Callable[[PropertyIdentifier, Any, Any], None]],
@@ -744,6 +745,9 @@ class ObjectDatabase:
         if name is not None and name in self._names:
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.DUPLICATE_NAME)
         self._objects[obj.object_identifier] = obj
+        self._type_index.setdefault(obj.object_identifier.object_type, {})[
+            obj.object_identifier
+        ] = obj
         if name is not None:
             self._names[name] = obj.object_identifier
         obj._object_db = self
@@ -763,6 +767,11 @@ class ObjectDatabase:
         name = obj._properties.get(PropertyIdentifier.OBJECT_NAME)
         if name is not None and self._names.get(name) == object_id:
             del self._names[name]
+        type_bucket = self._type_index.get(object_id.object_type)
+        if type_bucket is not None:
+            type_bucket.pop(object_id, None)
+            if not type_bucket:
+                del self._type_index[object_id.object_type]
         obj._object_db = None
         del self._objects[object_id]
         self._increment_database_revision()
@@ -878,7 +887,8 @@ class ObjectDatabase:
         :param obj_type: The :class:`ObjectType` to filter by.
         :returns: List of matching :class:`BACnetObject` instances.
         """
-        return [o for o in self._objects.values() if o.object_identifier.object_type == obj_type]
+        type_bucket = self._type_index.get(obj_type)
+        return list(type_bucket.values()) if type_bucket else []
 
     @property
     def object_list(self) -> list[ObjectIdentifier]:

@@ -1637,3 +1637,190 @@ class TestCOVEdgeCases:
 
         assert len(cov.get_active_subscriptions()) == 0
         assert handle.cancelled()
+
+
+class TestCOVSecondaryIndices:
+    """Tests verifying secondary index consistency for O(k) dispatch."""
+
+    def test_subscribe_populates_subs_by_object(self):
+        """subscribe() adds to _subs_by_object index."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=obj_id,
+            issue_confirmed_notifications=False,
+            lifetime=None,
+        )
+        cov.subscribe(SUBSCRIBER, request, db)
+
+        assert obj_id in cov._subs_by_object
+        assert len(cov._subs_by_object[obj_id]) == 1
+
+    def test_unsubscribe_cleans_subs_by_object(self):
+        """unsubscribe() removes from _subs_by_object and cleans empty buckets."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=obj_id,
+            issue_confirmed_notifications=False,
+            lifetime=None,
+        )
+        cov.subscribe(SUBSCRIBER, request, db)
+        assert obj_id in cov._subs_by_object
+
+        cov.unsubscribe(SUBSCRIBER, 42, obj_id)
+        assert obj_id not in cov._subs_by_object
+
+    def test_multiple_subs_same_object_index(self):
+        """Multiple subscribers for the same object share the same index bucket."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        for pid in (1, 2, 3):
+            req = SubscribeCOVRequest(
+                subscriber_process_identifier=pid,
+                monitored_object_identifier=obj_id,
+                issue_confirmed_notifications=False,
+                lifetime=None,
+            )
+            cov.subscribe(SUBSCRIBER, req, db)
+
+        assert len(cov._subs_by_object[obj_id]) == 3
+
+        # Remove one
+        cov.unsubscribe(SUBSCRIBER, 2, obj_id)
+        assert len(cov._subs_by_object[obj_id]) == 2
+
+    def test_subscribe_property_populates_prop_index(self):
+        """subscribe_property() adds to _prop_subs_by_obj_prop index."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        request = _make_prop_request(obj_id)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+
+        idx_key = (obj_id, int(PropertyIdentifier.PRESENT_VALUE))
+        assert idx_key in cov._prop_subs_by_obj_prop
+        assert len(cov._prop_subs_by_obj_prop[idx_key]) == 1
+
+    def test_unsubscribe_property_cleans_prop_index(self):
+        """unsubscribe_property() removes from prop index and cleans empty buckets."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        request = _make_prop_request(obj_id)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+
+        idx_key = (obj_id, int(PropertyIdentifier.PRESENT_VALUE))
+        assert idx_key in cov._prop_subs_by_obj_prop
+
+        cov.unsubscribe_property(SUBSCRIBER, 42, obj_id, int(PropertyIdentifier.PRESENT_VALUE))
+        assert idx_key not in cov._prop_subs_by_obj_prop
+
+    @pytest.mark.asyncio
+    async def test_expiry_cleans_subs_by_object(self):
+        """Subscription expiry removes from _subs_by_object index."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=obj_id,
+            issue_confirmed_notifications=False,
+            lifetime=1,
+        )
+        cov.subscribe(SUBSCRIBER, request, db)
+        assert obj_id in cov._subs_by_object
+
+        await asyncio.sleep(1.1)
+        assert obj_id not in cov._subs_by_object
+
+    @pytest.mark.asyncio
+    async def test_property_expiry_cleans_prop_index(self):
+        """Property subscription expiry removes from _prop_subs_by_obj_prop index."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        request = _make_prop_request(obj_id, lifetime=1)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+
+        idx_key = (obj_id, int(PropertyIdentifier.PRESENT_VALUE))
+        assert idx_key in cov._prop_subs_by_obj_prop
+
+        await asyncio.sleep(1.1)
+        assert idx_key not in cov._prop_subs_by_obj_prop
+
+    def test_shutdown_clears_all_indices(self):
+        """shutdown() clears both secondary indices."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        req = SubscribeCOVRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=obj_id,
+            issue_confirmed_notifications=False,
+            lifetime=None,
+        )
+        cov.subscribe(SUBSCRIBER, req, db)
+
+        prop_req = _make_prop_request(obj_id, process_id=2)
+        cov.subscribe_property(SUBSCRIBER, prop_req, db)
+
+        assert len(cov._subs_by_object) > 0
+        assert len(cov._prop_subs_by_obj_prop) > 0
+
+        cov.shutdown()
+
+        assert len(cov._subs_by_object) == 0
+        assert len(cov._prop_subs_by_obj_prop) == 0
+
+    @pytest.mark.asyncio
+    async def test_remove_object_cleans_both_indices(self):
+        """remove_object_subscriptions() clears both indices for that object."""
+        _app, db, cov = _make_cov_manager()
+        av1 = AnalogValueObject(1)
+        av2 = AnalogValueObject(2)
+        db.add(av1)
+        db.add(av2)
+
+        for av in (av1, av2):
+            req = SubscribeCOVRequest(
+                subscriber_process_identifier=1,
+                monitored_object_identifier=av.object_identifier,
+                issue_confirmed_notifications=False,
+                lifetime=300,
+            )
+            cov.subscribe(SUBSCRIBER, req, db)
+            prop_req = _make_prop_request(av.object_identifier, process_id=2, lifetime=300)
+            cov.subscribe_property(SUBSCRIBER, prop_req, db)
+
+        # Remove av1 subscriptions only
+        cov.remove_object_subscriptions(av1.object_identifier)
+
+        assert av1.object_identifier not in cov._subs_by_object
+        assert av2.object_identifier in cov._subs_by_object
+        assert len(cov._subscriptions) == 1
+        assert len(cov._property_subscriptions) == 1
+
+        # Clean up timers
+        cov.shutdown()

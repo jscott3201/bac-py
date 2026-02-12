@@ -5,10 +5,10 @@ API Reference
 
 The API documentation is organized by module:
 
-- :doc:`app` -- Application, client, server, and engines
+- :doc:`app/index` -- Application, client, server, and engines
 - :doc:`types` -- Primitive types, enumerations, and constructed types
-- :doc:`services` -- Service request/response types
-- :doc:`objects` -- BACnet object model
+- :doc:`services/index` -- Service request/response types
+- :doc:`objects/index` -- BACnet object model
 - :doc:`encoding` -- ASN.1/BER encoding and APDU codec
 - :doc:`network` -- Addressing and NPDU network layer
 - :doc:`transport` -- BACnet/IP, IPv6, and Ethernet transports

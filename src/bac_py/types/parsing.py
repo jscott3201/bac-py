@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from bac_py.types.enums import ObjectType, PropertyIdentifier
 from bac_py.types.primitives import ObjectIdentifier
 
@@ -32,12 +34,16 @@ PROPERTY_ALIASES: dict[str, PropertyIdentifier] = {
 """Short aliases for commonly used property identifiers."""
 
 
+@lru_cache(maxsize=256)
 def _resolve_object_type(name: str) -> ObjectType:
     """Resolve an object type name to an :class:`~bac_py.types.enums.ObjectType`.
 
     Accepts short aliases (e.g. ``"ai"``), hyphenated names
     (e.g. ``"analog-input"``), underscore names (e.g. ``"ANALOG_INPUT"``),
     or raw integer strings.
+
+    Results are cached so repeated lookups of the same alias (e.g. ``"ai"``)
+    are O(1) after the first call.
 
     :param name: Object type name in any supported format.
     :returns: Resolved :class:`~bac_py.types.enums.ObjectType` member.
@@ -121,12 +127,16 @@ def parse_object_identifier(
     raise ValueError(msg)
 
 
+@lru_cache(maxsize=512)
 def _resolve_property_identifier(name: str) -> PropertyIdentifier:
     """Resolve a property name to a :class:`~bac_py.types.enums.PropertyIdentifier`.
 
     Accepts short aliases (e.g. ``"pv"``), hyphenated names
     (e.g. ``"present-value"``), underscore names (e.g. ``"PRESENT_VALUE"``),
     or raw integer strings.
+
+    Results are cached so repeated lookups of the same alias (e.g. ``"pv"``)
+    are O(1) after the first call.
 
     :param name: Property name in any supported format.
     :returns: Resolved :class:`~bac_py.types.enums.PropertyIdentifier` member.

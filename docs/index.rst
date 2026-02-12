@@ -45,10 +45,10 @@ capabilities, see :doc:`features`.
    :caption: API Reference
    :maxdepth: 2
 
-   api/app
+   api/app/index
    api/types
-   api/services
-   api/objects
+   api/services/index
+   api/objects/index
    api/encoding
    api/network
    api/transport

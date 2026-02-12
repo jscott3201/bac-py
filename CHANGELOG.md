@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.0.1] - 2026-02-12
+## [1.0.2] - 2026-02-12
 
 ### Fixed
 
@@ -31,14 +31,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   3 captioned sections (Getting Started, User Guide, API Reference) with 17
   navigable entries. API modules are now listed directly in the top-level toctree
   instead of behind an intermediate landing page.
+- **API reference sidebar overhaul** -- Split 3 monolithic API pages (Application,
+  Services, Objects) into 12 focused sub-pages grouped by category. Application
+  is now split into Client, Server, and Engines; Services into Property, Discovery,
+  Events, and Management; Objects into Base, I/O, Scheduling, Monitoring, and
+  Infrastructure. Removed `:undoc-members:` from all API documentation to reduce
+  noise. Each sub-page now has a manageable right-hand table of contents instead
+  of listing 20-30+ sections on a single page.
+- **Hot-path performance optimizations** for typical building monitoring scenarios
+  (100+ devices, 25-40 points each):
+  - `parse_address()` string inputs now cached via `lru_cache` (O(1) repeated
+    lookups in polling loops).
+  - `_resolve_object_type()` and `_resolve_property_identifier()` alias
+    resolution now cached via `lru_cache`.
+  - `BIPAddress.encode()` uses `socket.inet_aton()` + `struct.pack()` instead
+    of string splitting.
+  - `encode_npdu()` pre-allocates bytearray to estimated packet size.
+  - `COVManager.check_and_notify()` and `check_and_notify_property()` use
+    secondary dict indices for O(k) dispatch (k = subscriptions on the changed
+    object) instead of O(N) full scan of all subscriptions.
+  - `ObjectDatabase.get_objects_of_type()` uses a type index for O(1) lookup
+    instead of O(N) full scan.
 
 ### Added
 
-- 116 new unit tests for Ethernet and MS/TP device support:
+- 137 new unit tests covering Ethernet/MS/TP support and performance optimizations:
   - NPDU variable MAC length encode/decode (1--8 byte SADR/DADR)
   - Mixed data link router forwarding (BIP↔MS/TP, 2-byte MAC, broadcasts)
   - Address `str()`↔`parse_address()` round-trips for all MAC formats
   - Network layer remote send with variable-length MACs and router cache learning
+  - COV secondary index maintenance (subscribe/unsubscribe/expiry/shutdown)
+  - ObjectDatabase type index (add/remove/query by type)
 
 ## [1.0.0] - 2026-02-12
 

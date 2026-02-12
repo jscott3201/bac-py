@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import re
 import socket
+import struct
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Any
 
 
@@ -23,8 +25,7 @@ class BIPAddress:
 
         :returns: A 6-byte ``bytes`` object (4 octets IP + 2 octets port, big-endian).
         """
-        parts = [int(x) for x in self.host.split(".")]
-        return bytes(parts) + self.port.to_bytes(2, "big")
+        return socket.inet_aton(self.host) + struct.pack("!H", self.port)
 
     @classmethod
     def decode(cls, data: bytes | memoryview) -> BIPAddress:
@@ -323,13 +324,21 @@ def parse_address(addr: str | BACnetAddress) -> BACnetAddress:
 
     If already a :class:`BACnetAddress`, returns it unchanged (pass-through).
 
+    String results are cached so repeated lookups of the same address
+    (common in building polling loops) are O(1) after the first call.
+
     :param addr: Address string or existing :class:`BACnetAddress`.
     :returns: The parsed :class:`BACnetAddress`.
     :raises ValueError: If the format is not recognised.
     """
     if isinstance(addr, BACnetAddress):
         return addr
+    return _parse_address_str(addr)
 
+
+@lru_cache(maxsize=256)
+def _parse_address_str(addr: str) -> BACnetAddress:
+    """Parse a string address to a :class:`BACnetAddress` (cached)."""
     addr = addr.strip()
     if not addr:
         msg = "Address string must not be empty"
