@@ -22,12 +22,31 @@ from bac_py.encoding.primitives import (
 )
 from bac_py.encoding.tags import decode_tag
 from bac_py.network.address import GLOBAL_BROADCAST, parse_address
-from bac_py.services.cov import COVNotificationRequest, SubscribeCOVRequest
+from bac_py.services.alarm_summary import (
+    GetAlarmSummaryACK,
+    GetAlarmSummaryRequest,
+    GetEnrollmentSummaryACK,
+    GetEnrollmentSummaryRequest,
+    GetEventInformationACK,
+    GetEventInformationRequest,
+)
+from bac_py.services.cov import (
+    BACnetPropertyReference,
+    COVNotificationRequest,
+    COVSubscriptionSpecification,
+    SubscribeCOVPropertyMultipleRequest,
+    SubscribeCOVPropertyRequest,
+    SubscribeCOVRequest,
+)
 from bac_py.services.device_mgmt import (
     DeviceCommunicationControlRequest,
     ReinitializeDeviceRequest,
     TimeSynchronizationRequest,
     UTCTimeSynchronizationRequest,
+)
+from bac_py.services.event_notification import (
+    AcknowledgeAlarmRequest,
+    EventNotificationRequest,
 )
 from bac_py.services.file_access import (
     AtomicReadFileACK,
@@ -67,8 +86,11 @@ from bac_py.services.write_property_multiple import (
     WritePropertyMultipleRequest,
 )
 from bac_py.types.enums import (
+    AcknowledgmentFilter,
     ConfirmedServiceChoice,
     EnableDisable,
+    EventState,
+    EventType,
     ObjectType,
     PropertyIdentifier,
     ReinitializedState,
@@ -84,6 +106,7 @@ if TYPE_CHECKING:
     from bac_py.app.application import BACnetApplication
     from bac_py.network.address import BACnetAddress
     from bac_py.transport.bip import BIPTransport
+    from bac_py.types.constructed import BACnetTimeStamp
 
 logger = logging.getLogger(__name__)
 
@@ -1093,6 +1116,91 @@ class BACnetClient:
             timeout=timeout,
         )
 
+    async def subscribe_cov_property(
+        self,
+        address: BACnetAddress,
+        object_identifier: ObjectIdentifier,
+        property_identifier: int,
+        process_id: int,
+        confirmed: bool = True,
+        lifetime: int | None = None,
+        property_array_index: int | None = None,
+        cov_increment: float | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        """Subscribe to property-level COV notifications per Clause 13.15.
+
+        :param address: Target device address.
+        :param object_identifier: Object to monitor.
+        :param property_identifier: Specific property to monitor.
+        :param process_id: Subscriber process identifier (caller-managed).
+        :param confirmed: ``True`` for confirmed notifications, ``False`` for unconfirmed.
+        :param lifetime: Subscription lifetime in seconds, or ``None`` for indefinite.
+        :param property_array_index: Optional array index within the property.
+        :param cov_increment: Optional COV increment override.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
+        """
+        request = SubscribeCOVPropertyRequest(
+            subscriber_process_identifier=process_id,
+            monitored_object_identifier=object_identifier,
+            monitored_property_identifier=BACnetPropertyReference(
+                property_identifier=property_identifier,
+                property_array_index=property_array_index,
+            ),
+            issue_confirmed_notifications=confirmed,
+            lifetime=lifetime,
+            cov_increment=cov_increment,
+        )
+        await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.SUBSCRIBE_COV_PROPERTY,
+            service_data=request.encode(),
+            timeout=timeout,
+        )
+
+    async def subscribe_cov_property_multiple(
+        self,
+        address: BACnetAddress,
+        process_id: int,
+        specifications: list[COVSubscriptionSpecification],
+        confirmed: bool = True,
+        lifetime: int | None = None,
+        max_notification_delay: int | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        """Subscribe to multiple property-level COV notifications per Clause 13.16.
+
+        :param address: Target device address.
+        :param process_id: Subscriber process identifier (caller-managed).
+        :param specifications: List of subscription specifications, each containing
+            a monitored object and its list of COV references.
+        :param confirmed: ``True`` for confirmed notifications.
+        :param lifetime: Subscription lifetime in seconds.
+        :param max_notification_delay: Maximum notification delay in seconds.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
+        """
+        request = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=process_id,
+            list_of_cov_subscription_specifications=specifications,
+            issue_confirmed_notifications=confirmed,
+            lifetime=lifetime,
+            max_notification_delay=max_notification_delay,
+        )
+        await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.SUBSCRIBE_COV_PROPERTY_MULTIPLE,
+            service_data=request.encode(),
+            timeout=timeout,
+        )
+
     # --- Device management ---
 
     async def device_communication_control(
@@ -1663,6 +1771,170 @@ class BACnetClient:
         if result != BvlcResultCode.SUCCESSFUL_COMPLETION:
             msg = f"BBMD rejected Write-BDT: {result.name}"
             raise RuntimeError(msg)
+
+    # --- Alarm and event services ---
+
+    async def acknowledge_alarm(
+        self,
+        address: BACnetAddress,
+        acknowledging_process_identifier: int,
+        event_object_identifier: ObjectIdentifier,
+        event_state_acknowledged: EventState,
+        time_stamp: BACnetTimeStamp,
+        acknowledgment_source: str,
+        time_of_acknowledgment: BACnetTimeStamp,
+        timeout: float | None = None,
+    ) -> None:
+        """Send AcknowledgeAlarm-Request per Clause 13.5.
+
+        :param address: Target device address.
+        :param acknowledging_process_identifier: Process ID of the acknowledger.
+        :param event_object_identifier: Object whose event is being acknowledged.
+        :param event_state_acknowledged: Event state being acknowledged.
+        :param time_stamp: Time stamp of the event being acknowledged.
+        :param acknowledgment_source: Character string identifying the source.
+        :param time_of_acknowledgment: Time stamp of the acknowledgment.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
+        """
+        request = AcknowledgeAlarmRequest(
+            acknowledging_process_identifier=acknowledging_process_identifier,
+            event_object_identifier=event_object_identifier,
+            event_state_acknowledged=event_state_acknowledged,
+            time_stamp=time_stamp,
+            acknowledgment_source=acknowledgment_source,
+            time_of_acknowledgment=time_of_acknowledgment,
+        )
+        await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.ACKNOWLEDGE_ALARM,
+            service_data=request.encode(),
+            timeout=timeout,
+        )
+
+    async def get_alarm_summary(
+        self,
+        address: BACnetAddress,
+        timeout: float | None = None,
+    ) -> GetAlarmSummaryACK:
+        """Send GetAlarmSummary-Request per Clause 13.6.
+
+        :param address: Target device address.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`GetAlarmSummaryACK` with alarm summary entries.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
+        """
+        request = GetAlarmSummaryRequest()
+        response_data = await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.GET_ALARM_SUMMARY,
+            service_data=request.encode(),
+            timeout=timeout,
+        )
+        return GetAlarmSummaryACK.decode(response_data)
+
+    async def get_enrollment_summary(
+        self,
+        address: BACnetAddress,
+        acknowledgment_filter: AcknowledgmentFilter,
+        event_state_filter: EventState | None = None,
+        event_type_filter: EventType | None = None,
+        priority_min: int | None = None,
+        priority_max: int | None = None,
+        notification_class_filter: int | None = None,
+        timeout: float | None = None,
+    ) -> GetEnrollmentSummaryACK:
+        """Send GetEnrollmentSummary-Request per Clause 13.7.
+
+        :param address: Target device address.
+        :param acknowledgment_filter: Filter by acknowledgment state.
+        :param event_state_filter: Optional filter by event state.
+        :param event_type_filter: Optional filter by event type.
+        :param priority_min: Optional minimum priority (0--255).
+        :param priority_max: Optional maximum priority (0--255).
+        :param notification_class_filter: Optional notification class filter.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`GetEnrollmentSummaryACK` with enrollment summaries.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
+        """
+        request = GetEnrollmentSummaryRequest(
+            acknowledgment_filter=acknowledgment_filter,
+            event_state_filter=event_state_filter,
+            event_type_filter=event_type_filter,
+            priority_min=priority_min,
+            priority_max=priority_max,
+            notification_class_filter=notification_class_filter,
+        )
+        response_data = await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.GET_ENROLLMENT_SUMMARY,
+            service_data=request.encode(),
+            timeout=timeout,
+        )
+        return GetEnrollmentSummaryACK.decode(response_data)
+
+    async def get_event_information(
+        self,
+        address: BACnetAddress,
+        last_received_object_identifier: ObjectIdentifier | None = None,
+        timeout: float | None = None,
+    ) -> GetEventInformationACK:
+        """Send GetEventInformation-Request per Clause 13.12.
+
+        :param address: Target device address.
+        :param last_received_object_identifier: Optional object identifier for
+            pagination. Pass the last object identifier from a previous
+            response to continue fetching when ``more_events`` is ``True``.
+        :param timeout: Optional caller-level timeout in seconds.
+        :returns: Decoded :class:`GetEventInformationACK` with event summaries.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
+        """
+        request = GetEventInformationRequest(
+            last_received_object_identifier=last_received_object_identifier,
+        )
+        response_data = await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.GET_EVENT_INFORMATION,
+            service_data=request.encode(),
+            timeout=timeout,
+        )
+        return GetEventInformationACK.decode(response_data)
+
+    async def confirmed_event_notification(
+        self,
+        address: BACnetAddress,
+        notification: EventNotificationRequest,
+        timeout: float | None = None,
+    ) -> None:
+        """Send ConfirmedEventNotification-Request per Clause 13.8.
+
+        :param address: Target device address.
+        :param notification: Pre-built :class:`EventNotificationRequest` with
+            all event notification parameters.
+        :param timeout: Optional caller-level timeout in seconds.
+        :raises BACnetError: On Error-PDU response.
+        :raises BACnetRejectError: On Reject-PDU response.
+        :raises BACnetAbortError: On Abort-PDU response.
+        :raises BACnetTimeoutError: On timeout after all retries.
+        """
+        await self._app.confirmed_request(
+            destination=address,
+            service_choice=ConfirmedServiceChoice.CONFIRMED_EVENT_NOTIFICATION,
+            service_data=notification.encode(),
+            timeout=timeout,
+        )
 
     async def delete_fdt_entry(
         self,

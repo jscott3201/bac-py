@@ -30,7 +30,11 @@ if TYPE_CHECKING:
     from bac_py.app.application import BACnetApplication
     from bac_py.network.address import BACnetAddress
     from bac_py.objects.base import BACnetObject, ObjectDatabase
-    from bac_py.services.cov import SubscribeCOVRequest
+    from bac_py.services.cov import (
+        SubscribeCOVPropertyMultipleRequest,
+        SubscribeCOVPropertyRequest,
+        SubscribeCOVRequest,
+    )
     from bac_py.types.primitives import ObjectIdentifier
 
 logger = logging.getLogger(__name__)
@@ -68,6 +72,44 @@ class COVSubscription:
     """Last notified Status_Flags, used for change detection."""
 
 
+@dataclass
+class PropertySubscription:
+    """Tracks a single property-level COV subscription (Clause 13.15/13.16)."""
+
+    subscriber: BACnetAddress
+    """BACnet address of the subscribing device."""
+
+    process_id: int
+    """Subscriber-assigned process identifier."""
+
+    monitored_object: ObjectIdentifier
+    """Object identifier being monitored."""
+
+    monitored_property: int  # PropertyIdentifier value
+    """Property identifier being monitored."""
+
+    property_array_index: int | None
+    """Optional array index within the monitored property."""
+
+    confirmed: bool
+    """``True`` for confirmed notifications, ``False`` for unconfirmed."""
+
+    lifetime: float | None
+    """Subscription duration in seconds, or ``None`` for indefinite."""
+
+    cov_increment: float | None
+    """Subscription-specific COV increment override, or ``None``."""
+
+    created_at: float = field(default_factory=time.monotonic)
+    """Monotonic timestamp when the subscription was created."""
+
+    last_value: Any = None
+    """Last notified value for the monitored property."""
+
+    expiry_handle: asyncio.TimerHandle | None = None
+    """Timer handle for subscription expiry, if any."""
+
+
 class COVManager:
     """Manages COV subscriptions and notification dispatch.
 
@@ -82,6 +124,11 @@ class COVManager:
         self._subscriptions: dict[
             tuple[Any, int, Any],  # (subscriber, process_id, object_id)
             COVSubscription,
+        ] = {}
+        self._property_subscriptions: dict[
+            tuple[Any, int, Any, int, int | None],
+            # (subscriber, process_id, object_id, property_id, array_index)
+            PropertySubscription,
         ] = {}
 
     def subscribe(
@@ -175,6 +222,9 @@ class COVManager:
                 sub.last_present_value = self._read_present_value(obj)
                 sub.last_status_flags = self._read_status_flags(obj)
 
+        # Also check property-level subscriptions
+        self.check_and_notify_property(obj, changed_property)
+
     def get_active_subscriptions(
         self,
         object_id: ObjectIdentifier | None = None,
@@ -191,6 +241,11 @@ class COVManager:
                 sub.expiry_handle.cancel()
         self._subscriptions.clear()
 
+        for prop_sub in self._property_subscriptions.values():
+            if prop_sub.expiry_handle:
+                prop_sub.expiry_handle.cancel()
+        self._property_subscriptions.clear()
+
     def remove_object_subscriptions(self, object_id: ObjectIdentifier) -> None:
         """Remove all subscriptions for a deleted object.
 
@@ -204,6 +259,345 @@ class COVManager:
             sub = self._subscriptions.pop(key)
             if sub.expiry_handle:
                 sub.expiry_handle.cancel()
+
+        prop_keys_to_remove = [
+            pkey
+            for pkey, psub in self._property_subscriptions.items()
+            if psub.monitored_object == object_id
+        ]
+        for pkey in prop_keys_to_remove:
+            psub = self._property_subscriptions.pop(pkey)
+            if psub.expiry_handle:
+                psub.expiry_handle.cancel()
+
+    def subscribe_property(
+        self,
+        subscriber: BACnetAddress,
+        request: SubscribeCOVPropertyRequest,
+        object_db: ObjectDatabase,
+    ) -> None:
+        """Add or update a property-level COV subscription (Clause 13.15).
+
+        :param subscriber: Address of the subscribing device.
+        :param request: The decoded SubscribeCOVProperty-Request.
+        :param object_db: Object database to validate the object exists.
+        :raises BACnetError: If the monitored object does not exist.
+        """
+        obj_id = request.monitored_object_identifier
+        obj = object_db.get(obj_id)
+        if obj is None:
+            raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
+
+        prop_ref = request.monitored_property_identifier
+        prop_id = prop_ref.property_identifier
+        array_index = prop_ref.property_array_index
+
+        key: tuple[Any, int, Any, int, int | None] = (
+            subscriber,
+            request.subscriber_process_identifier,
+            obj_id,
+            prop_id,
+            array_index,
+        )
+
+        # Cancel existing subscription timer if replacing
+        existing = self._property_subscriptions.get(key)
+        if existing and existing.expiry_handle:
+            existing.expiry_handle.cancel()
+
+        # Capture initial value of the specific property
+        initial_value = self._read_property_value(obj, prop_id, array_index)
+
+        confirmed = request.issue_confirmed_notifications or False
+        lifetime = request.lifetime
+
+        sub = PropertySubscription(
+            subscriber=subscriber,
+            process_id=request.subscriber_process_identifier,
+            monitored_object=obj_id,
+            monitored_property=prop_id,
+            property_array_index=array_index,
+            confirmed=confirmed,
+            lifetime=float(lifetime) if lifetime is not None else None,
+            cov_increment=request.cov_increment,
+            last_value=initial_value,
+        )
+        self._property_subscriptions[key] = sub
+
+        # Start lifetime timer if applicable
+        if lifetime is not None and lifetime > 0:
+            loop = asyncio.get_running_loop()
+            sub.expiry_handle = loop.call_later(
+                float(lifetime), self._on_property_subscription_expired, key
+            )
+
+        # Send initial notification with current values
+        self._send_property_notification(sub, obj)
+
+    def subscribe_property_multiple(
+        self,
+        subscriber: BACnetAddress,
+        request: SubscribeCOVPropertyMultipleRequest,
+        object_db: ObjectDatabase,
+    ) -> None:
+        """Add or update multiple property-level COV subscriptions (Clause 13.16).
+
+        :param subscriber: Address of the subscribing device.
+        :param request: The decoded SubscribeCOVPropertyMultiple-Request.
+        :param object_db: Object database to validate objects exist.
+        :raises BACnetError: If any monitored object does not exist.
+        """
+        confirmed = request.issue_confirmed_notifications or False
+        lifetime = request.lifetime
+
+        for spec in request.list_of_cov_subscription_specifications:
+            obj_id = spec.monitored_object_identifier
+            obj = object_db.get(obj_id)
+            if obj is None:
+                raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
+
+            for ref in spec.list_of_cov_references:
+                prop_id = ref.monitored_property.property_identifier
+                array_index = ref.monitored_property.property_array_index
+
+                key: tuple[Any, int, Any, int, int | None] = (
+                    subscriber,
+                    request.subscriber_process_identifier,
+                    obj_id,
+                    prop_id,
+                    array_index,
+                )
+
+                # Cancel existing subscription timer if replacing
+                existing = self._property_subscriptions.get(key)
+                if existing and existing.expiry_handle:
+                    existing.expiry_handle.cancel()
+
+                # Capture initial value of the specific property
+                initial_value = self._read_property_value(obj, prop_id, array_index)
+
+                sub = PropertySubscription(
+                    subscriber=subscriber,
+                    process_id=request.subscriber_process_identifier,
+                    monitored_object=obj_id,
+                    monitored_property=prop_id,
+                    property_array_index=array_index,
+                    confirmed=confirmed,
+                    lifetime=float(lifetime) if lifetime is not None else None,
+                    cov_increment=ref.cov_increment,
+                    last_value=initial_value,
+                )
+                self._property_subscriptions[key] = sub
+
+                # Start lifetime timer if applicable
+                if lifetime is not None and lifetime > 0:
+                    loop = asyncio.get_running_loop()
+                    sub.expiry_handle = loop.call_later(
+                        float(lifetime), self._on_property_subscription_expired, key
+                    )
+
+                # Send initial notification with current values
+                self._send_property_notification(sub, obj)
+
+    def unsubscribe_property(
+        self,
+        subscriber: BACnetAddress,
+        process_id: int,
+        obj_id: ObjectIdentifier,
+        property_id: int,
+        array_index: int | None = None,
+    ) -> None:
+        """Remove a property-level subscription (cancellation).
+
+        Silently ignores if no matching subscription exists.
+
+        :param subscriber: Address of the subscribing device.
+        :param process_id: Subscriber-assigned process identifier.
+        :param obj_id: Object identifier being monitored.
+        :param property_id: Property identifier value being monitored.
+        :param array_index: Optional array index within the property.
+        """
+        key: tuple[Any, int, Any, int, int | None] = (
+            subscriber,
+            process_id,
+            obj_id,
+            property_id,
+            array_index,
+        )
+        sub = self._property_subscriptions.pop(key, None)
+        if sub and sub.expiry_handle:
+            sub.expiry_handle.cancel()
+
+    def check_and_notify_property(
+        self,
+        obj: BACnetObject,
+        changed_property: PropertyIdentifier,
+    ) -> None:
+        """Check property-level subscriptions and send notifications if needed.
+
+        For all property subscriptions matching this object and the changed
+        property, check if the value changed enough to trigger a notification.
+        For analog types, a subscription-specific ``cov_increment`` overrides
+        the object's COV_INCREMENT. For non-analog types, any change triggers
+        a notification.
+
+        :param obj: The object whose property was changed.
+        :param changed_property: The property that was written.
+        """
+        obj_id = obj.object_identifier
+        changed_prop_int = int(changed_property)
+
+        for _key, sub in list(self._property_subscriptions.items()):
+            if sub.monitored_object != obj_id:
+                continue
+            if sub.monitored_property != changed_prop_int:
+                continue
+
+            current_value = self._read_property_value(
+                obj, sub.monitored_property, sub.property_array_index
+            )
+
+            if self._should_notify_property(sub, obj, current_value):
+                self._send_property_notification(sub, obj)
+                sub.last_value = current_value
+
+    def _should_notify_property(
+        self,
+        sub: PropertySubscription,
+        obj: BACnetObject,
+        current_value: Any,
+    ) -> bool:
+        """Determine if a property-level notification should be sent.
+
+        :param sub: The property subscription to evaluate.
+        :param obj: The monitored object.
+        :param current_value: The current value of the monitored property.
+        :returns: ``True`` if a notification should be sent.
+        """
+        if current_value == sub.last_value:
+            return False
+
+        obj_type = obj.object_identifier.object_type
+        if obj_type in ANALOG_TYPES:
+            # Use subscription-specific cov_increment if available,
+            # otherwise fall back to the object's COV_INCREMENT
+            cov_increment = sub.cov_increment
+            if cov_increment is None:
+                cov_increment = self._read_cov_increment(obj)
+
+            if cov_increment is not None and cov_increment > 0:
+                if sub.last_value is None:
+                    return True
+                if isinstance(current_value, (int, float)) and isinstance(
+                    sub.last_value, (int, float)
+                ):
+                    return abs(current_value - sub.last_value) >= cov_increment
+            # No COV_INCREMENT or zero: any change triggers
+            return True
+
+        # Non-analog: any change triggers notification
+        return True
+
+    def _send_property_notification(
+        self,
+        sub: PropertySubscription,
+        obj: BACnetObject,
+    ) -> None:
+        """Send a COV notification for a property-level subscription.
+
+        Builds a standard COVNotificationRequest with the monitored property's
+        value and Status_Flags in ``list_of_values``, then sends via the
+        application layer.
+
+        :param sub: The property subscription triggering the notification.
+        :param obj: The monitored object.
+        """
+        prop_value = self._read_property_value(
+            obj, sub.monitored_property, sub.property_array_index
+        )
+        status_flags = self._read_status_flags(obj)
+
+        prop_bytes = self._encode_value(prop_value, obj.object_identifier.object_type)
+        sf_bytes = self._encode_status_flags(status_flags)
+
+        list_of_values = [
+            BACnetPropertyValue(
+                property_identifier=PropertyIdentifier(sub.monitored_property),
+                property_array_index=sub.property_array_index,
+                value=prop_bytes,
+            ),
+            BACnetPropertyValue(
+                property_identifier=PropertyIdentifier.STATUS_FLAGS,
+                value=sf_bytes,
+            ),
+        ]
+
+        # Compute time_remaining
+        time_remaining = 0
+        if sub.lifetime is not None:
+            elapsed = time.monotonic() - sub.created_at
+            remaining = max(0, sub.lifetime - elapsed)
+            time_remaining = int(remaining)
+
+        device_id = self._app.device_object_identifier
+
+        notification = COVNotificationRequest(
+            subscriber_process_identifier=sub.process_id,
+            initiating_device_identifier=device_id,
+            monitored_object_identifier=sub.monitored_object,
+            time_remaining=time_remaining,
+            list_of_values=list_of_values,
+        )
+
+        encoded = notification.encode()
+
+        if sub.confirmed:
+            self._app.send_confirmed_cov_notification(
+                encoded, sub.subscriber, ConfirmedServiceChoice.CONFIRMED_COV_NOTIFICATION
+            )
+        else:
+            self._app.unconfirmed_request(
+                destination=sub.subscriber,
+                service_choice=UnconfirmedServiceChoice.UNCONFIRMED_COV_NOTIFICATION,
+                service_data=encoded,
+            )
+
+    def _on_property_subscription_expired(
+        self,
+        key: tuple[Any, int, Any, int, int | None],
+    ) -> None:
+        """Remove an expired property subscription.
+
+        :param key: The subscription key to remove.
+        """
+        sub = self._property_subscriptions.pop(key, None)
+        if sub:
+            logger.debug(
+                "Property COV subscription expired: process_id=%d, object=%s, property=%d",
+                sub.process_id,
+                sub.monitored_object,
+                sub.monitored_property,
+            )
+
+    @staticmethod
+    def _read_property_value(
+        obj: BACnetObject,
+        property_id: int,
+        array_index: int | None = None,
+    ) -> Any:
+        """Read a specific property value, returning None if not available.
+
+        :param obj: The object to read from.
+        :param property_id: The property identifier value.
+        :param array_index: Optional array index.
+        :returns: The property value, or ``None`` if unavailable.
+        """
+        try:
+            return obj.read_property(
+                PropertyIdentifier(property_id), array_index=array_index
+            )
+        except (BACnetError, ValueError):
+            return None
 
     def _should_notify(
         self,

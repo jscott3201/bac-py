@@ -19,6 +19,7 @@ from bac_py.types.enums import (
     EngineeringUnits,
     ErrorClass,
     ErrorCode,
+    EventType,
     ObjectType,
     PropertyIdentifier,
 )
@@ -63,6 +64,7 @@ class AnalogInputObject(_AnalogBase):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.ANALOG_INPUT
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.OUT_OF_RANGE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),
@@ -134,6 +136,7 @@ class AnalogOutputObject(_AnalogBase):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.ANALOG_OUTPUT
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.OUT_OF_RANGE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),
@@ -202,6 +205,7 @@ class AnalogValueObject(_AnalogBase):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.ANALOG_VALUE
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.OUT_OF_RANGE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),

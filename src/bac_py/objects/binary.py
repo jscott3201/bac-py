@@ -16,6 +16,7 @@ from bac_py.objects.base import (
 )
 from bac_py.types.enums import (
     BinaryPV,
+    EventType,
     ObjectType,
     Polarity,
     PropertyIdentifier,
@@ -52,6 +53,7 @@ class BinaryInputObject(_BinaryPolarityMixin, BACnetObject):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.BINARY_INPUT
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.CHANGE_OF_STATE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),
@@ -111,6 +113,7 @@ class BinaryOutputObject(_BinaryPolarityMixin, BACnetObject):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.BINARY_OUTPUT
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.CHANGE_OF_STATE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),
@@ -185,6 +188,7 @@ class BinaryValueObject(BACnetObject):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.BINARY_VALUE
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.CHANGE_OF_STATE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),

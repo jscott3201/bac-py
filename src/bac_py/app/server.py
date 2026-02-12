@@ -19,7 +19,23 @@ from bac_py.encoding.primitives import (
 from bac_py.network.address import GLOBAL_BROADCAST
 from bac_py.objects.base import _OBJECT_REGISTRY, create_object
 from bac_py.objects.file import FileObject
-from bac_py.services.cov import SubscribeCOVRequest
+from bac_py.services.alarm_summary import (
+    AlarmSummary,
+    EnrollmentSummary,
+    EventSummary,
+    GetAlarmSummaryACK,
+    GetAlarmSummaryRequest,
+    GetEnrollmentSummaryACK,
+    GetEnrollmentSummaryRequest,
+    GetEventInformationACK,
+    GetEventInformationRequest,
+)
+from bac_py.services.cov import (
+    COVNotificationMultipleRequest,
+    SubscribeCOVPropertyMultipleRequest,
+    SubscribeCOVPropertyRequest,
+    SubscribeCOVRequest,
+)
 from bac_py.services.device_mgmt import (
     DeviceCommunicationControlRequest,
     ReinitializeDeviceRequest,
@@ -27,6 +43,10 @@ from bac_py.services.device_mgmt import (
     UTCTimeSynchronizationRequest,
 )
 from bac_py.services.errors import BACnetError, BACnetRejectError
+from bac_py.services.event_notification import (
+    AcknowledgeAlarmRequest,
+    EventNotificationRequest,
+)
 from bac_py.services.file_access import (
     AtomicReadFileACK,
     AtomicReadFileRequest,
@@ -57,10 +77,15 @@ from bac_py.services.who_has import IHaveRequest, WhoHasRequest
 from bac_py.services.who_is import IAmRequest, WhoIsRequest
 from bac_py.services.write_property import WritePropertyRequest
 from bac_py.services.write_property_multiple import WritePropertyMultipleRequest
+from bac_py.types.constructed import BACnetTimeStamp
 from bac_py.types.enums import (
+    AcknowledgmentFilter,
     ConfirmedServiceChoice,
     ErrorClass,
     ErrorCode,
+    EventState,
+    EventType,
+    NotifyType,
     ObjectType,
     PropertyIdentifier,
     RejectReason,
@@ -215,6 +240,46 @@ class DefaultServerHandlers:
             UnconfirmedServiceChoice.UTC_TIME_SYNCHRONIZATION,
             self.handle_utc_time_synchronization,
         )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.ACKNOWLEDGE_ALARM,
+            self.handle_acknowledge_alarm,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.CONFIRMED_EVENT_NOTIFICATION,
+            self.handle_confirmed_event_notification,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.GET_ALARM_SUMMARY,
+            self.handle_get_alarm_summary,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.GET_ENROLLMENT_SUMMARY,
+            self.handle_get_enrollment_summary,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.GET_EVENT_INFORMATION,
+            self.handle_get_event_information,
+        )
+        registry.register_unconfirmed(
+            UnconfirmedServiceChoice.UNCONFIRMED_EVENT_NOTIFICATION,
+            self.handle_unconfirmed_event_notification,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.SUBSCRIBE_COV_PROPERTY,
+            self.handle_subscribe_cov_property,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.SUBSCRIBE_COV_PROPERTY_MULTIPLE,
+            self.handle_subscribe_cov_property_multiple,
+        )
+        registry.register_confirmed(
+            ConfirmedServiceChoice.CONFIRMED_COV_NOTIFICATION_MULTIPLE,
+            self.handle_confirmed_cov_notification_multiple,
+        )
+        registry.register_unconfirmed(
+            UnconfirmedServiceChoice.UNCONFIRMED_COV_NOTIFICATION_MULTIPLE,
+            self.handle_unconfirmed_cov_notification_multiple,
+        )
 
         # Auto-compute Protocol_Services_Supported from registered handlers
         # Per Clause 12.11.44: confirmed services at bit positions matching
@@ -356,6 +421,67 @@ class DefaultServerHandlers:
             cov_manager.subscribe(source, request, self._db)
 
         return None  # SimpleACK
+
+    async def handle_subscribe_cov_property(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle SubscribeCOVProperty-Request per Clause 13.15."""
+        request = SubscribeCOVPropertyRequest.decode(data)
+        obj_id = self._resolve_object_id(request.monitored_object_identifier)
+        obj = self._db.get(obj_id)
+        if obj is None:
+            raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
+        cov_manager = self._app.cov_manager
+        if cov_manager is None:
+            raise BACnetError(ErrorClass.SERVICES, ErrorCode.SERVICE_REQUEST_DENIED)
+        cov_manager.subscribe_property(source, request, self._db)
+        return None  # SimpleACK
+
+    async def handle_subscribe_cov_property_multiple(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle SubscribeCOVPropertyMultiple-Request per Clause 13.16."""
+        request = SubscribeCOVPropertyMultipleRequest.decode(data)
+        cov_manager = self._app.cov_manager
+        if cov_manager is None:
+            raise BACnetError(ErrorClass.SERVICES, ErrorCode.SERVICE_REQUEST_DENIED)
+        cov_manager.subscribe_property_multiple(source, request, self._db)
+        return None  # SimpleACK
+
+    async def handle_confirmed_cov_notification_multiple(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle ConfirmedCOVNotification-Multiple per Clause 13.17."""
+        request = COVNotificationMultipleRequest.decode(data)
+        logger.debug(
+            "ConfirmedCOVNotification-Multiple from %s: %d notifications",
+            source,
+            len(request.list_of_cov_notifications),
+        )
+        return None  # SimpleACK
+
+    async def handle_unconfirmed_cov_notification_multiple(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Handle UnconfirmedCOVNotification-Multiple per Clause 13.18."""
+        request = COVNotificationMultipleRequest.decode(data)
+        logger.debug(
+            "UnconfirmedCOVNotification-Multiple from %s: %d notifications",
+            source,
+            len(request.list_of_cov_notifications),
+        )
 
     async def handle_who_is(
         self,
@@ -982,6 +1108,307 @@ class DefaultServerHandlers:
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
 
         raise BACnetError(ErrorClass.SERVICES, ErrorCode.OPTIONAL_FUNCTIONALITY_NOT_SUPPORTED)
+
+    # --- Alarm / event handlers ---
+
+    async def handle_acknowledge_alarm(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle AcknowledgeAlarm-Request per Clause 13.5.
+
+        Updates the acked_transitions property on the target object
+        to mark the appropriate transition as acknowledged.
+
+        :returns: ``None`` (SimpleACK response).
+        :raises BACnetError: If the target object does not exist.
+        """
+        request = AcknowledgeAlarmRequest.decode(data)
+
+        obj = self._db.get(request.event_object_identifier)
+        if obj is None:
+            raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
+
+        acked_transitions = obj._properties.get(PropertyIdentifier.ACKED_TRANSITIONS)
+        if isinstance(acked_transitions, list) and len(acked_transitions) >= 3:
+            if request.event_state_acknowledged == EventState.FAULT:
+                idx = 1
+            elif request.event_state_acknowledged == EventState.NORMAL:
+                idx = 2
+            else:
+                idx = 0
+            acked_transitions[idx] = True
+
+        return None
+
+    async def handle_confirmed_event_notification(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes | None:
+        """Handle ConfirmedEventNotification-Request per Clause 13.8.
+
+        Logs the notification at debug level.
+
+        :returns: ``None`` (SimpleACK response).
+        """
+        request = EventNotificationRequest.decode(data)
+        logger.debug(
+            "ConfirmedEventNotification from %s: object=%s, toState=%s",
+            source,
+            request.event_object_identifier,
+            request.to_state,
+        )
+        return None
+
+    async def handle_unconfirmed_event_notification(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Handle UnconfirmedEventNotification-Request per Clause 13.9.
+
+        Logs the notification at debug level.
+        """
+        request = EventNotificationRequest.decode(data)
+        logger.debug(
+            "UnconfirmedEventNotification from %s: object=%s, toState=%s",
+            source,
+            request.event_object_identifier,
+            request.to_state,
+        )
+
+    async def handle_get_alarm_summary(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes:
+        """Handle GetAlarmSummary-Request per Clause 13.6.
+
+        Scans all objects in the database for those in an alarm
+        (non-NORMAL) event state and returns their summaries.
+
+        :returns: Encoded GetAlarmSummary-ACK service data.
+        """
+        GetAlarmSummaryRequest.decode(data)
+
+        summaries: list[AlarmSummary] = []
+        for obj in self._db.values():
+            event_state_val = obj._properties.get(PropertyIdentifier.EVENT_STATE)
+            if event_state_val is None:
+                continue
+            if not isinstance(event_state_val, EventState):
+                try:
+                    event_state_val = EventState(event_state_val)
+                except (ValueError, TypeError):
+                    continue
+            if event_state_val == EventState.NORMAL:
+                continue
+
+            acked_raw = obj._properties.get(PropertyIdentifier.ACKED_TRANSITIONS)
+            if isinstance(acked_raw, list) and len(acked_raw) >= 3:
+                b0 = bool(acked_raw[0])
+                b1 = bool(acked_raw[1])
+                b2 = bool(acked_raw[2])
+                acked_bits = BitString(
+                    bytes([(int(b0) << 7) | (int(b1) << 6) | (int(b2) << 5)]),
+                    5,
+                )
+            elif isinstance(acked_raw, BitString):
+                acked_bits = acked_raw
+            else:
+                acked_bits = BitString(b"\xe0", 5)
+
+            summaries.append(
+                AlarmSummary(
+                    object_identifier=obj.object_identifier,
+                    alarm_state=event_state_val,
+                    acknowledged_transitions=acked_bits,
+                )
+            )
+
+        return GetAlarmSummaryACK(list_of_alarm_summaries=summaries).encode()
+
+    async def handle_get_enrollment_summary(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes:
+        """Handle GetEnrollmentSummary-Request per Clause 13.7.
+
+        Iterates EventEnrollment objects, applies the request filters,
+        and returns matching enrollment summaries.
+
+        :returns: Encoded GetEnrollmentSummary-ACK service data.
+        """
+        request = GetEnrollmentSummaryRequest.decode(data)
+
+        summaries: list[EnrollmentSummary] = []
+        for obj in self._db.get_objects_of_type(ObjectType.EVENT_ENROLLMENT):
+            event_type_val = obj._properties.get(PropertyIdentifier.EVENT_TYPE)
+            if event_type_val is not None and not isinstance(event_type_val, EventType):
+                try:
+                    event_type_val = EventType(event_type_val)
+                except (ValueError, TypeError):
+                    continue
+            if event_type_val is None:
+                event_type_val = EventType.CHANGE_OF_VALUE
+
+            event_state_val = obj._properties.get(PropertyIdentifier.EVENT_STATE)
+            if event_state_val is not None and not isinstance(event_state_val, EventState):
+                try:
+                    event_state_val = EventState(event_state_val)
+                except (ValueError, TypeError):
+                    continue
+            if event_state_val is None:
+                event_state_val = EventState.NORMAL
+
+            notification_class: int = obj._properties.get(
+                PropertyIdentifier.NOTIFICATION_CLASS, 0
+            )
+
+            # Apply request filters
+            if request.event_state_filter is not None and event_state_val != request.event_state_filter:
+                continue
+            if request.event_type_filter is not None and event_type_val != request.event_type_filter:
+                continue
+            if request.notification_class_filter is not None and notification_class != request.notification_class_filter:
+                continue
+
+            # Acknowledgment filter
+            if request.acknowledgment_filter == AcknowledgmentFilter.ACKED:
+                acked_raw = obj._properties.get(PropertyIdentifier.ACKED_TRANSITIONS)
+                if isinstance(acked_raw, list) and len(acked_raw) >= 3 and not all(acked_raw):
+                    continue
+            elif request.acknowledgment_filter == AcknowledgmentFilter.NOT_ACKED:
+                acked_raw = obj._properties.get(PropertyIdentifier.ACKED_TRANSITIONS)
+                if isinstance(acked_raw, list) and len(acked_raw) >= 3 and all(acked_raw):
+                    continue
+
+            summaries.append(
+                EnrollmentSummary(
+                    object_identifier=obj.object_identifier,
+                    event_type=event_type_val,
+                    event_state=event_state_val,
+                    priority=0,
+                    notification_class=notification_class,
+                )
+            )
+
+        return GetEnrollmentSummaryACK(
+            list_of_enrollment_summaries=summaries,
+        ).encode()
+
+    async def handle_get_event_information(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> bytes:
+        """Handle GetEventInformation-Request per Clause 13.12.
+
+        Iterates all objects in the database for those in an alarm
+        (non-NORMAL) event state and returns event summaries with
+        pagination support.
+
+        :returns: Encoded GetEventInformation-ACK service data.
+        """
+        request = GetEventInformationRequest.decode(data)
+
+        default_timestamps = (
+            BACnetTimeStamp(choice=1, value=0),
+            BACnetTimeStamp(choice=1, value=0),
+            BACnetTimeStamp(choice=1, value=0),
+        )
+        default_enable = BitString(b"\xe0", 5)
+        default_acked = BitString(b"\xe0", 5)
+
+        # If a last_received_object_identifier is specified, skip
+        # objects until we pass it.
+        skip = request.last_received_object_identifier is not None
+        summaries: list[EventSummary] = []
+        for obj in self._db.values():
+            if skip:
+                if obj.object_identifier == request.last_received_object_identifier:
+                    skip = False
+                continue
+
+            event_state_val = obj._properties.get(PropertyIdentifier.EVENT_STATE)
+            if event_state_val is None:
+                continue
+            if not isinstance(event_state_val, EventState):
+                try:
+                    event_state_val = EventState(event_state_val)
+                except (ValueError, TypeError):
+                    continue
+            if event_state_val == EventState.NORMAL:
+                continue
+
+            # Event time stamps
+            ts_raw = obj._properties.get(PropertyIdentifier.EVENT_TIME_STAMPS)
+            if (
+                isinstance(ts_raw, (list, tuple))
+                and len(ts_raw) >= 3
+                and all(isinstance(t, BACnetTimeStamp) for t in ts_raw[:3])
+            ):
+                event_time_stamps = (ts_raw[0], ts_raw[1], ts_raw[2])
+            else:
+                event_time_stamps = default_timestamps
+
+            # Event enable
+            event_enable_raw = obj._properties.get(PropertyIdentifier.EVENT_ENABLE)
+            if isinstance(event_enable_raw, BitString):
+                event_enable = event_enable_raw
+            else:
+                event_enable = default_enable
+
+            # Notify type
+            notify_type_raw = obj._properties.get(PropertyIdentifier.NOTIFY_TYPE)
+            if isinstance(notify_type_raw, NotifyType):
+                notify_type = notify_type_raw
+            else:
+                notify_type = NotifyType.ALARM
+
+            # Acknowledged transitions
+            acked_raw = obj._properties.get(PropertyIdentifier.ACKED_TRANSITIONS)
+            if isinstance(acked_raw, BitString):
+                acked_transitions = acked_raw
+            elif isinstance(acked_raw, list) and len(acked_raw) >= 3:
+                b0 = bool(acked_raw[0])
+                b1 = bool(acked_raw[1])
+                b2 = bool(acked_raw[2])
+                acked_transitions = BitString(
+                    bytes([(int(b0) << 7) | (int(b1) << 6) | (int(b2) << 5)]),
+                    5,
+                )
+            else:
+                acked_transitions = default_acked
+
+            # Event priorities default to (0, 0, 0)
+            event_priorities = (0, 0, 0)
+
+            summaries.append(
+                EventSummary(
+                    object_identifier=obj.object_identifier,
+                    event_state=event_state_val,
+                    acknowledged_transitions=acked_transitions,
+                    event_time_stamps=event_time_stamps,
+                    notify_type=notify_type,
+                    event_enable=event_enable,
+                    event_priorities=event_priorities,
+                )
+            )
+
+        return GetEventInformationACK(
+            list_of_event_summaries=summaries,
+            more_events=False,
+        ).encode()
 
     # --- Discovery handlers ---
 

@@ -17,6 +17,7 @@ from bac_py.types.enums import (
     ErrorClass,
     ErrorCode,
     EventState,
+    EventType,
     NotifyType,
     ObjectType,
     PropertyIdentifier,
@@ -286,6 +287,8 @@ class BACnetObject:
 
     OBJECT_TYPE: ClassVar[ObjectType]
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]]
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = None
+    """Event algorithm for intrinsic reporting, or ``None`` if not supported."""
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         """Initialize a BACnet object with default and overridden properties.

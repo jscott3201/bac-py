@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from bac_py.app.cov import COVManager
+from bac_py.app.event_engine import EventEngine
 from bac_py.app.tsm import ClientTSM, ServerTSM
 from bac_py.encoding.apdu import (
     AbortPDU,
@@ -185,6 +186,7 @@ class BACnetApplication:
         self._unconfirmed_listeners: dict[int, list[Callable[..., Any]]] = {}
         self._background_tasks: set[asyncio.Task[None]] = set()
         self._cov_manager: COVManager | None = None
+        self._event_engine: EventEngine | None = None
         self._cov_callbacks: dict[int, Callable[..., Any]] = {}
         self._dcc_state: EnableDisable = EnableDisable.ENABLE
         self._dcc_timer: asyncio.TimerHandle | None = None
@@ -208,6 +210,11 @@ class BACnetApplication:
     def cov_manager(self) -> COVManager | None:
         """The COV subscription manager, or None if not started."""
         return self._cov_manager
+
+    @property
+    def event_engine(self) -> EventEngine | None:
+        """The event/alarm evaluation engine, or None if not started."""
+        return self._event_engine
 
     @property
     def dcc_state(self) -> EnableDisable:
@@ -293,6 +300,10 @@ class BACnetApplication:
             self._handle_unconfirmed_cov_notification,
         )
 
+        # Initialize event engine and start evaluation loop
+        self._event_engine = EventEngine(self)
+        await self._event_engine.start()
+
         # Broadcast I-Am on startup per Clause 12.11.13
         self._broadcast_i_am()
 
@@ -344,6 +355,11 @@ class BACnetApplication:
         if self._stopped:
             return
         self._stopped = True
+
+        # Shutdown event engine
+        if self._event_engine:
+            await self._event_engine.stop()
+            self._event_engine = None
 
         # Shutdown COV manager (cancel subscription timers)
         if self._cov_manager:

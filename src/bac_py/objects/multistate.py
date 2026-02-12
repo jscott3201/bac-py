@@ -18,6 +18,7 @@ from bac_py.services.errors import BACnetError
 from bac_py.types.enums import (
     ErrorClass,
     ErrorCode,
+    EventType,
     ObjectType,
     PropertyIdentifier,
 )
@@ -56,6 +57,7 @@ class MultiStateInputObject(_MultiStateBase):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.MULTI_STATE_INPUT
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.CHANGE_OF_STATE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),
@@ -122,6 +124,7 @@ class MultiStateOutputObject(_MultiStateBase):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.MULTI_STATE_OUTPUT
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.CHANGE_OF_STATE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),
@@ -179,6 +182,7 @@ class MultiStateValueObject(_MultiStateBase):
     """
 
     OBJECT_TYPE: ClassVar[ObjectType] = ObjectType.MULTI_STATE_VALUE
+    INTRINSIC_EVENT_ALGORITHM: ClassVar[EventType | None] = EventType.CHANGE_OF_STATE
 
     PROPERTY_DEFINITIONS: ClassVar[dict[PropertyIdentifier, PropertyDefinition]] = {
         **standard_properties(),

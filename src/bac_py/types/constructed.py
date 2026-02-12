@@ -1,4 +1,4 @@
-"""BACnet constructed data types per ASHRAE 135-2016."""
+"""BACnet constructed data types per ASHRAE 135-2020."""
 
 from __future__ import annotations
 
@@ -128,6 +128,142 @@ class BACnetDateTime:
             date=BACnetDate.from_dict(data["date"]),
             time=BACnetTime.from_dict(data["time"]),
         )
+
+
+@dataclass(frozen=True, slots=True)
+class BACnetTimeStamp:
+    """BACnet TimeStamp -- ``CHOICE { time [0], sequenceNumber [1], dateTime [2] }`` (Clause 21).
+
+    Used by event notifications (Clause 13.8), alarm acknowledgment
+    (Clause 13.5), and COV services for timestamping events.
+    """
+
+    choice: int
+    """Discriminator: 0 = time, 1 = sequenceNumber, 2 = dateTime."""
+
+    value: BACnetTime | int | BACnetDateTime
+    """The typed value corresponding to the choice discriminator."""
+
+    def encode(self) -> bytes:
+        """Encode to context-tagged BACnet wire format.
+
+        :returns: Context-tagged encoded bytes.
+        :raises ValueError: If *choice* is not 0, 1, or 2.
+        """
+        from bac_py.encoding.primitives import (
+            encode_context_tagged,
+            encode_unsigned,
+        )
+        from bac_py.encoding.tags import (
+            encode_closing_tag,
+            encode_opening_tag,
+        )
+
+        if self.choice == 0:
+            # [0] Time -- 4 bytes: hour, minute, second, hundredth
+            assert isinstance(self.value, BACnetTime)
+            from bac_py.encoding.primitives import encode_time
+
+            return encode_context_tagged(0, encode_time(self.value))
+
+        if self.choice == 1:
+            # [1] Unsigned sequence number
+            assert isinstance(self.value, int)
+            return encode_context_tagged(1, encode_unsigned(self.value))
+
+        if self.choice == 2:
+            # [2] BACnetDateTime -- constructed (opening/closing tags)
+            assert isinstance(self.value, BACnetDateTime)
+            from bac_py.encoding.primitives import encode_date, encode_time
+
+            buf = encode_opening_tag(2)
+            buf += encode_date(self.value.date)
+            buf += encode_time(self.value.time)
+            buf += encode_closing_tag(2)
+            return buf
+
+        msg = f"Invalid BACnetTimeStamp choice: {self.choice}"
+        raise ValueError(msg)
+
+    @classmethod
+    def decode(cls, data: memoryview | bytes, offset: int = 0) -> tuple[BACnetTimeStamp, int]:
+        """Decode from context-tagged BACnet wire format.
+
+        :param data: Buffer to decode from.
+        :param offset: Starting byte offset.
+        :returns: Tuple of (decoded :class:`BACnetTimeStamp`, new offset).
+        :raises ValueError: If the context tag is not 0, 1, or 2.
+        """
+        from bac_py.encoding.primitives import decode_time, decode_unsigned
+        from bac_py.encoding.tags import TagClass, decode_tag
+
+        if isinstance(data, bytes):
+            data = memoryview(data)
+
+        tag, new_offset = decode_tag(data, offset)
+
+        if tag.cls != TagClass.CONTEXT:
+            msg = f"Expected context tag for BACnetTimeStamp, got application tag {tag.number}"
+            raise ValueError(msg)
+
+        if tag.number == 0:
+            # [0] Time
+            time_val = decode_time(data[new_offset : new_offset + tag.length])
+            return cls(choice=0, value=time_val), new_offset + tag.length
+
+        if tag.number == 1:
+            # [1] Unsigned sequence number
+            seq_num = decode_unsigned(data[new_offset : new_offset + tag.length])
+            return cls(choice=1, value=seq_num), new_offset + tag.length
+
+        if tag.number == 2:
+            # [2] BACnetDateTime -- constructed with opening/closing tags
+            assert tag.is_opening
+            from bac_py.encoding.primitives import decode_date
+
+            date_val = decode_date(data[new_offset : new_offset + 4])
+            new_offset += 4
+            time_val = decode_time(data[new_offset : new_offset + 4])
+            new_offset += 4
+            # Consume the closing tag
+            closing_tag, new_offset = decode_tag(data, new_offset)
+            assert closing_tag.is_closing and closing_tag.number == 2
+            return cls(choice=2, value=BACnetDateTime(date=date_val, time=time_val)), new_offset
+
+        msg = f"Invalid BACnetTimeStamp context tag: {tag.number}"
+        raise ValueError(msg)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to a JSON-serializable dictionary.
+
+        :returns: Dictionary with ``"choice"`` and ``"value"`` keys.
+        """
+        if self.choice == 0:
+            assert isinstance(self.value, BACnetTime)
+            return {"choice": "time", "value": self.value.to_dict()}
+        if self.choice == 1:
+            return {"choice": "sequence_number", "value": self.value}
+        assert isinstance(self.value, BACnetDateTime)
+        return {"choice": "date_time", "value": self.value.to_dict()}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BACnetTimeStamp:
+        """Reconstruct from a JSON-friendly dictionary.
+
+        :param data: Dictionary containing ``"choice"`` and ``"value"`` keys.
+        :returns: Decoded :class:`BACnetTimeStamp` instance.
+        :raises ValueError: If the choice value is not recognized.
+        """
+        choice_str = data["choice"]
+        value_data = data["value"]
+        if choice_str == "time":
+            return cls(choice=0, value=BACnetTime.from_dict(value_data))
+        if choice_str == "sequence_number":
+            return cls(choice=1, value=value_data)
+        if choice_str == "date_time":
+            return cls(choice=2, value=BACnetDateTime.from_dict(value_data))
+        msg = f"Invalid BACnetTimeStamp choice: {choice_str}"
+        raise ValueError(msg)
 
 
 @dataclass(frozen=True, slots=True)
@@ -379,6 +515,92 @@ class BACnetDeviceObjectPropertyReference:
     device_identifier: ObjectIdentifier | None = None
     """Optional device containing the referenced object. ``None`` means
     the local device."""
+
+    def encode(self) -> bytes:
+        """Encode as context-tagged SEQUENCE per Clause 21.
+
+        :returns: Encoded bytes.
+        """
+        from bac_py.encoding.primitives import (
+            encode_context_enumerated,
+            encode_context_object_id,
+            encode_context_tagged,
+            encode_unsigned,
+        )
+
+        buf = bytearray()
+        # [0] objectIdentifier
+        buf.extend(encode_context_object_id(0, self.object_identifier))
+        # [1] propertyIdentifier
+        buf.extend(encode_context_enumerated(1, self.property_identifier))
+        # [2] propertyArrayIndex OPTIONAL
+        if self.property_array_index is not None:
+            buf.extend(encode_context_tagged(2, encode_unsigned(self.property_array_index)))
+        # [3] deviceIdentifier OPTIONAL
+        if self.device_identifier is not None:
+            buf.extend(encode_context_object_id(3, self.device_identifier))
+        return bytes(buf)
+
+    @classmethod
+    def decode(
+        cls,
+        data: memoryview | bytes,
+        offset: int = 0,
+    ) -> tuple[BACnetDeviceObjectPropertyReference, int]:
+        """Decode from wire bytes.
+
+        :param data: Buffer to decode from.
+        :param offset: Starting position in *data*.
+        :returns: Tuple of decoded reference and new offset.
+        """
+        from bac_py.encoding.primitives import (
+            decode_object_identifier,
+            decode_unsigned,
+        )
+        from bac_py.encoding.tags import as_memoryview, decode_tag
+
+        data = as_memoryview(data)
+
+        # [0] objectIdentifier
+        tag, offset = decode_tag(data, offset)
+        obj_type, instance = decode_object_identifier(data[offset : offset + tag.length])
+        offset += tag.length
+        from bac_py.types.enums import ObjectType
+
+        object_identifier = ObjectIdentifier(ObjectType(obj_type), instance)
+
+        # [1] propertyIdentifier
+        tag, offset = decode_tag(data, offset)
+        property_identifier = decode_unsigned(data[offset : offset + tag.length])
+        offset += tag.length
+
+        # [2] propertyArrayIndex OPTIONAL
+        property_array_index: int | None = None
+        if offset < len(data):
+            tag, new_offset = decode_tag(data, offset)
+            if tag.number == 2 and not tag.is_opening and not tag.is_closing:
+                property_array_index = decode_unsigned(
+                    data[new_offset : new_offset + tag.length]
+                )
+                offset = new_offset + tag.length
+
+        # [3] deviceIdentifier OPTIONAL
+        device_identifier: ObjectIdentifier | None = None
+        if offset < len(data):
+            tag, new_offset = decode_tag(data, offset)
+            if tag.number == 3 and not tag.is_opening and not tag.is_closing:
+                obj_type, instance = decode_object_identifier(
+                    data[new_offset : new_offset + tag.length]
+                )
+                device_identifier = ObjectIdentifier(ObjectType(obj_type), instance)
+                offset = new_offset + tag.length
+
+        return cls(
+            object_identifier=object_identifier,
+            property_identifier=property_identifier,
+            property_array_index=property_array_index,
+            device_identifier=device_identifier,
+        ), offset
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.

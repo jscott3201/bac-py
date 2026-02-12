@@ -1,4 +1,4 @@
-"""BACnet enumeration types per ASHRAE 135-2016."""
+"""BACnet enumeration types per ASHRAE 135-2020."""
 
 from __future__ import annotations
 
@@ -1234,3 +1234,44 @@ class SilencedState(IntEnum):
     AUDIBLE_SILENCED = 1
     VISIBLE_SILENCED = 2
     ALL_SILENCED = 3
+
+
+class AcknowledgmentFilter(IntEnum):
+    """BACnet acknowledgment filter for GetEnrollmentSummary (Clause 13.7.1)."""
+
+    ALL = 0
+    ACKED = 1
+    NOT_ACKED = 2
+
+
+class EventTransitionBits(IntEnum):
+    """Positional constants for the 3-element event transition bitstring.
+
+    Used to index into ``event_enable`` and ``acked_transitions``
+    bitstrings (Clause 12.11).
+    """
+
+    TO_OFFNORMAL = 0
+    TO_FAULT = 1
+    TO_NORMAL = 2
+
+
+class TimerState(IntEnum):
+    """BACnet timer state enumeration (Clause 12.31, new in 2020)."""
+
+    IDLE = 0
+    RUNNING = 1
+    EXPIRED = 2
+
+
+class TimerTransition(IntEnum):
+    """BACnet timer state transition enumeration (Clause 12.31, new in 2020)."""
+
+    NONE = 0
+    IDLE_TO_RUNNING = 1
+    RUNNING_TO_IDLE = 2
+    RUNNING_TO_RUNNING = 3
+    RUNNING_TO_EXPIRED = 4
+    FORCED_TO_EXPIRED = 5
+    EXPIRED_TO_IDLE = 6
+    EXPIRED_TO_RUNNING = 7
