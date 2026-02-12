@@ -11,12 +11,19 @@ from bac_py.encoding.primitives import (
     decode_unsigned,
     encode_application_character_string,
     encode_application_enumerated,
+    encode_application_object_id,
     encode_application_real,
     encode_application_unsigned,
 )
 from bac_py.encoding.tags import TagClass, decode_tag
 from bac_py.network.address import BACnetAddress, BIPAddress
+from bac_py.services.alarm_summary import (
+    AlarmSummary,
+    GetAlarmSummaryACK,
+    GetEventInformationACK,
+)
 from bac_py.services.common import BACnetPropertyValue
+from bac_py.services.private_transfer import ConfirmedPrivateTransferACK
 from bac_py.services.read_property import ReadPropertyACK
 from bac_py.services.read_property_multiple import (
     PropertyReference,
@@ -30,20 +37,28 @@ from bac_py.services.read_range import (
     ReadRangeACK,
     ResultFlags,
 )
+from bac_py.services.virtual_terminal import VTDataACK, VTOpenACK
 from bac_py.services.who_is import IAmRequest
+from bac_py.services.write_group import GroupChannelValue
 from bac_py.services.write_property_multiple import (
     WriteAccessSpecification,
 )
+from bac_py.types.constructed import BACnetTimeStamp
 from bac_py.types.enums import (
     ConfirmedServiceChoice,
+    EnableDisable,
     ErrorClass,
     ErrorCode,
+    EventState,
+    MessagePriority,
     ObjectType,
     PropertyIdentifier,
+    ReinitializedState,
     Segmentation,
     UnconfirmedServiceChoice,
+    VTClass,
 )
-from bac_py.types.primitives import ObjectIdentifier
+from bac_py.types.primitives import BACnetDate, BACnetTime, BitString, ObjectIdentifier
 
 PEER = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
 PEER_CONVENIENCE = BACnetAddress(
@@ -937,3 +952,712 @@ class TestPropertyTypeHints:
         value_bytes = self._get_encoded_value(app)
         tag, _ = decode_tag(value_bytes, 0)
         assert tag.number == 9  # Enumerated
+
+
+# ---------------------------------------------------------------------------
+# New test classes for untested BACnetClient methods
+# ---------------------------------------------------------------------------
+
+
+def _make_app():
+    """Create a mock BACnetApplication for testing."""
+    app = MagicMock()
+    app.confirmed_request = AsyncMock()
+    app.unconfirmed_request = MagicMock()
+    app.register_temporary_handler = MagicMock()
+    app.unregister_temporary_handler = MagicMock()
+    return app
+
+
+class TestSubscribeCOV:
+    """Tests for subscribe_cov() confirmed service."""
+
+    async def test_subscribe_cov_sends_request(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""  # SimpleACK
+
+        await client.subscribe_cov(
+            address=PEER,
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            process_id=42,
+            confirmed=True,
+            lifetime=3600,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.SUBSCRIBE_COV
+
+    async def test_subscribe_cov_without_lifetime(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.subscribe_cov(
+            address=PEER,
+            object_identifier=ObjectIdentifier(ObjectType.BINARY_INPUT, 5),
+            process_id=1,
+            confirmed=False,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.SUBSCRIBE_COV
+
+
+class TestUnsubscribeCOV:
+    """Tests for unsubscribe_cov() cancellation."""
+
+    async def test_unsubscribe_cov_sends_cancellation(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.unsubscribe_cov(
+            address=PEER,
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            process_id=42,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.SUBSCRIBE_COV
+
+
+class TestDeviceCommunicationControl:
+    """Tests for device_communication_control() confirmed service."""
+
+    async def test_device_communication_control_disable(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.device_communication_control(
+            address=PEER,
+            enable_disable=EnableDisable.DISABLE,
+            time_duration=60,
+            password="secret",
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"]
+            == ConfirmedServiceChoice.DEVICE_COMMUNICATION_CONTROL
+        )
+
+    async def test_device_communication_control_enable(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.device_communication_control(
+            address=PEER,
+            enable_disable=EnableDisable.ENABLE,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"]
+            == ConfirmedServiceChoice.DEVICE_COMMUNICATION_CONTROL
+        )
+
+
+class TestReinitializeDevice:
+    """Tests for reinitialize_device() confirmed service."""
+
+    async def test_reinitialize_device_coldstart(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.reinitialize_device(
+            address=PEER,
+            reinitialized_state=ReinitializedState.COLDSTART,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.REINITIALIZE_DEVICE
+
+    async def test_reinitialize_device_with_password(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.reinitialize_device(
+            address=PEER,
+            reinitialized_state=ReinitializedState.WARMSTART,
+            password="mypass",
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.REINITIALIZE_DEVICE
+
+
+class TestCreateObject:
+    """Tests for create_object() confirmed service returning ObjectIdentifier."""
+
+    async def test_create_object_by_type(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        # CreateObject-ACK returns an application-tagged ObjectIdentifier
+        ack_data = encode_application_object_id(int(ObjectType.ANALOG_VALUE), 100)
+        app.confirmed_request.return_value = ack_data
+
+        result = await client.create_object(
+            address=PEER,
+            object_type=ObjectType.ANALOG_VALUE,
+        )
+
+        assert isinstance(result, ObjectIdentifier)
+        assert result.object_type == ObjectType.ANALOG_VALUE
+        assert result.instance_number == 100
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.CREATE_OBJECT
+
+    async def test_create_object_by_identifier(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        ack_data = encode_application_object_id(int(ObjectType.BINARY_VALUE), 7)
+        app.confirmed_request.return_value = ack_data
+
+        result = await client.create_object(
+            address=PEER,
+            object_identifier=ObjectIdentifier(ObjectType.BINARY_VALUE, 7),
+        )
+
+        assert result.object_type == ObjectType.BINARY_VALUE
+        assert result.instance_number == 7
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.CREATE_OBJECT
+
+
+class TestDeleteObject:
+    """Tests for delete_object() confirmed service."""
+
+    async def test_delete_object(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""  # SimpleACK
+
+        await client.delete_object(
+            address=PEER,
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_VALUE, 100),
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.DELETE_OBJECT
+
+
+class TestAddRemoveListElement:
+    """Tests for add_list_element() and remove_list_element() confirmed services."""
+
+    async def test_add_list_element(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        element_data = encode_application_unsigned(42)
+        await client.add_list_element(
+            address=PEER,
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            list_of_elements=element_data,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.ADD_LIST_ELEMENT
+
+    async def test_remove_list_element(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        element_data = encode_application_unsigned(42)
+        await client.remove_list_element(
+            address=PEER,
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            list_of_elements=element_data,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.REMOVE_LIST_ELEMENT
+
+    async def test_add_list_element_with_array_index(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        element_data = encode_application_unsigned(7)
+        await client.add_list_element(
+            address=PEER,
+            object_identifier=ObjectIdentifier(ObjectType.NOTIFICATION_CLASS, 1),
+            property_identifier=PropertyIdentifier.RECIPIENT_LIST,
+            list_of_elements=element_data,
+            array_index=3,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.ADD_LIST_ELEMENT
+
+
+class TestTextMessage:
+    """Tests for send_confirmed_text_message() and send_unconfirmed_text_message()."""
+
+    async def test_send_confirmed_text_message(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.send_confirmed_text_message(
+            address=PEER,
+            source_device=ObjectIdentifier(ObjectType.DEVICE, 1),
+            message="Fire alarm on floor 3",
+            message_priority=MessagePriority.URGENT,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.CONFIRMED_TEXT_MESSAGE
+        )
+
+    async def test_send_confirmed_text_message_with_class(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.send_confirmed_text_message(
+            address=PEER,
+            source_device=ObjectIdentifier(ObjectType.DEVICE, 1),
+            message="Maintenance notice",
+            message_priority=MessagePriority.NORMAL,
+            message_class_numeric=5,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.CONFIRMED_TEXT_MESSAGE
+        )
+
+    def test_send_unconfirmed_text_message(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        client.send_unconfirmed_text_message(
+            destination=PEER,
+            source_device=ObjectIdentifier(ObjectType.DEVICE, 1),
+            message="System status OK",
+            message_priority=MessagePriority.NORMAL,
+        )
+
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"]
+            == UnconfirmedServiceChoice.UNCONFIRMED_TEXT_MESSAGE
+        )
+
+
+class TestVirtualTerminal:
+    """Tests for vt_open(), vt_close(), and vt_data() confirmed services."""
+
+    async def test_vt_open(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        ack = VTOpenACK(remote_vt_session_identifier=5)
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.vt_open(
+            address=PEER,
+            vt_class=VTClass.DEFAULT_TERMINAL,
+            local_vt_session_identifier=1,
+        )
+
+        assert isinstance(result, VTOpenACK)
+        assert result.remote_vt_session_identifier == 5
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.VT_OPEN
+
+    async def test_vt_close(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.vt_close(
+            address=PEER,
+            session_identifiers=[5, 6],
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.VT_CLOSE
+
+    async def test_vt_data(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        ack = VTDataACK(all_new_data_accepted=True)
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.vt_data(
+            address=PEER,
+            vt_session_identifier=5,
+            vt_new_data=b"hello\r\n",
+            vt_data_flag=False,
+        )
+
+        assert isinstance(result, VTDataACK)
+        assert result.all_new_data_accepted is True
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.VT_DATA
+
+    async def test_vt_data_partial_accept(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        ack = VTDataACK(all_new_data_accepted=False, accepted_octet_count=3)
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.vt_data(
+            address=PEER,
+            vt_session_identifier=5,
+            vt_new_data=b"hello\r\n",
+            vt_data_flag=True,
+        )
+
+        assert result.all_new_data_accepted is False
+        assert result.accepted_octet_count == 3
+
+
+class TestPrivateTransfer:
+    """Tests for confirmed_private_transfer() and unconfirmed_private_transfer()."""
+
+    async def test_confirmed_private_transfer(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        # result_block must contain valid application-tagged data so
+        # the round-trip encode/decode through extract_context_value works.
+        result_data = encode_application_unsigned(42)
+        ack = ConfirmedPrivateTransferACK(
+            vendor_id=7,
+            service_number=1,
+            result_block=result_data,
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.confirmed_private_transfer(
+            address=PEER,
+            vendor_id=7,
+            service_number=1,
+            service_parameters=b"\x0a\x0b",
+        )
+
+        assert isinstance(result, ConfirmedPrivateTransferACK)
+        assert result.vendor_id == 7
+        assert result.service_number == 1
+        assert result.result_block == result_data
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"]
+            == ConfirmedServiceChoice.CONFIRMED_PRIVATE_TRANSFER
+        )
+
+    async def test_confirmed_private_transfer_no_params(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        ack = ConfirmedPrivateTransferACK(vendor_id=99, service_number=0)
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.confirmed_private_transfer(
+            address=PEER,
+            vendor_id=99,
+            service_number=0,
+        )
+
+        assert result.vendor_id == 99
+        assert result.result_block is None
+
+    def test_unconfirmed_private_transfer(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        client.unconfirmed_private_transfer(
+            destination=PEER,
+            vendor_id=7,
+            service_number=2,
+            service_parameters=b"\xff",
+        )
+
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"]
+            == UnconfirmedServiceChoice.UNCONFIRMED_PRIVATE_TRANSFER
+        )
+
+    def test_unconfirmed_private_transfer_no_params(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        client.unconfirmed_private_transfer(
+            destination=PEER,
+            vendor_id=7,
+            service_number=3,
+        )
+
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"]
+            == UnconfirmedServiceChoice.UNCONFIRMED_PRIVATE_TRANSFER
+        )
+
+
+class TestTimeSynchronization:
+    """Tests for time_synchronization() and utc_time_synchronization() unconfirmed services."""
+
+    def test_time_synchronization(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        client.time_synchronization(
+            destination=PEER,
+            date=BACnetDate(year=2024, month=6, day=15, day_of_week=6),
+            time=BACnetTime(hour=14, minute=30, second=0, hundredth=0),
+        )
+
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"] == UnconfirmedServiceChoice.TIME_SYNCHRONIZATION
+        )
+
+    def test_utc_time_synchronization(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        client.utc_time_synchronization(
+            destination=PEER,
+            date=BACnetDate(year=2024, month=6, day=15, day_of_week=6),
+            time=BACnetTime(hour=18, minute=30, second=0, hundredth=0),
+        )
+
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args
+        assert (
+            call_kwargs.kwargs["service_choice"]
+            == UnconfirmedServiceChoice.UTC_TIME_SYNCHRONIZATION
+        )
+
+
+class TestWriteGroup:
+    """Tests for write_group() unconfirmed service."""
+
+    def test_write_group(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        client.write_group(
+            destination=PEER,
+            group_number=1,
+            write_priority=8,
+            change_list=[
+                GroupChannelValue(channel=1, value=encode_application_real(72.5)),
+                GroupChannelValue(channel=2, value=encode_application_real(68.0)),
+            ],
+        )
+
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == UnconfirmedServiceChoice.WRITE_GROUP
+
+    def test_write_group_with_override_priority(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        client.write_group(
+            destination=PEER,
+            group_number=5,
+            write_priority=10,
+            change_list=[
+                GroupChannelValue(
+                    channel=3,
+                    value=encode_application_unsigned(1),
+                    overriding_priority=4,
+                ),
+            ],
+        )
+
+        app.unconfirmed_request.assert_called_once()
+        call_kwargs = app.unconfirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == UnconfirmedServiceChoice.WRITE_GROUP
+
+
+class TestGetObjectList:
+    """Tests for get_object_list() convenience method."""
+
+    async def test_get_object_list_single_read(self):
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        client = BACnetClient(app)
+
+        # Build a fake ReadPropertyACK containing two ObjectIdentifiers
+        object_list_data = encode_application_object_id(
+            int(ObjectType.DEVICE), 1
+        ) + encode_application_object_id(int(ObjectType.ANALOG_INPUT), 1)
+        ack = ReadPropertyACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_value=object_list_data,
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.get_object_list("192.168.1.100", 1)
+
+        assert len(result) == 2
+        assert result[0] == ObjectIdentifier(ObjectType.DEVICE, 1)
+        assert result[1] == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+
+        # Should have called confirmed_request for the ReadProperty
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.READ_PROPERTY
+
+
+class TestAcknowledgeAlarm:
+    """Tests for acknowledge_alarm() confirmed service."""
+
+    async def test_acknowledge_alarm(self):
+        app = _make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        ts = BACnetTimeStamp(
+            choice=1,
+            value=100,  # sequenceNumber
+        )
+
+        await client.acknowledge_alarm(
+            address=PEER,
+            acknowledging_process_identifier=1,
+            event_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            event_state_acknowledged=EventState.HIGH_LIMIT,
+            time_stamp=ts,
+            acknowledgment_source="operator1",
+            time_of_acknowledgment=ts,
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.ACKNOWLEDGE_ALARM
+
+
+class TestGetAlarmSummary:
+    """Tests for get_alarm_summary() confirmed service."""
+
+    async def test_get_alarm_summary(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        ack = GetAlarmSummaryACK(
+            list_of_alarm_summaries=[
+                AlarmSummary(
+                    object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                    alarm_state=EventState.HIGH_LIMIT,
+                    acknowledged_transitions=BitString(value=b"\xe0", unused_bits=5),
+                ),
+            ]
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.get_alarm_summary(address=PEER)
+
+        assert isinstance(result, GetAlarmSummaryACK)
+        assert len(result.list_of_alarm_summaries) == 1
+        assert result.list_of_alarm_summaries[0].alarm_state == EventState.HIGH_LIMIT
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.GET_ALARM_SUMMARY
+
+    async def test_get_alarm_summary_empty(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        ack = GetAlarmSummaryACK(list_of_alarm_summaries=[])
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.get_alarm_summary(address=PEER)
+
+        assert isinstance(result, GetAlarmSummaryACK)
+        assert len(result.list_of_alarm_summaries) == 0
+
+
+class TestGetEventInformation:
+    """Tests for get_event_information() confirmed service."""
+
+    async def test_get_event_information_empty(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        ack = GetEventInformationACK(
+            list_of_event_summaries=[],
+            more_events=False,
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.get_event_information(address=PEER)
+
+        assert isinstance(result, GetEventInformationACK)
+        assert len(result.list_of_event_summaries) == 0
+        assert result.more_events is False
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.GET_EVENT_INFORMATION
+
+    async def test_get_event_information_with_pagination(self):
+        app = _make_app()
+        client = BACnetClient(app)
+
+        ack = GetEventInformationACK(
+            list_of_event_summaries=[],
+            more_events=True,
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.get_event_information(
+            address=PEER,
+            last_received_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 10),
+        )
+
+        assert result.more_events is True
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.GET_EVENT_INFORMATION

@@ -2186,3 +2186,945 @@ class TestRemoveListElement:
                 SOURCE,
             )
         assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
+
+
+# ---------------------------------------------------------------------------
+# ConfirmedTextMessage handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleConfirmedTextMessage:
+    @pytest.mark.asyncio
+    async def test_basic_text_message_returns_simple_ack(self):
+        """ConfirmedTextMessage handler returns None (SimpleACK)."""
+        from bac_py.services.text_message import ConfirmedTextMessageRequest
+        from bac_py.types.enums import MessagePriority
+
+        _, _, _, handlers = _make_app_and_handlers()
+        request = ConfirmedTextMessageRequest(
+            text_message_source_device=ObjectIdentifier(ObjectType.DEVICE, 100),
+            message_priority=MessagePriority.NORMAL,
+            message="Hello from device 100",
+        )
+        result = await handlers.handle_confirmed_text_message(
+            ConfirmedServiceChoice.CONFIRMED_TEXT_MESSAGE,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None  # SimpleACK
+
+    @pytest.mark.asyncio
+    async def test_urgent_text_message(self):
+        """ConfirmedTextMessage with urgent priority returns SimpleACK."""
+        from bac_py.services.text_message import ConfirmedTextMessageRequest
+        from bac_py.types.enums import MessagePriority
+
+        _, _, _, handlers = _make_app_and_handlers()
+        request = ConfirmedTextMessageRequest(
+            text_message_source_device=ObjectIdentifier(ObjectType.DEVICE, 200),
+            message_priority=MessagePriority.URGENT,
+            message="Emergency alert!",
+        )
+        result = await handlers.handle_confirmed_text_message(
+            ConfirmedServiceChoice.CONFIRMED_TEXT_MESSAGE,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_text_message_with_numeric_class(self):
+        """ConfirmedTextMessage with numeric message class returns SimpleACK."""
+        from bac_py.services.text_message import ConfirmedTextMessageRequest
+        from bac_py.types.enums import MessagePriority
+
+        _, _, _, handlers = _make_app_and_handlers()
+        request = ConfirmedTextMessageRequest(
+            text_message_source_device=ObjectIdentifier(ObjectType.DEVICE, 100),
+            message_priority=MessagePriority.NORMAL,
+            message="Classified message",
+            message_class_numeric=42,
+        )
+        result = await handlers.handle_confirmed_text_message(
+            ConfirmedServiceChoice.CONFIRMED_TEXT_MESSAGE,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_text_message_invokes_callback(self):
+        """ConfirmedTextMessage invokes the text message callback if set."""
+        from bac_py.services.text_message import ConfirmedTextMessageRequest
+        from bac_py.types.enums import MessagePriority
+
+        app, _, _, handlers = _make_app_and_handlers()
+        callback = MagicMock()
+        app._text_message_callback = callback
+
+        request = ConfirmedTextMessageRequest(
+            text_message_source_device=ObjectIdentifier(ObjectType.DEVICE, 100),
+            message_priority=MessagePriority.NORMAL,
+            message="callback test",
+        )
+        await handlers.handle_confirmed_text_message(
+            ConfirmedServiceChoice.CONFIRMED_TEXT_MESSAGE,
+            request.encode(),
+            SOURCE,
+        )
+        callback.assert_called_once()
+        call_args = callback.call_args
+        assert call_args[0][0].message == "callback test"
+        assert call_args[0][1] == SOURCE
+
+
+# ---------------------------------------------------------------------------
+# UnconfirmedTextMessage handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleUnconfirmedTextMessage:
+    @pytest.mark.asyncio
+    async def test_basic_unconfirmed_text_message(self):
+        """UnconfirmedTextMessage handler returns None."""
+        from bac_py.services.text_message import UnconfirmedTextMessageRequest
+        from bac_py.types.enums import MessagePriority, UnconfirmedServiceChoice
+
+        _, _, _, handlers = _make_app_and_handlers()
+        request = UnconfirmedTextMessageRequest(
+            text_message_source_device=ObjectIdentifier(ObjectType.DEVICE, 100),
+            message_priority=MessagePriority.NORMAL,
+            message="Unconfirmed hello",
+        )
+        result = await handlers.handle_unconfirmed_text_message(
+            UnconfirmedServiceChoice.UNCONFIRMED_TEXT_MESSAGE,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_unconfirmed_text_message_invokes_callback(self):
+        """UnconfirmedTextMessage invokes the text message callback if set."""
+        from bac_py.services.text_message import UnconfirmedTextMessageRequest
+        from bac_py.types.enums import MessagePriority, UnconfirmedServiceChoice
+
+        app, _, _, handlers = _make_app_and_handlers()
+        callback = MagicMock()
+        app._text_message_callback = callback
+
+        request = UnconfirmedTextMessageRequest(
+            text_message_source_device=ObjectIdentifier(ObjectType.DEVICE, 200),
+            message_priority=MessagePriority.URGENT,
+            message="urgent unconfirmed",
+        )
+        await handlers.handle_unconfirmed_text_message(
+            UnconfirmedServiceChoice.UNCONFIRMED_TEXT_MESSAGE,
+            request.encode(),
+            SOURCE,
+        )
+        callback.assert_called_once()
+        assert callback.call_args[0][0].message == "urgent unconfirmed"
+
+    @pytest.mark.asyncio
+    async def test_unconfirmed_text_message_with_character_class(self):
+        """UnconfirmedTextMessage with character message class returns None."""
+        from bac_py.services.text_message import UnconfirmedTextMessageRequest
+        from bac_py.types.enums import MessagePriority, UnconfirmedServiceChoice
+
+        _, _, _, handlers = _make_app_and_handlers()
+        request = UnconfirmedTextMessageRequest(
+            text_message_source_device=ObjectIdentifier(ObjectType.DEVICE, 100),
+            message_priority=MessagePriority.NORMAL,
+            message="classified by string",
+            message_class_character="maintenance",
+        )
+        result = await handlers.handle_unconfirmed_text_message(
+            UnconfirmedServiceChoice.UNCONFIRMED_TEXT_MESSAGE,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# WriteGroup handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleWriteGroup:
+    @pytest.mark.asyncio
+    async def test_write_group_basic(self):
+        """WriteGroup handler processes request and returns None."""
+        from bac_py.encoding.primitives import encode_application_unsigned
+        from bac_py.services.write_group import GroupChannelValue, WriteGroupRequest
+        from bac_py.types.enums import UnconfirmedServiceChoice
+
+        _, _, _, handlers = _make_app_and_handlers()
+        # Encode a simple unsigned value as the channel value
+        value_bytes = encode_application_unsigned(72)
+        request = WriteGroupRequest(
+            group_number=1,
+            write_priority=8,
+            change_list=[
+                GroupChannelValue(channel=1, value=bytes(value_bytes)),
+            ],
+        )
+        result = await handlers.handle_write_group(
+            UnconfirmedServiceChoice.WRITE_GROUP,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_write_group_multiple_channels(self):
+        """WriteGroup with multiple channel values processes without error."""
+        from bac_py.encoding.primitives import encode_application_unsigned
+        from bac_py.services.write_group import GroupChannelValue, WriteGroupRequest
+        from bac_py.types.enums import UnconfirmedServiceChoice
+
+        _, _, _, handlers = _make_app_and_handlers()
+        request = WriteGroupRequest(
+            group_number=5,
+            write_priority=10,
+            change_list=[
+                GroupChannelValue(
+                    channel=1,
+                    value=bytes(encode_application_unsigned(100)),
+                ),
+                GroupChannelValue(
+                    channel=2,
+                    value=bytes(encode_application_unsigned(200)),
+                    overriding_priority=4,
+                ),
+            ],
+        )
+        result = await handlers.handle_write_group(
+            UnconfirmedServiceChoice.WRITE_GROUP,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_write_group_empty_change_list(self):
+        """WriteGroup with empty change list processes without error."""
+        from bac_py.services.write_group import WriteGroupRequest
+        from bac_py.types.enums import UnconfirmedServiceChoice
+
+        _, _, _, handlers = _make_app_and_handlers()
+        request = WriteGroupRequest(
+            group_number=1,
+            write_priority=8,
+            change_list=[],
+        )
+        result = await handlers.handle_write_group(
+            UnconfirmedServiceChoice.WRITE_GROUP,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# WhoAmI handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleWhoAmI:
+    @pytest.mark.asyncio
+    async def test_who_am_i_logs_request(self):
+        """Who-Am-I handler processes request and returns None."""
+        from bac_py.services.device_discovery import WhoAmIRequest
+        from bac_py.types.enums import UnconfirmedServiceChoice
+
+        _, _, _, handlers = _make_app_and_handlers()
+        request = WhoAmIRequest(
+            vendor_id=42,
+            model_name="TestModel",
+            serial_number="SN-12345",
+        )
+        result = await handlers.handle_who_am_i(
+            UnconfirmedServiceChoice.WHO_AM_I,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_who_am_i_invokes_callback(self):
+        """Who-Am-I invokes the callback if set on the app."""
+        from bac_py.services.device_discovery import WhoAmIRequest
+        from bac_py.types.enums import UnconfirmedServiceChoice
+
+        app, _, _, handlers = _make_app_and_handlers()
+        callback = MagicMock()
+        app._who_am_i_callback = callback
+
+        request = WhoAmIRequest(
+            vendor_id=99,
+            model_name="NewDevice",
+            serial_number="SN-99999",
+        )
+        await handlers.handle_who_am_i(
+            UnconfirmedServiceChoice.WHO_AM_I,
+            request.encode(),
+            SOURCE,
+        )
+        callback.assert_called_once()
+        call_args = callback.call_args
+        assert call_args[0][0].vendor_id == 99
+        assert call_args[0][0].model_name == "NewDevice"
+        assert call_args[0][0].serial_number == "SN-99999"
+        assert call_args[0][1] == SOURCE
+
+    @pytest.mark.asyncio
+    async def test_who_am_i_no_callback(self):
+        """Who-Am-I without callback does not raise."""
+        from bac_py.services.device_discovery import WhoAmIRequest
+        from bac_py.types.enums import UnconfirmedServiceChoice
+
+        app, _, _, handlers = _make_app_and_handlers()
+        # Ensure no callback attribute
+        if hasattr(app, "_who_am_i_callback"):
+            delattr(app, "_who_am_i_callback")
+
+        request = WhoAmIRequest(
+            vendor_id=1,
+            model_name="M",
+            serial_number="S",
+        )
+        result = await handlers.handle_who_am_i(
+            UnconfirmedServiceChoice.WHO_AM_I,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# VT-Open handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleVTOpen:
+    def _make_vt_handlers(self):
+        """Create handlers with VT-related app attributes properly initialized."""
+        app, db, device, handlers = _make_app_and_handlers()
+        # VT handlers use getattr() with defaults, but MagicMock auto-creates
+        # attributes as MagicMock objects. Delete them so getattr falls through
+        # to the default values used in the handler code.
+        del app._vt_session_counter
+        del app._vt_sessions
+        return app, db, device, handlers
+
+    @pytest.mark.asyncio
+    async def test_vt_open_returns_session_id(self):
+        """VT-Open handler returns VTOpenACK with a remote session ID."""
+        from bac_py.services.virtual_terminal import VTOpenACK, VTOpenRequest
+        from bac_py.types.enums import VTClass
+
+        _, _, _, handlers = self._make_vt_handlers()
+        request = VTOpenRequest(
+            vt_class=VTClass.DEFAULT_TERMINAL,
+            local_vt_session_identifier=1,
+        )
+        result = await handlers.handle_vt_open(
+            ConfirmedServiceChoice.VT_OPEN,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is not None
+        ack = VTOpenACK.decode(result)
+        assert ack.remote_vt_session_identifier >= 1
+
+    @pytest.mark.asyncio
+    async def test_vt_open_increments_session_counter(self):
+        """Multiple VT-Open calls produce different session IDs."""
+        from bac_py.services.virtual_terminal import VTOpenACK, VTOpenRequest
+        from bac_py.types.enums import VTClass
+
+        _, _, _, handlers = self._make_vt_handlers()
+        request = VTOpenRequest(
+            vt_class=VTClass.DEFAULT_TERMINAL,
+            local_vt_session_identifier=1,
+        )
+        result1 = await handlers.handle_vt_open(
+            ConfirmedServiceChoice.VT_OPEN,
+            request.encode(),
+            SOURCE,
+        )
+        result2 = await handlers.handle_vt_open(
+            ConfirmedServiceChoice.VT_OPEN,
+            request.encode(),
+            SOURCE,
+        )
+        ack1 = VTOpenACK.decode(result1)
+        ack2 = VTOpenACK.decode(result2)
+        assert ack1.remote_vt_session_identifier != ack2.remote_vt_session_identifier
+
+    @pytest.mark.asyncio
+    async def test_vt_open_unknown_class_raises(self):
+        """VT-Open with unsupported VT class raises UNKNOWN_VT_CLASS."""
+        from bac_py.services.virtual_terminal import VTOpenRequest
+        from bac_py.types.enums import VTClass
+
+        _, _, device, handlers = self._make_vt_handlers()
+        # Set VT classes supported to a specific list that excludes DEC_VT100
+        device._properties[PropertyIdentifier.VT_CLASSES_SUPPORTED] = [
+            VTClass.DEFAULT_TERMINAL,
+        ]
+
+        request = VTOpenRequest(
+            vt_class=VTClass.DEC_VT100,
+            local_vt_session_identifier=1,
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_vt_open(
+                ConfirmedServiceChoice.VT_OPEN,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_VT_CLASS
+
+
+# ---------------------------------------------------------------------------
+# VT-Close handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleVTClose:
+    def _make_vt_handlers(self):
+        """Create handlers with VT-related app attributes properly initialized."""
+        app, db, device, handlers = _make_app_and_handlers()
+        del app._vt_session_counter
+        del app._vt_sessions
+        return app, db, device, handlers
+
+    @pytest.mark.asyncio
+    async def test_vt_close_existing_session(self):
+        """VT-Close on a valid session returns SimpleACK."""
+        from bac_py.services.virtual_terminal import VTCloseRequest, VTOpenACK, VTOpenRequest
+        from bac_py.types.enums import VTClass
+
+        _, _, _, handlers = self._make_vt_handlers()
+
+        # First open a session
+        open_request = VTOpenRequest(
+            vt_class=VTClass.DEFAULT_TERMINAL,
+            local_vt_session_identifier=1,
+        )
+        open_result = await handlers.handle_vt_open(
+            ConfirmedServiceChoice.VT_OPEN,
+            open_request.encode(),
+            SOURCE,
+        )
+        ack = VTOpenACK.decode(open_result)
+        session_id = ack.remote_vt_session_identifier
+
+        # Now close it
+        close_request = VTCloseRequest(
+            list_of_remote_vt_session_identifiers=[session_id],
+        )
+        result = await handlers.handle_vt_close(
+            ConfirmedServiceChoice.VT_CLOSE,
+            close_request.encode(),
+            SOURCE,
+        )
+        assert result is None  # SimpleACK
+
+    @pytest.mark.asyncio
+    async def test_vt_close_unknown_session_raises(self):
+        """VT-Close with unknown session ID raises UNKNOWN_VT_SESSION."""
+        from bac_py.services.virtual_terminal import VTCloseRequest
+
+        _, _, _, handlers = self._make_vt_handlers()
+        request = VTCloseRequest(
+            list_of_remote_vt_session_identifiers=[999],
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_vt_close(
+                ConfirmedServiceChoice.VT_CLOSE,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_VT_SESSION
+
+    @pytest.mark.asyncio
+    async def test_vt_close_removes_session(self):
+        """VT-Close removes the session; closing again raises error."""
+        from bac_py.services.virtual_terminal import VTCloseRequest, VTOpenACK, VTOpenRequest
+        from bac_py.types.enums import VTClass
+
+        _, _, _, handlers = self._make_vt_handlers()
+
+        # Open a session
+        open_request = VTOpenRequest(
+            vt_class=VTClass.DEFAULT_TERMINAL,
+            local_vt_session_identifier=1,
+        )
+        open_result = await handlers.handle_vt_open(
+            ConfirmedServiceChoice.VT_OPEN,
+            open_request.encode(),
+            SOURCE,
+        )
+        ack = VTOpenACK.decode(open_result)
+        session_id = ack.remote_vt_session_identifier
+
+        # Close it
+        close_request = VTCloseRequest(
+            list_of_remote_vt_session_identifiers=[session_id],
+        )
+        await handlers.handle_vt_close(
+            ConfirmedServiceChoice.VT_CLOSE,
+            close_request.encode(),
+            SOURCE,
+        )
+
+        # Closing again should raise
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_vt_close(
+                ConfirmedServiceChoice.VT_CLOSE,
+                close_request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_VT_SESSION
+
+
+# ---------------------------------------------------------------------------
+# VT-Data handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleVTData:
+    def _make_vt_handlers(self):
+        """Create handlers with VT-related app attributes properly initialized."""
+        app, db, device, handlers = _make_app_and_handlers()
+        del app._vt_session_counter
+        del app._vt_sessions
+        return app, db, device, handlers
+
+    @pytest.mark.asyncio
+    async def test_vt_data_on_open_session(self):
+        """VT-Data on a valid session returns VTDataACK with all_new_data_accepted."""
+        from bac_py.services.virtual_terminal import (
+            VTDataACK,
+            VTDataRequest,
+            VTOpenACK,
+            VTOpenRequest,
+        )
+        from bac_py.types.enums import VTClass
+
+        _, _, _, handlers = self._make_vt_handlers()
+
+        # Open a session first
+        open_request = VTOpenRequest(
+            vt_class=VTClass.DEFAULT_TERMINAL,
+            local_vt_session_identifier=1,
+        )
+        open_result = await handlers.handle_vt_open(
+            ConfirmedServiceChoice.VT_OPEN,
+            open_request.encode(),
+            SOURCE,
+        )
+        ack = VTOpenACK.decode(open_result)
+        session_id = ack.remote_vt_session_identifier
+
+        # Send data
+        data_request = VTDataRequest(
+            vt_session_identifier=session_id,
+            vt_new_data=b"Hello VT\r\n",
+            vt_data_flag=False,
+        )
+        result = await handlers.handle_vt_data(
+            ConfirmedServiceChoice.VT_DATA,
+            data_request.encode(),
+            SOURCE,
+        )
+        assert result is not None
+        data_ack = VTDataACK.decode(result)
+        assert data_ack.all_new_data_accepted is True
+
+    @pytest.mark.asyncio
+    async def test_vt_data_unknown_session_raises(self):
+        """VT-Data on unknown session raises UNKNOWN_VT_SESSION."""
+        from bac_py.services.virtual_terminal import VTDataRequest
+
+        _, _, _, handlers = self._make_vt_handlers()
+        request = VTDataRequest(
+            vt_session_identifier=999,
+            vt_new_data=b"data",
+            vt_data_flag=True,
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_vt_data(
+                ConfirmedServiceChoice.VT_DATA,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_VT_SESSION
+
+    @pytest.mark.asyncio
+    async def test_vt_data_with_flag_true(self):
+        """VT-Data with vt_data_flag=True processes correctly."""
+        from bac_py.services.virtual_terminal import (
+            VTDataACK,
+            VTDataRequest,
+            VTOpenACK,
+            VTOpenRequest,
+        )
+        from bac_py.types.enums import VTClass
+
+        _, _, _, handlers = self._make_vt_handlers()
+
+        # Open session
+        open_request = VTOpenRequest(
+            vt_class=VTClass.DEFAULT_TERMINAL,
+            local_vt_session_identifier=5,
+        )
+        open_result = await handlers.handle_vt_open(
+            ConfirmedServiceChoice.VT_OPEN,
+            open_request.encode(),
+            SOURCE,
+        )
+        ack = VTOpenACK.decode(open_result)
+        session_id = ack.remote_vt_session_identifier
+
+        data_request = VTDataRequest(
+            vt_session_identifier=session_id,
+            vt_new_data=b"\x1b[2J",
+            vt_data_flag=True,
+        )
+        result = await handlers.handle_vt_data(
+            ConfirmedServiceChoice.VT_DATA,
+            data_request.encode(),
+            SOURCE,
+        )
+        data_ack = VTDataACK.decode(result)
+        assert data_ack.all_new_data_accepted is True
+
+
+# ---------------------------------------------------------------------------
+# AuditLogQuery handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleAuditLogQuery:
+    @pytest.mark.asyncio
+    async def test_query_empty_audit_log(self):
+        """AuditLogQuery on an empty log returns no records."""
+        from bac_py.objects.audit_log import AuditLogObject
+        from bac_py.services.audit import AuditLogQueryACK, AuditLogQueryRequest
+        from bac_py.types.audit_types import AuditQueryByTarget
+
+        _, db, _, handlers = _make_app_and_handlers()
+        audit_log = AuditLogObject(1)
+        audit_log._properties[PropertyIdentifier.LOG_ENABLE] = True
+        db.add(audit_log)
+
+        query_params = AuditQueryByTarget(
+            target_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+        )
+        request = AuditLogQueryRequest(
+            audit_log=ObjectIdentifier(ObjectType.AUDIT_LOG, 1),
+            query_parameters=query_params,
+            requested_count=10,
+        )
+        result = await handlers.handle_audit_log_query(
+            ConfirmedServiceChoice.AUDIT_LOG_QUERY,
+            request.encode(),
+            SOURCE,
+        )
+        ack = AuditLogQueryACK.decode(result)
+        assert len(ack.records) == 0
+        assert ack.no_more_items is True
+
+    @pytest.mark.asyncio
+    async def test_query_audit_log_with_records(self):
+        """AuditLogQuery returns records that have been appended."""
+        from bac_py.objects.audit_log import AuditLogObject
+        from bac_py.services.audit import AuditLogQueryACK, AuditLogQueryRequest
+        from bac_py.types.audit_types import AuditQueryByTarget, BACnetAuditNotification
+        from bac_py.types.enums import AuditOperation
+
+        _, db, _, handlers = _make_app_and_handlers()
+        audit_log = AuditLogObject(1)
+        audit_log._properties[PropertyIdentifier.LOG_ENABLE] = True
+        db.add(audit_log)
+
+        # Append some records
+        for i in range(3):
+            notification = BACnetAuditNotification(
+                operation=AuditOperation.WRITE,
+                target_object=ObjectIdentifier(ObjectType.ANALOG_INPUT, i + 1),
+            )
+            audit_log.append_record(notification)
+
+        query_params = AuditQueryByTarget(
+            target_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+        )
+        request = AuditLogQueryRequest(
+            audit_log=ObjectIdentifier(ObjectType.AUDIT_LOG, 1),
+            query_parameters=query_params,
+            requested_count=10,
+        )
+        result = await handlers.handle_audit_log_query(
+            ConfirmedServiceChoice.AUDIT_LOG_QUERY,
+            request.encode(),
+            SOURCE,
+        )
+        ack = AuditLogQueryACK.decode(result)
+        assert len(ack.records) == 3
+        assert ack.no_more_items is True
+
+    @pytest.mark.asyncio
+    async def test_query_unknown_audit_log_raises(self):
+        """AuditLogQuery on a non-existent audit log raises UNKNOWN_OBJECT."""
+        from bac_py.services.audit import AuditLogQueryRequest
+        from bac_py.types.audit_types import AuditQueryByTarget
+
+        _, _, _, handlers = _make_app_and_handlers()
+        query_params = AuditQueryByTarget(
+            target_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+        )
+        request = AuditLogQueryRequest(
+            audit_log=ObjectIdentifier(ObjectType.AUDIT_LOG, 999),
+            query_parameters=query_params,
+            requested_count=10,
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_audit_log_query(
+                ConfirmedServiceChoice.AUDIT_LOG_QUERY,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+    @pytest.mark.asyncio
+    async def test_query_non_audit_log_object_raises(self):
+        """AuditLogQuery on a non-AuditLog object raises UNKNOWN_OBJECT."""
+        from bac_py.services.audit import AuditLogQueryRequest
+        from bac_py.types.audit_types import AuditQueryByTarget
+
+        _, _, _, handlers = _make_app_and_handlers()
+        # Device object exists but is not an AuditLogObject
+        query_params = AuditQueryByTarget(
+            target_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+        )
+        request = AuditLogQueryRequest(
+            audit_log=ObjectIdentifier(ObjectType.DEVICE, 1),
+            query_parameters=query_params,
+            requested_count=10,
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_audit_log_query(
+                ConfirmedServiceChoice.AUDIT_LOG_QUERY,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+    @pytest.mark.asyncio
+    async def test_query_with_start_at_sequence(self):
+        """AuditLogQuery with start_at_sequence_number filters records."""
+        from bac_py.objects.audit_log import AuditLogObject
+        from bac_py.services.audit import AuditLogQueryACK, AuditLogQueryRequest
+        from bac_py.types.audit_types import AuditQueryByTarget, BACnetAuditNotification
+        from bac_py.types.enums import AuditOperation
+
+        _, db, _, handlers = _make_app_and_handlers()
+        audit_log = AuditLogObject(1)
+        audit_log._properties[PropertyIdentifier.LOG_ENABLE] = True
+        db.add(audit_log)
+
+        # Append 5 records (sequence numbers 1-5)
+        for i in range(5):
+            notification = BACnetAuditNotification(
+                operation=AuditOperation.WRITE,
+                target_object=ObjectIdentifier(ObjectType.ANALOG_INPUT, i + 1),
+            )
+            audit_log.append_record(notification)
+
+        query_params = AuditQueryByTarget(
+            target_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+        )
+        request = AuditLogQueryRequest(
+            audit_log=ObjectIdentifier(ObjectType.AUDIT_LOG, 1),
+            query_parameters=query_params,
+            start_at_sequence_number=3,
+            requested_count=10,
+        )
+        result = await handlers.handle_audit_log_query(
+            ConfirmedServiceChoice.AUDIT_LOG_QUERY,
+            request.encode(),
+            SOURCE,
+        )
+        ack = AuditLogQueryACK.decode(result)
+        # Should return records 3, 4, 5
+        assert len(ack.records) == 3
+        assert ack.no_more_items is True
+
+
+# ---------------------------------------------------------------------------
+# AuditNotification handler tests
+# ---------------------------------------------------------------------------
+
+
+class TestHandleAuditNotification:
+    @pytest.mark.asyncio
+    async def test_confirmed_audit_notification_returns_simple_ack(self):
+        """ConfirmedAuditNotification returns None (SimpleACK)."""
+        from bac_py.services.audit import ConfirmedAuditNotificationRequest
+        from bac_py.types.audit_types import BACnetAuditNotification
+        from bac_py.types.enums import AuditOperation
+
+        _, _, _, handlers = _make_app_and_handlers()
+        notification = BACnetAuditNotification(
+            operation=AuditOperation.WRITE,
+            target_object=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+        )
+        request = ConfirmedAuditNotificationRequest(
+            notifications=[notification],
+        )
+        result = await handlers.handle_confirmed_audit_notification(
+            ConfirmedServiceChoice.CONFIRMED_AUDIT_NOTIFICATION,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None  # SimpleACK
+
+    @pytest.mark.asyncio
+    async def test_confirmed_audit_notification_appends_to_log(self):
+        """ConfirmedAuditNotification appends notifications to AuditLog objects."""
+        from bac_py.objects.audit_log import AuditLogObject
+        from bac_py.services.audit import ConfirmedAuditNotificationRequest
+        from bac_py.types.audit_types import BACnetAuditNotification
+        from bac_py.types.enums import AuditOperation
+
+        _, db, _, handlers = _make_app_and_handlers()
+        audit_log = AuditLogObject(1)
+        audit_log._properties[PropertyIdentifier.LOG_ENABLE] = True
+        db.add(audit_log)
+
+        notification = BACnetAuditNotification(
+            operation=AuditOperation.WRITE,
+            target_object=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+        )
+        request = ConfirmedAuditNotificationRequest(
+            notifications=[notification],
+        )
+        await handlers.handle_confirmed_audit_notification(
+            ConfirmedServiceChoice.CONFIRMED_AUDIT_NOTIFICATION,
+            request.encode(),
+            SOURCE,
+        )
+        # The record should have been appended to the log
+        buffer = audit_log._properties[PropertyIdentifier.LOG_BUFFER]
+        assert len(buffer) == 1
+        assert buffer[0].notification.operation == AuditOperation.WRITE
+
+    @pytest.mark.asyncio
+    async def test_confirmed_audit_multiple_notifications(self):
+        """ConfirmedAuditNotification with multiple notifications appends all."""
+        from bac_py.objects.audit_log import AuditLogObject
+        from bac_py.services.audit import ConfirmedAuditNotificationRequest
+        from bac_py.types.audit_types import BACnetAuditNotification
+        from bac_py.types.enums import AuditOperation
+
+        _, db, _, handlers = _make_app_and_handlers()
+        audit_log = AuditLogObject(1)
+        audit_log._properties[PropertyIdentifier.LOG_ENABLE] = True
+        db.add(audit_log)
+
+        notifications = [
+            BACnetAuditNotification(
+                operation=AuditOperation.WRITE,
+                target_object=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            ),
+            BACnetAuditNotification(
+                operation=AuditOperation.CREATE,
+                target_object=ObjectIdentifier(ObjectType.ANALOG_INPUT, 2),
+            ),
+        ]
+        request = ConfirmedAuditNotificationRequest(notifications=notifications)
+        await handlers.handle_confirmed_audit_notification(
+            ConfirmedServiceChoice.CONFIRMED_AUDIT_NOTIFICATION,
+            request.encode(),
+            SOURCE,
+        )
+        buffer = audit_log._properties[PropertyIdentifier.LOG_BUFFER]
+        assert len(buffer) == 2
+
+    @pytest.mark.asyncio
+    async def test_unconfirmed_audit_notification_returns_none(self):
+        """UnconfirmedAuditNotification returns None."""
+        from bac_py.services.audit import UnconfirmedAuditNotificationRequest
+        from bac_py.types.audit_types import BACnetAuditNotification
+        from bac_py.types.enums import AuditOperation, UnconfirmedServiceChoice
+
+        _, _, _, handlers = _make_app_and_handlers()
+        notification = BACnetAuditNotification(
+            operation=AuditOperation.GENERAL,
+        )
+        request = UnconfirmedAuditNotificationRequest(
+            notifications=[notification],
+        )
+        result = await handlers.handle_unconfirmed_audit_notification(
+            UnconfirmedServiceChoice.UNCONFIRMED_AUDIT_NOTIFICATION,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_unconfirmed_audit_notification_appends_to_log(self):
+        """UnconfirmedAuditNotification appends to AuditLog objects."""
+        from bac_py.objects.audit_log import AuditLogObject
+        from bac_py.services.audit import UnconfirmedAuditNotificationRequest
+        from bac_py.types.audit_types import BACnetAuditNotification
+        from bac_py.types.enums import AuditOperation, UnconfirmedServiceChoice
+
+        _, db, _, handlers = _make_app_and_handlers()
+        audit_log = AuditLogObject(1)
+        audit_log._properties[PropertyIdentifier.LOG_ENABLE] = True
+        db.add(audit_log)
+
+        notification = BACnetAuditNotification(
+            operation=AuditOperation.DELETE,
+            target_object=ObjectIdentifier(ObjectType.ANALOG_INPUT, 5),
+        )
+        request = UnconfirmedAuditNotificationRequest(
+            notifications=[notification],
+        )
+        await handlers.handle_unconfirmed_audit_notification(
+            UnconfirmedServiceChoice.UNCONFIRMED_AUDIT_NOTIFICATION,
+            request.encode(),
+            SOURCE,
+        )
+        buffer = audit_log._properties[PropertyIdentifier.LOG_BUFFER]
+        assert len(buffer) == 1
+        assert buffer[0].notification.operation == AuditOperation.DELETE
+
+    @pytest.mark.asyncio
+    async def test_audit_notification_no_log_objects(self):
+        """AuditNotification without AuditLog objects in db does not raise."""
+        from bac_py.services.audit import ConfirmedAuditNotificationRequest
+        from bac_py.types.audit_types import BACnetAuditNotification
+        from bac_py.types.enums import AuditOperation
+
+        _, _, _, handlers = _make_app_and_handlers()
+        # No AuditLogObject in db
+        notification = BACnetAuditNotification(
+            operation=AuditOperation.WRITE,
+            target_object=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+        )
+        request = ConfirmedAuditNotificationRequest(
+            notifications=[notification],
+        )
+        result = await handlers.handle_confirmed_audit_notification(
+            ConfirmedServiceChoice.CONFIRMED_AUDIT_NOTIFICATION,
+            request.encode(),
+            SOURCE,
+        )
+        assert result is None  # SimpleACK, no error even without log objects

@@ -1,11 +1,24 @@
 """Tests for COV service encoding/decoding per ASHRAE 135-2016 Clause 13."""
 
-from bac_py.encoding.primitives import encode_application_bit_string, encode_application_real
+from bac_py.encoding.primitives import (
+    encode_application_bit_string,
+    encode_application_real,
+    encode_application_unsigned,
+)
 from bac_py.services.cov import (
+    BACnetPropertyReference,
     BACnetPropertyValue,
+    COVNotificationMultipleRequest,
     COVNotificationRequest,
+    COVObjectNotification,
+    COVPropertyValue,
+    COVReference,
+    COVSubscriptionSpecification,
+    SubscribeCOVPropertyMultipleRequest,
+    SubscribeCOVPropertyRequest,
     SubscribeCOVRequest,
 )
+from bac_py.types.constructed import BACnetTimeStamp
 from bac_py.types.enums import ObjectType, PropertyIdentifier
 from bac_py.types.primitives import BitString, ObjectIdentifier
 
@@ -327,3 +340,547 @@ class TestCOVNotificationRequest:
         assert decoded.monitored_object_identifier.object_type == ObjectType.BINARY_OUTPUT
         assert len(decoded.list_of_values) == 2
         assert decoded.list_of_values[0].value == b"\x91\x00"
+
+
+class TestBACnetPropertyReference:
+    """Tests for BACnetPropertyReference encode/decode."""
+
+    def test_round_trip_basic(self):
+        """Property reference with just property_identifier."""
+        ref = BACnetPropertyReference(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+        )
+        encoded = ref.encode()
+        decoded, _offset = BACnetPropertyReference.decode(encoded)
+
+        assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
+        assert decoded.property_array_index is None
+
+    def test_round_trip_with_array_index(self):
+        """Property reference with property_array_index."""
+        ref = BACnetPropertyReference(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            property_array_index=5,
+        )
+        encoded = ref.encode()
+        decoded, _offset = BACnetPropertyReference.decode(encoded)
+
+        assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
+        assert decoded.property_array_index == 5
+
+    def test_round_trip_with_array_index_none(self):
+        """Property reference with property_array_index explicitly None."""
+        ref = BACnetPropertyReference(
+            property_identifier=PropertyIdentifier.STATUS_FLAGS,
+            property_array_index=None,
+        )
+        encoded = ref.encode()
+        decoded, _offset = BACnetPropertyReference.decode(encoded)
+
+        assert decoded.property_identifier == PropertyIdentifier.STATUS_FLAGS
+        assert decoded.property_array_index is None
+
+
+class TestSubscribeCOVPropertyRequest:
+    """Tests for SubscribeCOVProperty-Request encode/decode."""
+
+    def test_round_trip_full_subscription(self):
+        """Full subscription with all fields set."""
+        ref = BACnetPropertyReference(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+        )
+        req = SubscribeCOVPropertyRequest(
+            subscriber_process_identifier=10,
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            monitored_property_identifier=ref,
+            issue_confirmed_notifications=True,
+            lifetime=600,
+            cov_increment=1.5,
+        )
+        encoded = req.encode()
+        decoded = SubscribeCOVPropertyRequest.decode(encoded)
+
+        assert decoded.subscriber_process_identifier == 10
+        assert decoded.monitored_object_identifier.object_type == ObjectType.ANALOG_INPUT
+        assert decoded.monitored_object_identifier.instance_number == 1
+        assert decoded.issue_confirmed_notifications is True
+        assert decoded.lifetime == 600
+        assert (
+            decoded.monitored_property_identifier.property_identifier
+            == PropertyIdentifier.PRESENT_VALUE
+        )
+        assert decoded.monitored_property_identifier.property_array_index is None
+        assert decoded.cov_increment == 1.5
+
+    def test_round_trip_cancellation(self):
+        """Cancellation: optional fields None."""
+        ref = BACnetPropertyReference(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+        )
+        req = SubscribeCOVPropertyRequest(
+            subscriber_process_identifier=10,
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            monitored_property_identifier=ref,
+        )
+        encoded = req.encode()
+        decoded = SubscribeCOVPropertyRequest.decode(encoded)
+
+        assert decoded.subscriber_process_identifier == 10
+        assert decoded.monitored_object_identifier.object_type == ObjectType.ANALOG_INPUT
+        assert decoded.issue_confirmed_notifications is None
+        assert decoded.lifetime is None
+        assert decoded.cov_increment is None
+        assert (
+            decoded.monitored_property_identifier.property_identifier
+            == PropertyIdentifier.PRESENT_VALUE
+        )
+
+    def test_round_trip_with_cov_increment(self):
+        """Subscription with COV increment."""
+        ref = BACnetPropertyReference(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            property_array_index=0,
+        )
+        req = SubscribeCOVPropertyRequest(
+            subscriber_process_identifier=42,
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_VALUE, 7),
+            monitored_property_identifier=ref,
+            issue_confirmed_notifications=False,
+            lifetime=300,
+            cov_increment=0.5,
+        )
+        encoded = req.encode()
+        decoded = SubscribeCOVPropertyRequest.decode(encoded)
+
+        assert decoded.subscriber_process_identifier == 42
+        assert decoded.monitored_object_identifier.object_type == ObjectType.ANALOG_VALUE
+        assert decoded.monitored_object_identifier.instance_number == 7
+        assert decoded.issue_confirmed_notifications is False
+        assert decoded.lifetime == 300
+        assert decoded.monitored_property_identifier.property_array_index == 0
+        assert decoded.cov_increment == 0.5
+
+    def test_round_trip_without_cov_increment(self):
+        """Subscription without COV increment."""
+        ref = BACnetPropertyReference(
+            property_identifier=PropertyIdentifier.RELIABILITY,
+        )
+        req = SubscribeCOVPropertyRequest(
+            subscriber_process_identifier=99,
+            monitored_object_identifier=ObjectIdentifier(ObjectType.BINARY_INPUT, 3),
+            monitored_property_identifier=ref,
+            issue_confirmed_notifications=True,
+            lifetime=120,
+            cov_increment=None,
+        )
+        encoded = req.encode()
+        decoded = SubscribeCOVPropertyRequest.decode(encoded)
+
+        assert decoded.subscriber_process_identifier == 99
+        assert decoded.monitored_object_identifier.object_type == ObjectType.BINARY_INPUT
+        assert decoded.issue_confirmed_notifications is True
+        assert decoded.lifetime == 120
+        assert (
+            decoded.monitored_property_identifier.property_identifier
+            == PropertyIdentifier.RELIABILITY
+        )
+        assert decoded.cov_increment is None
+
+
+class TestCOVReference:
+    """Tests for COVReference encode/decode."""
+
+    def test_round_trip_with_cov_increment(self):
+        """COV reference with increment."""
+        ref = COVReference(
+            monitored_property=BACnetPropertyReference(
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            cov_increment=2.0,
+        )
+        encoded = ref.encode()
+        decoded, _offset = COVReference.decode(encoded)
+
+        assert decoded.monitored_property.property_identifier == PropertyIdentifier.PRESENT_VALUE
+        assert decoded.monitored_property.property_array_index is None
+        assert decoded.cov_increment == 2.0
+
+    def test_round_trip_without_cov_increment(self):
+        """COV reference without increment."""
+        ref = COVReference(
+            monitored_property=BACnetPropertyReference(
+                property_identifier=PropertyIdentifier.STATUS_FLAGS,
+                property_array_index=3,
+            ),
+            cov_increment=None,
+        )
+        encoded = ref.encode()
+        decoded, _offset = COVReference.decode(encoded)
+
+        assert decoded.monitored_property.property_identifier == PropertyIdentifier.STATUS_FLAGS
+        assert decoded.monitored_property.property_array_index == 3
+        assert decoded.cov_increment is None
+
+
+class TestCOVSubscriptionSpecification:
+    """Tests for COVSubscriptionSpecification encode/decode."""
+
+    def test_round_trip_single_reference(self):
+        """Specification with a single COV reference."""
+        spec = COVSubscriptionSpecification(
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            list_of_cov_references=[
+                COVReference(
+                    monitored_property=BACnetPropertyReference(
+                        property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                    ),
+                    cov_increment=1.0,
+                ),
+            ],
+        )
+        encoded = spec.encode()
+        decoded, _offset = COVSubscriptionSpecification.decode(encoded)
+
+        assert decoded.monitored_object_identifier.object_type == ObjectType.ANALOG_INPUT
+        assert decoded.monitored_object_identifier.instance_number == 1
+        assert len(decoded.list_of_cov_references) == 1
+        assert (
+            decoded.list_of_cov_references[0].monitored_property.property_identifier
+            == PropertyIdentifier.PRESENT_VALUE
+        )
+        assert decoded.list_of_cov_references[0].cov_increment == 1.0
+
+    def test_round_trip_multiple_references(self):
+        """Specification with multiple COV references."""
+        spec = COVSubscriptionSpecification(
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_VALUE, 10),
+            list_of_cov_references=[
+                COVReference(
+                    monitored_property=BACnetPropertyReference(
+                        property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                    ),
+                    cov_increment=0.5,
+                ),
+                COVReference(
+                    monitored_property=BACnetPropertyReference(
+                        property_identifier=PropertyIdentifier.STATUS_FLAGS,
+                    ),
+                    cov_increment=None,
+                ),
+                COVReference(
+                    monitored_property=BACnetPropertyReference(
+                        property_identifier=PropertyIdentifier.RELIABILITY,
+                        property_array_index=2,
+                    ),
+                    cov_increment=3.0,
+                ),
+            ],
+        )
+        encoded = spec.encode()
+        decoded, _offset = COVSubscriptionSpecification.decode(encoded)
+
+        assert decoded.monitored_object_identifier.object_type == ObjectType.ANALOG_VALUE
+        assert decoded.monitored_object_identifier.instance_number == 10
+        assert len(decoded.list_of_cov_references) == 3
+        assert decoded.list_of_cov_references[0].cov_increment == 0.5
+        assert decoded.list_of_cov_references[1].cov_increment is None
+        assert decoded.list_of_cov_references[2].monitored_property.property_array_index == 2
+        assert decoded.list_of_cov_references[2].cov_increment == 3.0
+
+
+class TestSubscribeCOVPropertyMultipleRequest:
+    """Tests for SubscribeCOVPropertyMultiple-Request encode/decode."""
+
+    def test_round_trip_basic_subscription(self):
+        """Basic subscription with one specification."""
+        req = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=15,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                            ),
+                            cov_increment=1.0,
+                        ),
+                    ],
+                ),
+            ],
+            issue_confirmed_notifications=True,
+            lifetime=300,
+        )
+        encoded = req.encode()
+        decoded = SubscribeCOVPropertyMultipleRequest.decode(encoded)
+
+        assert decoded.subscriber_process_identifier == 15
+        assert decoded.issue_confirmed_notifications is True
+        assert decoded.lifetime == 300
+        assert decoded.max_notification_delay is None
+        assert len(decoded.list_of_cov_subscription_specifications) == 1
+        spec = decoded.list_of_cov_subscription_specifications[0]
+        assert spec.monitored_object_identifier.object_type == ObjectType.ANALOG_INPUT
+        assert len(spec.list_of_cov_references) == 1
+        assert spec.list_of_cov_references[0].cov_increment == 1.0
+
+    def test_round_trip_with_max_notification_delay(self):
+        """Subscription with max_notification_delay set."""
+        req = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=20,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 5),
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                            ),
+                        ),
+                    ],
+                ),
+            ],
+            issue_confirmed_notifications=False,
+            lifetime=600,
+            max_notification_delay=10,
+        )
+        encoded = req.encode()
+        decoded = SubscribeCOVPropertyMultipleRequest.decode(encoded)
+
+        assert decoded.subscriber_process_identifier == 20
+        assert decoded.issue_confirmed_notifications is False
+        assert decoded.lifetime == 600
+        assert decoded.max_notification_delay == 10
+        assert len(decoded.list_of_cov_subscription_specifications) == 1
+
+    def test_round_trip_cancellation(self):
+        """Cancellation: optional fields omitted."""
+        req = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=30,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=ObjectIdentifier(ObjectType.BINARY_INPUT, 2),
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                            ),
+                        ),
+                    ],
+                ),
+            ],
+        )
+        encoded = req.encode()
+        decoded = SubscribeCOVPropertyMultipleRequest.decode(encoded)
+
+        assert decoded.subscriber_process_identifier == 30
+        assert decoded.issue_confirmed_notifications is None
+        assert decoded.lifetime is None
+        assert decoded.max_notification_delay is None
+        assert len(decoded.list_of_cov_subscription_specifications) == 1
+
+
+class TestCOVPropertyValue:
+    """Tests for COVPropertyValue encode/decode."""
+
+    def test_round_trip_basic(self):
+        """Basic property value with no optional fields."""
+        value_bytes = encode_application_real(72.5)
+        pv = COVPropertyValue(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            value=value_bytes,
+        )
+        encoded = pv.encode()
+        decoded, _offset = COVPropertyValue.decode(encoded)
+
+        assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
+        assert decoded.value == value_bytes
+        assert decoded.array_index is None
+        assert decoded.time_of_change is None
+
+    def test_round_trip_with_array_index(self):
+        """Property value with array_index."""
+        value_bytes = encode_application_unsigned(100)
+        pv = COVPropertyValue(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            value=value_bytes,
+            array_index=3,
+        )
+        encoded = pv.encode()
+        decoded, _offset = COVPropertyValue.decode(encoded)
+
+        assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
+        assert decoded.value == value_bytes
+        assert decoded.array_index == 3
+        assert decoded.time_of_change is None
+
+    def test_round_trip_with_time_of_change(self):
+        """Property value with time_of_change (BACnetTimeStamp sequence number)."""
+        value_bytes = encode_application_real(55.0)
+        timestamp = BACnetTimeStamp(choice=1, value=42)
+        pv = COVPropertyValue(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            value=value_bytes,
+            time_of_change=timestamp,
+        )
+        encoded = pv.encode()
+        decoded, _offset = COVPropertyValue.decode(encoded)
+
+        assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
+        assert decoded.value == value_bytes
+        assert decoded.array_index is None
+        assert decoded.time_of_change is not None
+        assert decoded.time_of_change.choice == 1
+        assert decoded.time_of_change.value == 42
+
+
+class TestCOVObjectNotification:
+    """Tests for COVObjectNotification encode/decode."""
+
+    def test_round_trip_single_property_value(self):
+        """Notification with a single property value."""
+        value_bytes = encode_application_real(23.5)
+        notification = COVObjectNotification(
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            list_of_values=[
+                COVPropertyValue(
+                    property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                    value=value_bytes,
+                ),
+            ],
+        )
+        encoded = notification.encode()
+        decoded, _offset = COVObjectNotification.decode(encoded)
+
+        assert decoded.monitored_object_identifier.object_type == ObjectType.ANALOG_INPUT
+        assert decoded.monitored_object_identifier.instance_number == 1
+        assert len(decoded.list_of_values) == 1
+        assert decoded.list_of_values[0].property_identifier == PropertyIdentifier.PRESENT_VALUE
+        assert decoded.list_of_values[0].value == value_bytes
+
+    def test_round_trip_multiple_property_values(self):
+        """Notification with multiple property values."""
+        pv_bytes = encode_application_real(68.0)
+        sf_bytes = encode_application_bit_string(BitString(bytes([0x00]), unused_bits=4))
+        notification = COVObjectNotification(
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_VALUE, 10),
+            list_of_values=[
+                COVPropertyValue(
+                    property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                    value=pv_bytes,
+                ),
+                COVPropertyValue(
+                    property_identifier=PropertyIdentifier.STATUS_FLAGS,
+                    value=sf_bytes,
+                    array_index=None,
+                ),
+            ],
+        )
+        encoded = notification.encode()
+        decoded, _offset = COVObjectNotification.decode(encoded)
+
+        assert decoded.monitored_object_identifier.object_type == ObjectType.ANALOG_VALUE
+        assert decoded.monitored_object_identifier.instance_number == 10
+        assert len(decoded.list_of_values) == 2
+        assert decoded.list_of_values[0].property_identifier == PropertyIdentifier.PRESENT_VALUE
+        assert decoded.list_of_values[0].value == pv_bytes
+        assert decoded.list_of_values[1].property_identifier == PropertyIdentifier.STATUS_FLAGS
+        assert decoded.list_of_values[1].value == sf_bytes
+
+
+class TestCOVNotificationMultipleRequest:
+    """Tests for COVNotificationMultiple-Request encode/decode."""
+
+    def test_round_trip_single_object_notification(self):
+        """Multiple notification with a single object."""
+        value_bytes = encode_application_real(72.5)
+        timestamp = BACnetTimeStamp(choice=1, value=100)
+        req = COVNotificationMultipleRequest(
+            subscriber_process_identifier=42,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 100),
+            time_remaining=300,
+            timestamp=timestamp,
+            list_of_cov_notifications=[
+                COVObjectNotification(
+                    monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                    list_of_values=[
+                        COVPropertyValue(
+                            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                            value=value_bytes,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        encoded = req.encode()
+        decoded = COVNotificationMultipleRequest.decode(encoded)
+
+        assert decoded.subscriber_process_identifier == 42
+        assert decoded.initiating_device_identifier.object_type == ObjectType.DEVICE
+        assert decoded.initiating_device_identifier.instance_number == 100
+        assert decoded.time_remaining == 300
+        assert decoded.timestamp.choice == 1
+        assert decoded.timestamp.value == 100
+        assert len(decoded.list_of_cov_notifications) == 1
+        obj_notif = decoded.list_of_cov_notifications[0]
+        assert obj_notif.monitored_object_identifier.object_type == ObjectType.ANALOG_INPUT
+        assert len(obj_notif.list_of_values) == 1
+        assert obj_notif.list_of_values[0].value == value_bytes
+
+    def test_round_trip_multiple_object_notifications(self):
+        """Multiple notification with multiple objects."""
+        pv_bytes_ai = encode_application_real(72.5)
+        sf_bytes = encode_application_bit_string(BitString(bytes([0x00]), unused_bits=4))
+        pv_bytes_bv = b"\x91\x01"  # enumerated 1 (active)
+        timestamp = BACnetTimeStamp(choice=1, value=200)
+        req = COVNotificationMultipleRequest(
+            subscriber_process_identifier=7,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 50),
+            time_remaining=120,
+            timestamp=timestamp,
+            list_of_cov_notifications=[
+                COVObjectNotification(
+                    monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                    list_of_values=[
+                        COVPropertyValue(
+                            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                            value=pv_bytes_ai,
+                        ),
+                        COVPropertyValue(
+                            property_identifier=PropertyIdentifier.STATUS_FLAGS,
+                            value=sf_bytes,
+                        ),
+                    ],
+                ),
+                COVObjectNotification(
+                    monitored_object_identifier=ObjectIdentifier(ObjectType.BINARY_VALUE, 3),
+                    list_of_values=[
+                        COVPropertyValue(
+                            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                            value=pv_bytes_bv,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        encoded = req.encode()
+        decoded = COVNotificationMultipleRequest.decode(encoded)
+
+        assert decoded.subscriber_process_identifier == 7
+        assert decoded.initiating_device_identifier.object_type == ObjectType.DEVICE
+        assert decoded.initiating_device_identifier.instance_number == 50
+        assert decoded.time_remaining == 120
+        assert decoded.timestamp.choice == 1
+        assert decoded.timestamp.value == 200
+        assert len(decoded.list_of_cov_notifications) == 2
+
+        notif_ai = decoded.list_of_cov_notifications[0]
+        assert notif_ai.monitored_object_identifier.object_type == ObjectType.ANALOG_INPUT
+        assert len(notif_ai.list_of_values) == 2
+        assert notif_ai.list_of_values[0].value == pv_bytes_ai
+        assert notif_ai.list_of_values[1].value == sf_bytes
+
+        notif_bv = decoded.list_of_cov_notifications[1]
+        assert notif_bv.monitored_object_identifier.object_type == ObjectType.BINARY_VALUE
+        assert len(notif_bv.list_of_values) == 1
+        assert notif_bv.list_of_values[0].value == pv_bytes_bv

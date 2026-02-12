@@ -2,8 +2,20 @@ import asyncio
 
 import pytest
 
-from bac_py.app.tsm import ClientTransaction, ClientTSM, ServerTransaction, ServerTSM
-from bac_py.encoding.apdu import ConfirmedRequestPDU
+from bac_py.app.tsm import (
+    ClientTransaction,
+    ClientTSM,
+    ServerTransaction,
+    ServerTransactionState,
+    ServerTSM,
+)
+from bac_py.encoding.apdu import (
+    AbortPDU,
+    ComplexAckPDU,
+    ConfirmedRequestPDU,
+    SegmentAckPDU,
+    decode_apdu,
+)
 from bac_py.network.address import BACnetAddress
 from bac_py.services.errors import (
     BACnetAbortError,
@@ -249,3 +261,789 @@ class TestServerTSM:
         assert txn.client_max_apdu_length == 480
         assert txn.client_max_segments == 64
         assert txn.segmented_response_accepted is True
+
+
+# ---------------------------------------------------------------------------
+# Segmentation scenario tests
+# ---------------------------------------------------------------------------
+
+
+class TestClientSegmentedResponse:
+    """Test receiving a segmented ComplexACK response on the client side."""
+
+    @pytest.fixture
+    def network(self):
+        return FakeNetworkLayer()
+
+    @pytest.fixture
+    def tsm(self, network):
+        return ClientTSM(network, apdu_timeout=0.1, apdu_retries=1, proposed_window_size=16)
+
+    async def test_first_segment_triggers_segment_ack(self, tsm, network):
+        """Receiving the first segment (seq=0, more_follows=True) should send a SegmentACK."""
+        task = asyncio.create_task(tsm.send_request(12, b"\x01\x02", PEER))
+        await asyncio.sleep(0.01)
+
+        assert len(network.sent) >= 1
+        apdu_bytes = network.sent[0][0]
+        invoke_id = apdu_bytes[2]
+
+        # Clear to isolate the SegmentACK we expect next
+        network.clear()
+
+        # Server sends first segment of a segmented ComplexACK
+        first_seg = ComplexAckPDU(
+            segmented=True,
+            more_follows=True,
+            invoke_id=invoke_id,
+            sequence_number=0,
+            proposed_window_size=2,
+            service_choice=12,
+            service_ack=b"\xaa\xbb",
+        )
+        tsm.handle_segmented_complex_ack(PEER, first_seg)
+
+        # Client should have sent a SegmentACK
+        assert len(network.sent) == 1
+        ack_bytes = network.sent[0][0]
+        decoded_ack = decode_apdu(ack_bytes)
+        assert isinstance(decoded_ack, SegmentAckPDU)
+        assert decoded_ack.invoke_id == invoke_id
+        assert decoded_ack.sequence_number == 0
+        assert decoded_ack.negative_ack is False
+        assert decoded_ack.sent_by_server is False
+
+        # Task should still be pending (more segments expected)
+        assert not task.done()
+
+        # Clean up: send final segment
+        network.clear()
+        final_seg = ComplexAckPDU(
+            segmented=True,
+            more_follows=False,
+            invoke_id=invoke_id,
+            sequence_number=1,
+            proposed_window_size=2,
+            service_choice=12,
+            service_ack=b"\xcc\xdd",
+        )
+        tsm.handle_segmented_complex_ack(PEER, final_seg)
+        result = await task
+        assert result == b"\xaa\xbb\xcc\xdd"
+
+    async def test_two_segment_reassembly(self, tsm, network):
+        """Receiving two segments should reassemble into complete data."""
+        task = asyncio.create_task(tsm.send_request(12, b"\x01\x02", PEER))
+        await asyncio.sleep(0.01)
+
+        invoke_id = network.sent[0][0][2]
+        network.clear()
+
+        # First segment
+        seg0 = ComplexAckPDU(
+            segmented=True,
+            more_follows=True,
+            invoke_id=invoke_id,
+            sequence_number=0,
+            proposed_window_size=2,
+            service_choice=12,
+            service_ack=b"\x01\x02\x03",
+        )
+        tsm.handle_segmented_complex_ack(PEER, seg0)
+        network.clear()
+
+        # Second (final) segment
+        seg1 = ComplexAckPDU(
+            segmented=True,
+            more_follows=False,
+            invoke_id=invoke_id,
+            sequence_number=1,
+            proposed_window_size=2,
+            service_choice=12,
+            service_ack=b"\x04\x05\x06",
+        )
+        tsm.handle_segmented_complex_ack(PEER, seg1)
+        result = await task
+        assert result == b"\x01\x02\x03\x04\x05\x06"
+
+    async def test_four_segments_with_window_ack(self, tsm, network):
+        """Four segments with window_size=2 should produce an intermediate ACK.
+
+        The SegmentReceiver stores segment 0 at creation, setting
+        ``_expected_idx=1`` and ``_window_start_idx=1``.  With
+        ``actual_window_size=2`` (min of ours and sender's), the first
+        window boundary is at ``_window_start_idx + actual_window_size = 3``.
+        So segments 1 and 2 fill that window, triggering a SEND_ACK.
+        """
+        tsm_ws2 = ClientTSM(network, apdu_timeout=0.1, apdu_retries=1, proposed_window_size=2)
+        task = asyncio.create_task(tsm_ws2.send_request(12, b"\x01\x02", PEER))
+        await asyncio.sleep(0.01)
+
+        invoke_id = network.sent[0][0][2]
+        network.clear()
+
+        # First segment (seq=0) -- stored by SegmentReceiver.create()
+        seg0 = ComplexAckPDU(
+            segmented=True,
+            more_follows=True,
+            invoke_id=invoke_id,
+            sequence_number=0,
+            proposed_window_size=2,
+            service_choice=12,
+            service_ack=b"\xaa",
+        )
+        tsm_ws2.handle_segmented_complex_ack(PEER, seg0)
+        # Initial ACK for seq=0 sent by handle_segmented_complex_ack
+        network.clear()
+
+        # Second segment (seq=1) -- CONTINUE, no ACK yet
+        seg1 = ComplexAckPDU(
+            segmented=True,
+            more_follows=True,
+            invoke_id=invoke_id,
+            sequence_number=1,
+            proposed_window_size=2,
+            service_choice=12,
+            service_ack=b"\xbb",
+        )
+        tsm_ws2.handle_segmented_complex_ack(PEER, seg1)
+
+        # Third segment (seq=2) -- window boundary, triggers SEND_ACK
+        seg2 = ComplexAckPDU(
+            segmented=True,
+            more_follows=True,
+            invoke_id=invoke_id,
+            sequence_number=2,
+            proposed_window_size=2,
+            service_choice=12,
+            service_ack=b"\xcc",
+        )
+        tsm_ws2.handle_segmented_complex_ack(PEER, seg2)
+
+        # Should have sent a SegmentACK at the window boundary
+        assert len(network.sent) >= 1
+        ack_bytes = network.sent[-1][0]
+        decoded = decode_apdu(ack_bytes)
+        assert isinstance(decoded, SegmentAckPDU)
+        assert decoded.sequence_number == 2
+        network.clear()
+
+        # Fourth (final) segment
+        seg3 = ComplexAckPDU(
+            segmented=True,
+            more_follows=False,
+            invoke_id=invoke_id,
+            sequence_number=3,
+            proposed_window_size=2,
+            service_choice=12,
+            service_ack=b"\xdd",
+        )
+        tsm_ws2.handle_segmented_complex_ack(PEER, seg3)
+        result = await task
+        assert result == b"\xaa\xbb\xcc\xdd"
+
+    async def test_segmented_ack_ignored_for_unknown_transaction(self, tsm, network):
+        """A segmented ComplexACK for an unknown invoke_id should be silently ignored."""
+        seg = ComplexAckPDU(
+            segmented=True,
+            more_follows=True,
+            invoke_id=99,
+            sequence_number=0,
+            proposed_window_size=2,
+            service_choice=12,
+            service_ack=b"\xaa",
+        )
+        # Should not raise
+        tsm.handle_segmented_complex_ack(PEER, seg)
+        assert len(network.sent) == 0
+
+
+class TestClientInvokeIdAllocation:
+    """Test invoke ID allocation and exhaustion."""
+
+    @pytest.fixture
+    def network(self):
+        return FakeNetworkLayer()
+
+    async def test_256_requests_exhausts_invoke_ids(self, network):
+        """Sending 256 concurrent requests to the same peer should exhaust invoke IDs."""
+        tsm = ClientTSM(network, apdu_timeout=5.0, apdu_retries=0)
+        tasks = []
+        for _ in range(256):
+            t = asyncio.create_task(tsm.send_request(12, b"\x01", PEER))
+            tasks.append(t)
+        await asyncio.sleep(0.01)
+
+        # All 256 invoke IDs are now in use; the next one should raise RuntimeError
+        with pytest.raises(RuntimeError, match="No available invoke IDs"):
+            tsm._allocate_invoke_id(PEER)
+
+        # Clean up: complete all transactions
+        for apdu_bytes, dest, _ in network.sent:
+            invoke_id = apdu_bytes[2]
+            tsm.handle_simple_ack(dest, invoke_id, 12)
+        for t in tasks:
+            await t
+
+    async def test_completed_request_frees_invoke_id(self, network):
+        """Completing a request should free the invoke ID for reuse."""
+        tsm = ClientTSM(network, apdu_timeout=0.1, apdu_retries=0)
+
+        # Send and complete a request
+        task1 = asyncio.create_task(tsm.send_request(12, b"\x01", PEER))
+        await asyncio.sleep(0.01)
+        invoke_id_1 = network.sent[0][0][2]
+        tsm.handle_simple_ack(PEER, invoke_id_1, 12)
+        await task1
+
+        # The invoke ID should now be available again; send another request
+        network.clear()
+        task2 = asyncio.create_task(tsm.send_request(12, b"\x02", PEER))
+        await asyncio.sleep(0.01)
+        assert len(network.sent) == 1
+        invoke_id_2 = network.sent[0][0][2]
+        tsm.handle_simple_ack(PEER, invoke_id_2, 12)
+        result = await task2
+        assert result == b""
+
+    async def test_different_peers_can_coexist(self, network):
+        """Concurrent requests to different peers should both succeed."""
+        tsm = ClientTSM(network, apdu_timeout=0.1, apdu_retries=0)
+        peer2 = BACnetAddress(mac_address=b"\xc0\xa8\x01\x02\xba\xc0")
+
+        task1 = asyncio.create_task(tsm.send_request(12, b"\x01", PEER))
+        task2 = asyncio.create_task(tsm.send_request(12, b"\x01", peer2))
+        await asyncio.sleep(0.01)
+
+        assert len(network.sent) == 2
+        invoke_id_1 = network.sent[0][0][2]
+        invoke_id_2 = network.sent[1][0][2]
+
+        # Both transactions should be independently completable
+        tsm.handle_simple_ack(PEER, invoke_id_1, 12)
+        tsm.handle_simple_ack(peer2, invoke_id_2, 12)
+        result1 = await task1
+        result2 = await task2
+        assert result1 == b""
+        assert result2 == b""
+
+
+class TestServerSegmentedResponse:
+    """Test server sending segmented ComplexACK responses."""
+
+    @pytest.fixture
+    def network(self):
+        return FakeNetworkLayer()
+
+    @pytest.fixture
+    def tsm(self, network):
+        return ServerTSM(
+            network,
+            request_timeout=0.1,
+            max_apdu_length=480,
+            proposed_window_size=2,
+        )
+
+    def _receive_request(self, tsm, *, segmented_response_accepted=True):
+        """Receive a confirmed request and return the transaction."""
+        pdu = ConfirmedRequestPDU(
+            segmented=False,
+            more_follows=False,
+            segmented_response_accepted=segmented_response_accepted,
+            max_segments=None,
+            max_apdu_length=480,
+            invoke_id=1,
+            sequence_number=None,
+            proposed_window_size=None,
+            service_choice=12,
+            service_request=b"\x01\x02",
+        )
+        result = tsm.receive_confirmed_request(pdu, PEER)
+        assert result is not None
+        txn, data = result
+        assert data == b"\x01\x02"
+        return txn
+
+    async def test_segmented_response_sends_segments(self, tsm, network):
+        """start_segmented_response should send ComplexACK segments to the network."""
+        txn = self._receive_request(tsm)
+        network.clear()
+
+        # Create response data larger than one segment
+        # max_apdu_length=480, ComplexACK overhead=5, so max payload = 475 bytes/segment
+        response_data = bytes(range(256)) * 2  # 512 bytes -> needs 2 segments
+
+        tsm.start_segmented_response(txn, 12, response_data)
+
+        # Should have sent segments (window_size=2 means up to 2 segments sent)
+        assert len(network.sent) >= 1
+        # Decode the first sent APDU to verify it is a segmented ComplexACK
+        first_apdu = decode_apdu(network.sent[0][0])
+        assert isinstance(first_apdu, ComplexAckPDU)
+        assert first_apdu.segmented is True
+        assert first_apdu.invoke_id == 1
+        assert first_apdu.sequence_number == 0
+        assert first_apdu.service_choice == 12
+
+    async def test_segment_ack_advances_window(self, tsm, network):
+        """After receiving SegmentACK, the server should send the next window."""
+        txn = self._receive_request(tsm)
+        network.clear()
+
+        # 3-segment response: 475*2 + remainder
+        response_data = b"\xab" * (475 * 2 + 100)  # 1050 bytes -> 3 segments
+
+        tsm.start_segmented_response(txn, 12, response_data)
+
+        # With window_size=2, the first window sends segments 0 and 1
+        initial_sent_count = len(network.sent)
+        assert initial_sent_count >= 2
+
+        # Verify segment 0 and 1 were sent
+        seg0 = decode_apdu(network.sent[0][0])
+        seg1 = decode_apdu(network.sent[1][0])
+        assert isinstance(seg0, ComplexAckPDU)
+        assert isinstance(seg1, ComplexAckPDU)
+        assert seg0.sequence_number == 0
+        assert seg1.sequence_number == 1
+        assert seg0.more_follows is True
+        assert seg1.more_follows is True
+
+        network.clear()
+
+        # Client sends SegmentACK acknowledging through sequence 1
+        seg_ack = SegmentAckPDU(
+            negative_ack=False,
+            sent_by_server=False,
+            invoke_id=1,
+            sequence_number=1,
+            actual_window_size=2,
+        )
+        tsm.handle_segment_ack_for_response(PEER, seg_ack)
+
+        # Server should now send the next window (segment 2, the final one)
+        assert len(network.sent) >= 1
+        seg2 = decode_apdu(network.sent[0][0])
+        assert isinstance(seg2, ComplexAckPDU)
+        assert seg2.sequence_number == 2
+        assert seg2.more_follows is False
+
+    async def test_final_segment_ack_completes_transaction(self, tsm, network):
+        """SegmentACK for the final segment should complete the segmented response."""
+        txn = self._receive_request(tsm)
+        network.clear()
+
+        # 2-segment response
+        response_data = b"\xab" * 500  # 500 bytes -> 2 segments (475 + 25)
+
+        tsm.start_segmented_response(txn, 12, response_data)
+
+        # With window_size=2, both segments sent in one window
+        assert len(network.sent) == 2
+        seg1 = decode_apdu(network.sent[1][0])
+        assert isinstance(seg1, ComplexAckPDU)
+        assert seg1.more_follows is False  # last segment
+
+        network.clear()
+
+        # Client ACKs the final segment
+        seg_ack = SegmentAckPDU(
+            negative_ack=False,
+            sent_by_server=False,
+            invoke_id=1,
+            sequence_number=1,
+            actual_window_size=2,
+        )
+        tsm.handle_segment_ack_for_response(PEER, seg_ack)
+
+        # Transaction should transition to IDLE (complete)
+        assert txn.state == ServerTransactionState.IDLE
+        assert txn.segment_sender is None
+
+    async def test_segmented_response_rejected_when_not_accepted(self, tsm, network):
+        """If client does not accept segmented responses, server should abort."""
+        txn = self._receive_request(tsm, segmented_response_accepted=False)
+        network.clear()
+
+        response_data = b"\xab" * 500
+        tsm.start_segmented_response(txn, 12, response_data)
+
+        # Should have sent an Abort PDU
+        assert len(network.sent) == 1
+        abort = decode_apdu(network.sent[0][0])
+        assert isinstance(abort, AbortPDU)
+        assert abort.sent_by_server is True
+        assert abort.abort_reason == AbortReason.SEGMENTATION_NOT_SUPPORTED
+
+
+class TestSegmentAckWindowSize:
+    """Test window size validation in SegmentACK handling."""
+
+    @pytest.fixture
+    def network(self):
+        return FakeNetworkLayer()
+
+    async def test_client_aborts_on_zero_window_size(self, network):
+        """Client should abort when receiving SegmentACK with window_size=0."""
+        tsm = ClientTSM(network, apdu_timeout=0.1, apdu_retries=0, max_apdu_length=50)
+
+        # Create a request large enough to require segmentation
+        # max_apdu=50, confirmed_request overhead=6, so max_payload=44
+        large_data = b"\xab" * 100  # 100 bytes -> 3 segments
+
+        task = asyncio.create_task(tsm.send_request(12, large_data, PEER))
+        await asyncio.sleep(0.01)
+
+        assert len(network.sent) >= 1
+        invoke_id = network.sent[0][0][2]
+        network.clear()
+
+        # Send SegmentACK with invalid window_size=0
+        bad_ack = SegmentAckPDU(
+            negative_ack=False,
+            sent_by_server=True,
+            invoke_id=invoke_id,
+            sequence_number=0,
+            actual_window_size=0,
+        )
+        tsm.handle_segment_ack(PEER, bad_ack)
+
+        # Client should have sent an Abort PDU
+        assert len(network.sent) >= 1
+        abort = decode_apdu(network.sent[-1][0])
+        assert isinstance(abort, AbortPDU)
+        assert abort.abort_reason == AbortReason.WINDOW_SIZE_OUT_OF_RANGE
+
+        with pytest.raises(BACnetAbortError) as exc_info:
+            await task
+        assert exc_info.value.reason == AbortReason.WINDOW_SIZE_OUT_OF_RANGE
+
+    async def test_client_aborts_on_window_size_128(self, network):
+        """Client should abort when receiving SegmentACK with window_size=128."""
+        tsm = ClientTSM(network, apdu_timeout=0.1, apdu_retries=0, max_apdu_length=50)
+        large_data = b"\xab" * 100
+
+        task = asyncio.create_task(tsm.send_request(12, large_data, PEER))
+        await asyncio.sleep(0.01)
+
+        invoke_id = network.sent[0][0][2]
+        network.clear()
+
+        bad_ack = SegmentAckPDU(
+            negative_ack=False,
+            sent_by_server=True,
+            invoke_id=invoke_id,
+            sequence_number=0,
+            actual_window_size=128,
+        )
+        tsm.handle_segment_ack(PEER, bad_ack)
+
+        assert len(network.sent) >= 1
+        abort = decode_apdu(network.sent[-1][0])
+        assert isinstance(abort, AbortPDU)
+        assert abort.abort_reason == AbortReason.WINDOW_SIZE_OUT_OF_RANGE
+
+        with pytest.raises(BACnetAbortError):
+            await task
+
+    async def test_server_aborts_on_zero_window_size(self, network):
+        """Server should abort when receiving SegmentACK with window_size=0."""
+        tsm = ServerTSM(
+            network,
+            request_timeout=0.1,
+            max_apdu_length=480,
+            proposed_window_size=2,
+        )
+        pdu = ConfirmedRequestPDU(
+            segmented=False,
+            more_follows=False,
+            segmented_response_accepted=True,
+            max_segments=None,
+            max_apdu_length=480,
+            invoke_id=1,
+            sequence_number=None,
+            proposed_window_size=None,
+            service_choice=12,
+            service_request=b"\x01\x02",
+        )
+        result = tsm.receive_confirmed_request(pdu, PEER)
+        assert result is not None
+        txn, _ = result
+        network.clear()
+
+        response_data = b"\xab" * 500
+        tsm.start_segmented_response(txn, 12, response_data)
+        network.clear()
+
+        bad_ack = SegmentAckPDU(
+            negative_ack=False,
+            sent_by_server=False,
+            invoke_id=1,
+            sequence_number=0,
+            actual_window_size=0,
+        )
+        tsm.handle_segment_ack_for_response(PEER, bad_ack)
+
+        # Should have sent an Abort PDU
+        assert len(network.sent) >= 1
+        abort = decode_apdu(network.sent[-1][0])
+        assert isinstance(abort, AbortPDU)
+        assert abort.sent_by_server is True
+        assert abort.abort_reason == AbortReason.WINDOW_SIZE_OUT_OF_RANGE
+
+    async def test_server_aborts_on_window_size_255(self, network):
+        """Server should abort when receiving SegmentACK with window_size=255."""
+        tsm = ServerTSM(
+            network,
+            request_timeout=0.1,
+            max_apdu_length=480,
+            proposed_window_size=2,
+        )
+        pdu = ConfirmedRequestPDU(
+            segmented=False,
+            more_follows=False,
+            segmented_response_accepted=True,
+            max_segments=None,
+            max_apdu_length=480,
+            invoke_id=1,
+            sequence_number=None,
+            proposed_window_size=None,
+            service_choice=12,
+            service_request=b"\x01\x02",
+        )
+        result = tsm.receive_confirmed_request(pdu, PEER)
+        assert result is not None
+        txn, _ = result
+        network.clear()
+
+        response_data = b"\xab" * 500
+        tsm.start_segmented_response(txn, 12, response_data)
+        network.clear()
+
+        bad_ack = SegmentAckPDU(
+            negative_ack=False,
+            sent_by_server=False,
+            invoke_id=1,
+            sequence_number=0,
+            actual_window_size=255,
+        )
+        tsm.handle_segment_ack_for_response(PEER, bad_ack)
+
+        assert len(network.sent) >= 1
+        abort = decode_apdu(network.sent[-1][0])
+        assert isinstance(abort, AbortPDU)
+        assert abort.abort_reason == AbortReason.WINDOW_SIZE_OUT_OF_RANGE
+
+    async def test_valid_window_size_127_is_accepted(self, network):
+        """Window size 127 (the maximum valid value) should be accepted."""
+        tsm = ClientTSM(network, apdu_timeout=0.1, apdu_retries=0, max_apdu_length=50)
+        large_data = b"\xab" * 100
+
+        task = asyncio.create_task(tsm.send_request(12, large_data, PEER))
+        await asyncio.sleep(0.01)
+
+        invoke_id = network.sent[0][0][2]
+        network.clear()
+
+        # Send a valid SegmentACK with window_size=127 for the last segment
+        # First, figure out what segments were sent
+        # max_payload = 50 - 6 = 44 bytes; 100 bytes -> ceil(100/44) = 3 segments
+        # Acknowledge through the last segment (seq=2)
+        good_ack = SegmentAckPDU(
+            negative_ack=False,
+            sent_by_server=True,
+            invoke_id=invoke_id,
+            sequence_number=2,
+            actual_window_size=127,
+        )
+        tsm.handle_segment_ack(PEER, good_ack)
+
+        # Should NOT have sent an abort; transaction moves to AWAIT_CONFIRMATION
+        aborts = [
+            s
+            for s in network.sent
+            if len(s[0]) >= 1 and (s[0][0] >> 4) == 7  # PduType.ABORT = 7
+        ]
+        assert len(aborts) == 0
+
+        # Complete the transaction to clean up
+        tsm.handle_simple_ack(PEER, invoke_id, 12)
+        result = await task
+        assert result == b""
+
+
+class TestDuplicateSegments:
+    """Test duplicate segment handling during segmented reception."""
+
+    @pytest.fixture
+    def network(self):
+        return FakeNetworkLayer()
+
+    @pytest.fixture
+    def tsm(self, network):
+        return ClientTSM(network, apdu_timeout=0.1, apdu_retries=1, proposed_window_size=4)
+
+    async def test_duplicate_segment_resends_ack(self, tsm, network):
+        """Receiving a duplicate segment should trigger a resend of the last ACK."""
+        task = asyncio.create_task(tsm.send_request(12, b"\x01\x02", PEER))
+        await asyncio.sleep(0.01)
+
+        invoke_id = network.sent[0][0][2]
+        network.clear()
+
+        # Server sends first segment
+        seg0 = ComplexAckPDU(
+            segmented=True,
+            more_follows=True,
+            invoke_id=invoke_id,
+            sequence_number=0,
+            proposed_window_size=4,
+            service_choice=12,
+            service_ack=b"\xaa",
+        )
+        tsm.handle_segmented_complex_ack(PEER, seg0)
+
+        # Client sent a SegmentACK for the first segment (initial ACK)
+        initial_ack_count = len(network.sent)
+        assert initial_ack_count == 1
+        network.clear()
+
+        # Server resends the first segment (seq=0) -- this is a duplicate
+        # since the receiver has already advanced past it
+        tsm.handle_segmented_complex_ack(PEER, seg0)
+
+        # The duplicate should trigger a RESEND_LAST_ACK action,
+        # sending another SegmentACK
+        assert len(network.sent) >= 1
+        ack_bytes = network.sent[-1][0]
+        decoded = decode_apdu(ack_bytes)
+        assert isinstance(decoded, SegmentAckPDU)
+        assert decoded.negative_ack is False
+
+        # Task still pending
+        assert not task.done()
+
+        # Clean up: send final segment
+        network.clear()
+        seg1 = ComplexAckPDU(
+            segmented=True,
+            more_follows=False,
+            invoke_id=invoke_id,
+            sequence_number=1,
+            proposed_window_size=4,
+            service_choice=12,
+            service_ack=b"\xbb",
+        )
+        tsm.handle_segmented_complex_ack(PEER, seg1)
+        result = await task
+        assert result == b"\xaa\xbb"
+
+    async def test_duplicate_does_not_corrupt_reassembly(self, tsm, network):
+        """Receiving a duplicate segment should not corrupt the reassembled data."""
+        task = asyncio.create_task(tsm.send_request(12, b"\x01\x02", PEER))
+        await asyncio.sleep(0.01)
+
+        invoke_id = network.sent[0][0][2]
+        network.clear()
+
+        # Segment 0
+        seg0 = ComplexAckPDU(
+            segmented=True,
+            more_follows=True,
+            invoke_id=invoke_id,
+            sequence_number=0,
+            proposed_window_size=4,
+            service_choice=12,
+            service_ack=b"\x11\x22",
+        )
+        tsm.handle_segmented_complex_ack(PEER, seg0)
+        network.clear()
+
+        # Segment 1
+        seg1 = ComplexAckPDU(
+            segmented=True,
+            more_follows=True,
+            invoke_id=invoke_id,
+            sequence_number=1,
+            proposed_window_size=4,
+            service_choice=12,
+            service_ack=b"\x33\x44",
+        )
+        tsm.handle_segmented_complex_ack(PEER, seg1)
+        network.clear()
+
+        # Duplicate of segment 0 (should be ignored or cause ACK resend)
+        tsm.handle_segmented_complex_ack(PEER, seg0)
+        network.clear()
+
+        # Duplicate of segment 1
+        tsm.handle_segmented_complex_ack(PEER, seg1)
+        network.clear()
+
+        # Final segment
+        seg2 = ComplexAckPDU(
+            segmented=True,
+            more_follows=False,
+            invoke_id=invoke_id,
+            sequence_number=2,
+            proposed_window_size=4,
+            service_choice=12,
+            service_ack=b"\x55\x66",
+        )
+        tsm.handle_segmented_complex_ack(PEER, seg2)
+        result = await task
+        assert result == b"\x11\x22\x33\x44\x55\x66"
+
+    async def test_server_duplicate_request_segment_handling(self, network):
+        """Server should handle duplicate request segments gracefully."""
+        tsm = ServerTSM(
+            network,
+            request_timeout=0.1,
+            proposed_window_size=4,
+        )
+
+        # First segment of a segmented request
+        seg0 = ConfirmedRequestPDU(
+            segmented=True,
+            more_follows=True,
+            segmented_response_accepted=True,
+            max_segments=None,
+            max_apdu_length=1476,
+            invoke_id=1,
+            sequence_number=0,
+            proposed_window_size=4,
+            service_choice=12,
+            service_request=b"\x01\x02",
+        )
+        result = tsm.receive_confirmed_request(seg0, PEER)
+        assert result is not None
+        _txn, data = result
+        assert data is None  # More segments expected
+
+        ack_count_after_first = len(network.sent)
+        assert ack_count_after_first >= 1  # SegmentACK for seq=0
+
+        # Duplicate of segment 0
+        tsm.receive_confirmed_request(seg0, PEER)
+        # Duplicate goes through handle_request_segment; should return (txn, None)
+        # and resend the last ACK
+        ack_count_after_dup = len(network.sent)
+        assert ack_count_after_dup > ack_count_after_first
+
+        # Send final segment to complete the request
+        seg1 = ConfirmedRequestPDU(
+            segmented=True,
+            more_follows=False,
+            segmented_response_accepted=True,
+            max_segments=None,
+            max_apdu_length=1476,
+            invoke_id=1,
+            sequence_number=1,
+            proposed_window_size=4,
+            service_choice=12,
+            service_request=b"\x03\x04",
+        )
+        result3 = tsm.receive_confirmed_request(seg1, PEER)
+        assert result3 is not None
+        _txn3, complete_data = result3
+        assert complete_data == b"\x01\x02\x03\x04"
