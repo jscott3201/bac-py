@@ -245,6 +245,12 @@ class NetworkPortObject(BACnetObject):
             PropertyAccess.READ_WRITE,
             required=False,
         ),
+        # Ethernet specific (Clause 7 / Clause 12.56)
+        # MAC_ADDRESS is already defined above as a required property.
+        # For Ethernet ports the MAC_ADDRESS holds the 6-byte IEEE 802 MAC.
+        # No additional Ethernet-specific properties are needed beyond
+        # the standard NetworkPort properties (MAC_ADDRESS, NETWORK_TYPE,
+        # APDU_LENGTH, LINK_SPEED).
     }
 
     def __init__(

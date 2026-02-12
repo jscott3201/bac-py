@@ -5,10 +5,14 @@ import pytest
 from bac_py.app.application import (
     BACnetApplication,
     DeviceConfig,
+    DeviceInfo,
     RouterConfig,
     RouterPortConfig,
 )
 from bac_py.network.address import BACnetAddress
+from bac_py.services.who_is import IAmRequest
+from bac_py.types.enums import ObjectType, Segmentation
+from bac_py.types.primitives import ObjectIdentifier
 
 
 class TestRouterPortConfig:
@@ -326,3 +330,92 @@ class TestBACnetApplicationRouterMode:
                 assert app._server_tsm is not None
             finally:
                 await app.stop()
+
+
+class TestDeviceInfoCache:
+    """Test device info caching from I-Am responses (Clause 19.4)."""
+
+    def test_cache_miss_returns_none(self):
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        assert app.get_device_info(dest) is None
+
+    def test_cache_populated_from_i_am(self):
+        """I-Am response should populate the device info cache."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        iam = IAmRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 100),
+            max_apdu_length=480,
+            segmentation_supported=Segmentation.NONE,
+            vendor_id=99,
+        )
+        app._device_info_cache[source] = DeviceInfo(
+            max_apdu_length=iam.max_apdu_length,
+            segmentation_supported=int(iam.segmentation_supported),
+        )
+
+        info = app.get_device_info(source)
+        assert info is not None
+        assert info.max_apdu_length == 480
+        assert info.segmentation_supported == int(Segmentation.NONE)
+
+    async def test_i_am_handler_populates_cache(self):
+        """The _handle_i_am_for_cache handler should update the cache."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        iam = IAmRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 200),
+            max_apdu_length=1024,
+            segmentation_supported=Segmentation.BOTH,
+            vendor_id=42,
+        )
+        await app._handle_i_am_for_cache(8, iam.encode(), source)
+
+        info = app.get_device_info(source)
+        assert info is not None
+        assert info.max_apdu_length == 1024
+        assert info.segmentation_supported == int(Segmentation.BOTH)
+
+    async def test_subsequent_i_am_updates_cache(self):
+        """A second I-Am from the same device should update the cache."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        # First I-Am
+        iam1 = IAmRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 200),
+            max_apdu_length=480,
+            segmentation_supported=Segmentation.NONE,
+            vendor_id=42,
+        )
+        await app._handle_i_am_for_cache(8, iam1.encode(), source)
+        assert app.get_device_info(source).max_apdu_length == 480  # type: ignore[union-attr]
+
+        # Second I-Am with different capabilities
+        iam2 = IAmRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 200),
+            max_apdu_length=1476,
+            segmentation_supported=Segmentation.BOTH,
+            vendor_id=42,
+        )
+        await app._handle_i_am_for_cache(8, iam2.encode(), source)
+        info = app.get_device_info(source)
+        assert info is not None
+        assert info.max_apdu_length == 1476
+        assert info.segmentation_supported == int(Segmentation.BOTH)
+
+    async def test_malformed_i_am_does_not_crash(self):
+        """Malformed I-Am data should be silently ignored."""
+        cfg = DeviceConfig(instance_number=1)
+        app = BACnetApplication(cfg)
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        await app._handle_i_am_for_cache(8, b"\x00", source)
+        assert app.get_device_info(source) is None

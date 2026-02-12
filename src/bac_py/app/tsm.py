@@ -126,12 +126,21 @@ class ClientTSM:
         service_choice: int,
         request_data: bytes,
         destination: BACnetAddress,
+        *,
+        max_apdu_override: int | None = None,
     ) -> bytes:
         """Send a confirmed request and await the response.
 
         If the request data exceeds the max segment payload, the request
         is automatically segmented per Clause 5.2.
 
+        :param service_choice: Confirmed service choice number.
+        :param request_data: Encoded service request bytes.
+        :param destination: Target device address.
+        :param max_apdu_override: When provided, constrains the effective
+            max APDU length for segmentation decisions (Clause 19.4).
+            Typically set to ``min(local, remote)`` based on cached
+            peer device info from I-Am responses.
         :returns: The service-ack data from ComplexACK, or empty bytes
             for SimpleACK.
         :raises BACnetError: On Error-PDU response.
@@ -139,6 +148,7 @@ class ClientTSM:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        effective_max_apdu = max_apdu_override or self._max_apdu_length
         loop = asyncio.get_running_loop()
         invoke_id = self._allocate_invoke_id(destination)
         future: asyncio.Future[bytes] = loop.create_future()
@@ -150,15 +160,16 @@ class ClientTSM:
             request_data=request_data,
             future=future,
         )
+        txn._effective_max_apdu = effective_max_apdu  # type: ignore[attr-defined]
         key = (destination, invoke_id)
         self._transactions[key] = txn
 
         try:
-            max_payload = compute_max_segment_payload(self._max_apdu_length, "confirmed_request")
+            max_payload = compute_max_segment_payload(effective_max_apdu, "confirmed_request")
             if len(request_data) > max_payload:
-                self._send_segmented_request(txn)
+                self._send_segmented_request(txn, effective_max_apdu)
             else:
-                self._send_confirmed_request(txn)
+                self._send_confirmed_request(txn, effective_max_apdu)
             return await future
         finally:
             self._transactions.pop(key, None)
@@ -344,14 +355,17 @@ class ClientTSM:
             txn.timeout_handle.cancel()
             txn.timeout_handle = None
 
-    def _send_confirmed_request(self, txn: ClientTransaction) -> None:
+    def _send_confirmed_request(
+        self, txn: ClientTransaction, effective_max_apdu: int | None = None
+    ) -> None:
         """Encode and send a non-segmented confirmed request APDU."""
+        max_apdu = effective_max_apdu or self._max_apdu_length
         pdu = ConfirmedRequestPDU(
             segmented=False,
             more_follows=False,
             segmented_response_accepted=True,
             max_segments=self._max_segments,
-            max_apdu_length=self._max_apdu_length,
+            max_apdu_length=max_apdu,
             invoke_id=txn.invoke_id,
             sequence_number=None,
             proposed_window_size=None,
@@ -363,14 +377,17 @@ class ClientTSM:
         txn.state = ClientTransactionState.AWAIT_CONFIRMATION
         self._start_timeout(txn)
 
-    def _send_segmented_request(self, txn: ClientTransaction) -> None:
+    def _send_segmented_request(
+        self, txn: ClientTransaction, effective_max_apdu: int | None = None
+    ) -> None:
         """Begin sending a segmented request."""
+        max_apdu = effective_max_apdu or self._max_apdu_length
         try:
             sender = SegmentSender.create(
                 payload=txn.request_data,
                 invoke_id=txn.invoke_id,
                 service_choice=txn.service_choice,
-                max_apdu_length=self._max_apdu_length,
+                max_apdu_length=max_apdu,
                 pdu_type="confirmed_request",
                 proposed_window_size=self._proposed_window_size,
             )
@@ -387,6 +404,7 @@ class ClientTSM:
         sender = txn.segment_sender
         if sender is None:
             return
+        effective = getattr(txn, "_effective_max_apdu", self._max_apdu_length)
         segments = sender.fill_window()
         for seq_num, seg_data, more_follows in segments:
             pdu = ConfirmedRequestPDU(
@@ -394,7 +412,7 @@ class ClientTSM:
                 more_follows=more_follows,
                 segmented_response_accepted=True,
                 max_segments=self._max_segments,
-                max_apdu_length=self._max_apdu_length,
+                max_apdu_length=effective,
                 invoke_id=txn.invoke_id,
                 sequence_number=seq_num,
                 proposed_window_size=sender.proposed_window_size,
@@ -477,11 +495,12 @@ class ClientTSM:
             # Retry using the same method as the original request.
             # If the request data exceeds the max segment payload it
             # must be re-sent as a segmented request.
-            max_payload = compute_max_segment_payload(self._max_apdu_length, "confirmed_request")
+            effective = getattr(txn, "_effective_max_apdu", self._max_apdu_length)
+            max_payload = compute_max_segment_payload(effective, "confirmed_request")
             if len(txn.request_data) > max_payload:
-                self._send_segmented_request(txn)
+                self._send_segmented_request(txn, effective)
             else:
-                self._send_confirmed_request(txn)
+                self._send_confirmed_request(txn, effective)
         else:
             txn.future.set_exception(
                 BACnetTimeoutError(f"No response after {self._retries} retries")

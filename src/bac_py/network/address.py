@@ -86,6 +86,60 @@ class BIP6Address:
 
 
 @dataclass(frozen=True, slots=True)
+class EthernetAddress:
+    """A 6-octet IEEE 802 MAC address for BACnet Ethernet (Clause 7).
+
+    Used as the MAC-layer address for BACnet/Ethernet (ISO 8802-3) data links.
+    """
+
+    mac: bytes
+    """6-byte IEEE MAC address."""
+
+    def __post_init__(self) -> None:
+        """Validate the MAC address length."""
+        if len(self.mac) != 6:
+            msg = f"Ethernet MAC must be 6 bytes, got {len(self.mac)}"
+            raise ValueError(msg)
+
+    def encode(self) -> bytes:
+        """Encode to 6-byte wire format.
+
+        :returns: The 6-byte MAC address.
+        """
+        return self.mac
+
+    @classmethod
+    def decode(cls, data: bytes | memoryview) -> EthernetAddress:
+        """Decode from 6 bytes of MAC address data.
+
+        :param data: At least 6 bytes of raw address data.
+        :returns: The decoded :class:`EthernetAddress`.
+        """
+        return cls(mac=bytes(data[:6]))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-friendly dictionary.
+
+        :returns: A dict with a ``"mac"`` key containing colon-separated hex.
+        """
+        return {"mac": ":".join(f"{b:02x}" for b in self.mac)}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EthernetAddress:
+        """Reconstruct from a dictionary produced by :meth:`to_dict`.
+
+        :param data: Dictionary with a ``"mac"`` key.
+        :returns: The reconstructed :class:`EthernetAddress`.
+        """
+        mac_str: str = data["mac"]
+        return cls(mac=bytes(int(x, 16) for x in mac_str.split(":")))
+
+    def __str__(self) -> str:
+        """Format as colon-separated hex (``AA:BB:CC:DD:EE:FF``)."""
+        return ":".join(f"{b:02x}" for b in self.mac)
+
+
+@dataclass(frozen=True, slots=True)
 class BACnetAddress:
     """A full BACnet address: optional network number + MAC address.
 
@@ -228,6 +282,13 @@ _ADDR_RE = re.compile(
     r")$"
 )
 
+# Ethernet MAC pattern: AA:BB:CC:DD:EE:FF (with optional network prefix)
+_ETHER_RE = re.compile(
+    r"^(?:(\d+):)?"  # optional network number + colon
+    r"([0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:"
+    r"[0-9a-fA-F]{2}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2})$"
+)
+
 # IPv6 bracket notation: optional "network:" prefix, then [ipv6]:port or [ipv6]
 _ADDR6_RE = re.compile(
     r"^(?:(\d+):)?"  # optional network number + colon
@@ -264,6 +325,16 @@ def parse_address(addr: str | BACnetAddress) -> BACnetAddress:
     if not addr:
         msg = "Address string must not be empty"
         raise ValueError(msg)
+
+    # Try Ethernet MAC format (AA:BB:CC:DD:EE:FF)
+    me = _ETHER_RE.match(addr)
+    if me:
+        network_str, mac_str = me.groups()
+        network = int(network_str) if network_str is not None else None
+        mac = bytes(int(x, 16) for x in mac_str.split(":"))
+        if network is not None:
+            return remote_station(network, mac)
+        return BACnetAddress(mac_address=mac)
 
     # Try IPv6 bracket notation first
     m6 = _ADDR6_RE.match(addr)

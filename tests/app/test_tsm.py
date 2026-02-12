@@ -131,6 +131,26 @@ class TestClientTSM:
         tsm.handle_reject(PEER, 99, RejectReason.UNRECOGNIZED_SERVICE)
         tsm.handle_abort(PEER, 99, AbortReason.OTHER)
 
+    async def test_max_apdu_override_constrains_segment_payload(self, network):
+        """max_apdu_override should constrain the APDU size in sent PDUs."""
+        tsm = ClientTSM(network, apdu_timeout=0.1, apdu_retries=0, max_apdu_length=1476)
+        task = asyncio.create_task(tsm.send_request(12, b"\x01\x02", PEER, max_apdu_override=480))
+        await asyncio.sleep(0.01)
+
+        # The sent APDU should advertise max_apdu_length=480, not 1476
+        assert len(network.sent) >= 1
+        apdu_bytes = network.sent[0][0]
+        invoke_id = apdu_bytes[2]
+
+        # Byte 1 of ConfirmedRequestPDU encodes max-segments and
+        # max-APDU-length-accepted. Bits 0-3 encode the max APDU index.
+        # Index 3 = 480 bytes per Clause 20.1.2.5
+        max_apdu_encoding = apdu_bytes[1] & 0x0F
+        assert max_apdu_encoding == 3  # 3 = 480 bytes
+
+        tsm.handle_simple_ack(PEER, invoke_id, 12)
+        await task
+
 
 class TestServerTSM:
     @pytest.fixture

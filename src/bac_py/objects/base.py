@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import copy
 from dataclasses import dataclass
 from enum import IntEnum
@@ -725,6 +726,10 @@ class ObjectDatabase:
     def __init__(self) -> None:
         self._objects: dict[ObjectIdentifier, BACnetObject] = {}
         self._names: dict[str, ObjectIdentifier] = {}
+        self._change_callbacks: dict[
+            tuple[ObjectIdentifier, PropertyIdentifier],
+            list[Callable[[PropertyIdentifier, Any, Any], None]],
+        ] = {}
 
     def add(self, obj: BACnetObject) -> None:
         """Add an object to the database.
@@ -799,6 +804,65 @@ class ObjectDatabase:
                 current = obj._properties.get(PropertyIdentifier.DATABASE_REVISION, 0)
                 obj._properties[PropertyIdentifier.DATABASE_REVISION] = current + 1
                 break
+
+    def register_change_callback(
+        self,
+        object_id: ObjectIdentifier,
+        prop_id: PropertyIdentifier,
+        callback: Callable[[PropertyIdentifier, Any, Any], None],
+    ) -> None:
+        """Register a callback fired when a property value changes.
+
+        The callback receives ``(prop_id, old_value, new_value)`` after
+        a successful write that changes the value.
+
+        :param object_id: Target object identifier.
+        :param prop_id: Property identifier to monitor.
+        :param callback: Function to call on value change.
+        """
+        key = (object_id, prop_id)
+        self._change_callbacks.setdefault(key, []).append(callback)
+        # Wire the object's write notification so it fans out to our callbacks
+        obj = self._objects.get(object_id)
+        if obj is not None and obj._on_property_written is None:
+            obj._on_property_written = self._make_write_notifier(object_id)
+
+    def unregister_change_callback(
+        self,
+        object_id: ObjectIdentifier,
+        prop_id: PropertyIdentifier,
+        callback: Callable[[PropertyIdentifier, Any, Any], None],
+    ) -> None:
+        """Remove a previously registered change callback.
+
+        :param object_id: Target object identifier.
+        :param prop_id: Property identifier.
+        :param callback: The callback to remove.
+        """
+        key = (object_id, prop_id)
+        cbs = self._change_callbacks.get(key)
+        if cbs is not None:
+            with contextlib.suppress(ValueError):
+                cbs.remove(callback)
+            if not cbs:
+                del self._change_callbacks[key]
+
+    def _make_write_notifier(
+        self, object_id: ObjectIdentifier
+    ) -> Callable[[PropertyIdentifier, Any, Any], None]:
+        """Create a write notification function for a specific object.
+
+        :param object_id: The object to create the notifier for.
+        :returns: A callback suitable for ``_on_property_written``.
+        """
+
+        def _notify(prop_id: PropertyIdentifier, old_value: Any, new_value: Any) -> None:
+            key = (object_id, prop_id)
+            for cb in self._change_callbacks.get(key, []):
+                with contextlib.suppress(Exception):
+                    cb(prop_id, old_value, new_value)
+
+        return _notify
 
     def get(self, object_id: ObjectIdentifier) -> BACnetObject | None:
         """Retrieve an object by its identifier.

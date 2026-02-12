@@ -1,8 +1,12 @@
+import pytest
+
 from bac_py.network.address import (
     GLOBAL_BROADCAST,
     LOCAL_BROADCAST,
     BACnetAddress,
     BIPAddress,
+    EthernetAddress,
+    parse_address,
     remote_broadcast,
     remote_station,
 )
@@ -187,3 +191,94 @@ class TestIsRemoteBroadcast:
     def test_local_unicast_false(self):
         addr = BACnetAddress(mac_address=b"\x01\x02\x03\x04\x05\x06")
         assert addr.is_remote_broadcast is False
+
+
+class TestEthernetAddress:
+    def test_encode_decode_round_trip(self):
+        mac = b"\xaa\xbb\xcc\xdd\xee\xff"
+        addr = EthernetAddress(mac=mac)
+        encoded = addr.encode()
+        decoded = EthernetAddress.decode(encoded)
+        assert decoded == addr
+
+    def test_encode_produces_six_bytes(self):
+        addr = EthernetAddress(mac=b"\x01\x02\x03\x04\x05\x06")
+        assert len(addr.encode()) == 6
+
+    def test_invalid_mac_length_raises(self):
+        with pytest.raises(ValueError, match="6 bytes"):
+            EthernetAddress(mac=b"\x01\x02\x03")
+
+    def test_to_dict(self):
+        addr = EthernetAddress(mac=b"\xaa\xbb\xcc\xdd\xee\xff")
+        d = addr.to_dict()
+        assert d == {"mac": "aa:bb:cc:dd:ee:ff"}
+
+    def test_from_dict(self):
+        d = {"mac": "aa:bb:cc:dd:ee:ff"}
+        addr = EthernetAddress.from_dict(d)
+        assert addr.mac == b"\xaa\xbb\xcc\xdd\xee\xff"
+
+    def test_to_dict_from_dict_round_trip(self):
+        addr = EthernetAddress(mac=b"\x01\x02\x03\x04\x05\x06")
+        restored = EthernetAddress.from_dict(addr.to_dict())
+        assert restored == addr
+
+    def test_str(self):
+        addr = EthernetAddress(mac=b"\xaa\xbb\xcc\xdd\xee\xff")
+        assert str(addr) == "aa:bb:cc:dd:ee:ff"
+
+
+class TestParseAddress:
+    def test_parse_ipv4_default_port(self):
+        addr = parse_address("192.168.1.100")
+        assert addr.mac_address == b"\xc0\xa8\x01\x64\xba\xc0"
+
+    def test_parse_ipv4_explicit_port(self):
+        addr = parse_address("192.168.1.100:47809")
+        assert addr.mac_address == b"\xc0\xa8\x01\x64\xba\xc1"
+
+    def test_parse_remote_ipv4(self):
+        addr = parse_address("2:192.168.1.100")
+        assert addr.network == 2
+        assert addr.mac_address == b"\xc0\xa8\x01\x64\xba\xc0"
+
+    def test_parse_global_broadcast(self):
+        addr = parse_address("*")
+        assert addr == GLOBAL_BROADCAST
+
+    def test_parse_remote_broadcast(self):
+        addr = parse_address("2:*")
+        assert addr.network == 2
+        assert addr.mac_address == b""
+
+    def test_parse_ethernet_mac(self):
+        addr = parse_address("aa:bb:cc:dd:ee:ff")
+        assert addr.mac_address == b"\xaa\xbb\xcc\xdd\xee\xff"
+        assert addr.network is None
+
+    def test_parse_ethernet_mac_uppercase(self):
+        addr = parse_address("AA:BB:CC:DD:EE:FF")
+        assert addr.mac_address == b"\xaa\xbb\xcc\xdd\xee\xff"
+
+    def test_parse_remote_ethernet_mac(self):
+        addr = parse_address("5:aa:bb:cc:dd:ee:ff")
+        assert addr.network == 5
+        assert addr.mac_address == b"\xaa\xbb\xcc\xdd\xee\xff"
+
+    def test_parse_bacnet_address_passthrough(self):
+        addr = BACnetAddress(mac_address=b"\x01\x02")
+        assert parse_address(addr) is addr
+
+    def test_parse_empty_raises(self):
+        with pytest.raises(ValueError):
+            parse_address("")
+
+    def test_parse_invalid_raises(self):
+        with pytest.raises(ValueError):
+            parse_address("not-an-address")
+
+    def test_parse_ipv6(self):
+        addr = parse_address("[::1]:47808")
+        assert addr.network is None
+        assert len(addr.mac_address) == 18

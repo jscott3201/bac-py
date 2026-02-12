@@ -1,11 +1,11 @@
 """Trend Log recording engine per ASHRAE 135-2020 Clause 12.25.
 
 The :class:`TrendLogEngine` follows the same async lifecycle pattern as
-:class:`EventEngine`.  It manages polled and triggered recording for all
-:class:`TrendLogObject` instances in the object database.
+:class:`EventEngine`.  It manages polled, triggered, and COV-based
+recording for all :class:`TrendLogObject` instances in the object database.
 
-**COV-based logging** is deferred to future work (requires cross-device
-subscription plumbing).
+COV-based logging (Clause 12.25.13) uses property-change callbacks on
+local objects to record values when the monitored property changes.
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ def _datetime_to_float(dt: BACnetDateTime) -> float:
 
 
 class TrendLogEngine:
-    """Async engine that drives polled and triggered trend log recording."""
+    """Async engine that drives polled, triggered, and COV-based trend log recording."""
 
     def __init__(
         self,
@@ -69,6 +69,8 @@ class TrendLogEngine:
         self._task: asyncio.Task[None] | None = None
         # Track last poll time per TrendLog OID (monotonic seconds)
         self._last_poll: dict[Any, float] = {}
+        # Track which TrendLog OIDs have active COV subscriptions
+        self._cov_subscriptions: dict[Any, bool] = {}
 
     # --- Lifecycle ---
 
@@ -79,13 +81,14 @@ class TrendLogEngine:
         self._task = asyncio.create_task(self._run_loop())
 
     async def stop(self) -> None:
-        """Stop the recording loop."""
+        """Stop the recording loop and clean up COV subscriptions."""
         if self._task is not None:
             self._task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
         self._last_poll.clear()
+        self._unregister_all_cov()
 
     # --- Main loop ---
 
@@ -108,21 +111,34 @@ class TrendLogEngine:
 
     def _evaluate_trendlog(self, tl: TrendLogObject, now_mono: float) -> None:
         """Evaluate a single TrendLog object."""
+        oid = tl.object_identifier
         log_enable = tl.read_property(PropertyIdentifier.LOG_ENABLE)
         if not log_enable:
+            # If disabled, unsubscribe any COV callback
+            if oid in self._cov_subscriptions:
+                self._unregister_cov(tl)
             return
 
         # Check start_time / stop_time window
         if not self._within_time_window(tl):
+            # Outside time window, unsubscribe COV
+            if oid in self._cov_subscriptions:
+                self._unregister_cov(tl)
             return
 
         logging_type = tl.read_property(PropertyIdentifier.LOGGING_TYPE)
 
         if logging_type == LoggingType.POLLED:
+            # If switching away from COV, clean up
+            if oid in self._cov_subscriptions:
+                self._unregister_cov(tl)
             self._handle_polled(tl, now_mono)
         elif logging_type == LoggingType.TRIGGERED:
+            if oid in self._cov_subscriptions:
+                self._unregister_cov(tl)
             self._handle_triggered(tl)
-        # COV deferred
+        elif logging_type == LoggingType.COV:
+            self._handle_cov(tl)
 
     def _within_time_window(self, tl: TrendLogObject) -> bool:
         """Check if we're within the TrendLog's start/stop time window."""
@@ -183,6 +199,69 @@ class TrendLogEngine:
         if trigger:
             tl._properties[PropertyIdentifier.TRIGGER] = False
             self._record_value(tl)
+
+    def _handle_cov(self, tl: TrendLogObject) -> None:
+        """Handle COV-based logging (Clause 12.25.13).
+
+        Registers a property-change callback on the monitored object
+        so that values are recorded whenever the property changes.
+        """
+        oid = tl.object_identifier
+        if oid in self._cov_subscriptions:
+            return  # Already subscribed
+
+        db = self._app.object_db
+        ref = tl._properties.get(PropertyIdentifier.LOG_DEVICE_OBJECT_PROPERTY)
+        if ref is None:
+            return
+
+        target = db.get(ref.object_identifier)
+        if target is None:
+            return
+
+        prop_id = PropertyIdentifier(ref.property_identifier)
+
+        def _on_change(_prop_id: PropertyIdentifier, _old: Any, new_value: Any) -> None:
+            """Record value when the monitored property changes."""
+            if not tl.read_property(PropertyIdentifier.LOG_ENABLE):
+                return
+            if not self._within_time_window(tl):
+                return
+            status_flags = None
+            with contextlib.suppress(Exception):
+                status_flags = target.read_property(PropertyIdentifier.STATUS_FLAGS)
+            record = BACnetLogRecord(
+                timestamp=_now_datetime(),
+                log_datum=new_value,
+                status_flags=status_flags,
+            )
+            tl.append_record(record)
+
+        # Store the callback reference for cleanup
+        tl._cov_callback = _on_change  # type: ignore[attr-defined]
+        db.register_change_callback(ref.object_identifier, prop_id, _on_change)
+        self._cov_subscriptions[oid] = True
+
+    def _unregister_cov(self, tl: TrendLogObject) -> None:
+        """Remove COV subscription for a single TrendLog."""
+        oid = tl.object_identifier
+        if oid not in self._cov_subscriptions:
+            return
+
+        db = self._app.object_db
+        ref = tl._properties.get(PropertyIdentifier.LOG_DEVICE_OBJECT_PROPERTY)
+        callback = getattr(tl, "_cov_callback", None)
+        if ref is not None and callback is not None:
+            prop_id = PropertyIdentifier(ref.property_identifier)
+            db.unregister_change_callback(ref.object_identifier, prop_id, callback)
+        del self._cov_subscriptions[oid]
+
+    def _unregister_all_cov(self) -> None:
+        """Remove all COV subscriptions."""
+        db = self._app.object_db
+        for tl_obj in db.get_objects_of_type(ObjectType.TREND_LOG):
+            self._unregister_cov(tl_obj)  # type: ignore[arg-type]
+        self._cov_subscriptions.clear()
 
     def _record_value(self, tl: TrendLogObject) -> None:
         """Read the monitored property and append a log record."""

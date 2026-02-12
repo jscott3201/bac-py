@@ -52,6 +52,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+@dataclass(frozen=True, slots=True)
+class DeviceInfo:
+    """Cached peer device capabilities from I-Am responses (Clause 19.4)."""
+
+    max_apdu_length: int
+    """Maximum APDU length accepted by the peer device."""
+
+    segmentation_supported: int
+    """Segmentation support level (Segmentation enum value)."""
+
+
 @dataclass
 class BBMDConfig:
     """Configuration for BBMD on a router port."""
@@ -190,6 +201,7 @@ class BACnetApplication:
         self._cov_callbacks: dict[int, Callable[..., Any]] = {}
         self._dcc_state: EnableDisable = EnableDisable.ENABLE
         self._dcc_timer: asyncio.TimerHandle | None = None
+        self._device_info_cache: dict[BACnetAddress, DeviceInfo] = {}
 
     @property
     def object_db(self) -> ObjectDatabase:
@@ -257,6 +269,17 @@ class BACnetApplication:
         """
         return ObjectIdentifier(ObjectType.DEVICE, self._config.instance_number)
 
+    def get_device_info(self, address: BACnetAddress) -> DeviceInfo | None:
+        """Look up cached peer device capabilities.
+
+        Returns cached :class:`DeviceInfo` from I-Am responses, or
+        ``None`` if no information is available for *address*.
+
+        :param address: The peer device address.
+        :returns: Cached device info, or ``None``.
+        """
+        return self._device_info_cache.get(address)
+
     async def start(self) -> None:
         """Start the transport and initialize all layers."""
         self._stopped = False
@@ -303,6 +326,12 @@ class BACnetApplication:
         # Initialize event engine and start evaluation loop
         self._event_engine = EventEngine(self)
         await self._event_engine.start()
+
+        # Register I-Am listener for device info caching (Clause 19.4)
+        self._service_registry.register_unconfirmed(
+            UnconfirmedServiceChoice.I_AM,
+            self._handle_i_am_for_cache,
+        )
 
         # Broadcast I-Am on startup per Clause 12.11.13
         self._broadcast_i_am()
@@ -602,6 +631,24 @@ class BACnetApplication:
         if self._network is not None:
             self._network.unregister_network_message_handler(message_type, handler)
 
+    async def _handle_i_am_for_cache(
+        self,
+        service_choice: int,
+        data: bytes,
+        source: BACnetAddress,
+    ) -> None:
+        """Cache peer device info from incoming I-Am responses (Clause 19.4)."""
+        try:
+            from bac_py.services.who_is import IAmRequest
+
+            iam = IAmRequest.decode(data)
+            self._device_info_cache[source] = DeviceInfo(
+                max_apdu_length=iam.max_apdu_length,
+                segmentation_supported=int(iam.segmentation_supported),
+            )
+        except Exception:
+            logger.debug("Failed to decode I-Am for cache from %s", source, exc_info=True)
+
     async def confirmed_request(
         self,
         destination: BACnetAddress,
@@ -624,7 +671,19 @@ class BACnetApplication:
         if self._client_tsm is None:
             msg = "Application not started"
             raise RuntimeError(msg)
-        coro = self._client_tsm.send_request(service_choice, service_data, destination)
+
+        # Constrain APDU size to peer capability if cached (Clause 19.4)
+        max_apdu_override: int | None = None
+        device_info = self._device_info_cache.get(destination)
+        if device_info is not None:
+            max_apdu_override = min(self._config.max_apdu_length, device_info.max_apdu_length)
+
+        coro = self._client_tsm.send_request(
+            service_choice,
+            service_data,
+            destination,
+            max_apdu_override=max_apdu_override,
+        )
         if timeout is not None:
             return await asyncio.wait_for(coro, timeout)
         return await coro

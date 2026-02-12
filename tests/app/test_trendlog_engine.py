@@ -4,6 +4,7 @@ import datetime
 
 from bac_py.app.trendlog_engine import TrendLogEngine, _now_datetime
 from bac_py.objects.analog import AnalogInputObject
+from bac_py.objects.base import ObjectDatabase
 from bac_py.objects.trendlog import TrendLogObject
 from bac_py.types.constructed import (
     BACnetDeviceObjectPropertyReference,
@@ -32,11 +33,11 @@ class _FakeObjectDB:
 
 
 class _FakeApp:
-    def __init__(self, db: _FakeObjectDB) -> None:
+    def __init__(self, db: _FakeObjectDB | ObjectDatabase) -> None:
         self.object_db = db
 
 
-def _make_engine(db: _FakeObjectDB) -> TrendLogEngine:
+def _make_engine(db: _FakeObjectDB | ObjectDatabase) -> TrendLogEngine:
     app = _FakeApp(db)
     return TrendLogEngine(app, scan_interval=1.0)  # type: ignore[arg-type]
 
@@ -222,6 +223,166 @@ class TestTriggeredLogging:
 
         buf = tl.read_property(PropertyIdentifier.LOG_BUFFER)
         assert len(buf) == 0
+
+
+# ---------------------------------------------------------------------------
+# COV-based logging (Clause 12.25.13)
+# ---------------------------------------------------------------------------
+
+
+class TestCOVLogging:
+    def _make_real_db(self):
+        """Create a real ObjectDatabase for COV callback support."""
+        return ObjectDatabase()
+
+    def test_cov_records_when_property_changes(self):
+        db = self._make_real_db()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 10.0
+        ai._properties[PropertyIdentifier.OUT_OF_SERVICE] = True
+        db.add(ai)
+
+        tl = _make_trendlog(
+            target_oid=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            logging_type=LoggingType.COV,
+        )
+        db.add(tl)
+
+        engine = _make_engine(db)
+        # First cycle registers the COV callback
+        engine._evaluate_cycle()
+        assert tl.object_identifier in engine._cov_subscriptions
+
+        # Now change the monitored property
+        ai.write_property(PropertyIdentifier.PRESENT_VALUE, 42.0)
+
+        buf = tl.read_property(PropertyIdentifier.LOG_BUFFER)
+        assert len(buf) == 1
+        assert buf[0].log_datum == 42.0
+
+    def test_cov_does_not_record_when_value_unchanged(self):
+        db = self._make_real_db()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 10.0
+        ai._properties[PropertyIdentifier.OUT_OF_SERVICE] = True
+        db.add(ai)
+
+        tl = _make_trendlog(
+            target_oid=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            logging_type=LoggingType.COV,
+        )
+        db.add(tl)
+
+        engine = _make_engine(db)
+        engine._evaluate_cycle()
+
+        # Write the same value -- no change notification fires
+        ai.write_property(PropertyIdentifier.PRESENT_VALUE, 10.0)
+
+        buf = tl.read_property(PropertyIdentifier.LOG_BUFFER)
+        assert len(buf) == 0
+
+    def test_disabling_trendlog_removes_cov_subscription(self):
+        db = self._make_real_db()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 10.0
+        ai._properties[PropertyIdentifier.OUT_OF_SERVICE] = True
+        db.add(ai)
+
+        tl = _make_trendlog(
+            target_oid=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            logging_type=LoggingType.COV,
+        )
+        db.add(tl)
+
+        engine = _make_engine(db)
+        engine._evaluate_cycle()
+        assert tl.object_identifier in engine._cov_subscriptions
+
+        # Disable the TrendLog
+        tl._properties[PropertyIdentifier.LOG_ENABLE] = False
+        engine._evaluate_cycle()
+        assert tl.object_identifier not in engine._cov_subscriptions
+
+        # Property change should NOT record (re-enable out-of-service for write)
+        ai._properties[PropertyIdentifier.OUT_OF_SERVICE] = True
+        ai.write_property(PropertyIdentifier.PRESENT_VALUE, 99.0)
+        buf = tl.read_property(PropertyIdentifier.LOG_BUFFER)
+        assert len(buf) == 0
+
+    def test_cov_respects_stop_time(self):
+        db = self._make_real_db()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 10.0
+        ai._properties[PropertyIdentifier.OUT_OF_SERVICE] = True
+        db.add(ai)
+
+        tl = _make_trendlog(
+            target_oid=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            logging_type=LoggingType.COV,
+        )
+        # Set stop_time in the past
+        from bac_py.types.constructed import BACnetDateTime
+        from bac_py.types.primitives import BACnetDate, BACnetTime
+
+        tl._properties[PropertyIdentifier.STOP_TIME] = BACnetDateTime(
+            date=BACnetDate(2000, 1, 1, 6),
+            time=BACnetTime(0, 0, 0, 0),
+        )
+        db.add(tl)
+
+        engine = _make_engine(db)
+        engine._evaluate_cycle()
+        # Should NOT subscribe because outside time window
+        assert tl.object_identifier not in engine._cov_subscriptions
+
+    def test_cov_multiple_changes_records_each(self):
+        db = self._make_real_db()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 10.0
+        ai._properties[PropertyIdentifier.OUT_OF_SERVICE] = True
+        db.add(ai)
+
+        tl = _make_trendlog(
+            target_oid=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            logging_type=LoggingType.COV,
+            buffer_size=10,
+        )
+        db.add(tl)
+
+        engine = _make_engine(db)
+        engine._evaluate_cycle()
+
+        # Multiple changes
+        ai.write_property(PropertyIdentifier.PRESENT_VALUE, 20.0)
+        ai.write_property(PropertyIdentifier.PRESENT_VALUE, 30.0)
+        ai.write_property(PropertyIdentifier.PRESENT_VALUE, 40.0)
+
+        buf = tl.read_property(PropertyIdentifier.LOG_BUFFER)
+        assert len(buf) == 3
+        assert buf[0].log_datum == 20.0
+        assert buf[1].log_datum == 30.0
+        assert buf[2].log_datum == 40.0
+
+    async def test_stop_cleans_up_cov_subscriptions(self):
+        db = self._make_real_db()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 10.0
+        ai._properties[PropertyIdentifier.OUT_OF_SERVICE] = True
+        db.add(ai)
+
+        tl = _make_trendlog(
+            target_oid=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            logging_type=LoggingType.COV,
+        )
+        db.add(tl)
+
+        engine = _make_engine(db)
+        engine._evaluate_cycle()
+        assert tl.object_identifier in engine._cov_subscriptions
+
+        await engine.stop()
+        assert len(engine._cov_subscriptions) == 0
 
 
 # ---------------------------------------------------------------------------
