@@ -149,9 +149,7 @@ class FaultCharacterString:
         return buf
 
     @classmethod
-    def decode_inner(
-        cls, data: memoryview, offset: int
-    ) -> tuple[FaultCharacterString, int]:
+    def decode_inner(cls, data: memoryview, offset: int) -> tuple[FaultCharacterString, int]:
         """Decode inner fields from wire data."""
         _tag, offset = decode_tag(data, offset)  # opening 0
         values: list[str] = []
@@ -212,17 +210,13 @@ class FaultExtended:
         return buf
 
     @classmethod
-    def decode_inner(
-        cls, data: memoryview, offset: int
-    ) -> tuple[FaultExtended, int]:
+    def decode_inner(cls, data: memoryview, offset: int) -> tuple[FaultExtended, int]:
         """Decode inner fields from wire data."""
         vid, offset = _decode_ctx_unsigned(data, offset)
         eft, offset = _decode_ctx_unsigned(data, offset)
         _tag, offset = decode_tag(data, offset)  # opening 2
         params, offset = extract_context_value(data, offset, 2)
-        return cls(
-            vendor_id=vid, extended_fault_type=eft, parameters=params
-        ), offset
+        return cls(vendor_id=vid, extended_fault_type=eft, parameters=params), offset
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dict."""
@@ -277,9 +271,7 @@ class FaultLifeSafety:
         return buf
 
     @classmethod
-    def decode_inner(
-        cls, data: memoryview, offset: int
-    ) -> tuple[FaultLifeSafety, int]:
+    def decode_inner(cls, data: memoryview, offset: int) -> tuple[FaultLifeSafety, int]:
         """Decode inner fields from wire data."""
         _tag, offset = decode_tag(data, offset)  # opening 0
         fault_vals: list[LifeSafetyState] = []
@@ -357,9 +349,7 @@ class FaultState:
         return buf
 
     @classmethod
-    def decode_inner(
-        cls, data: memoryview, offset: int
-    ) -> tuple[FaultState, int]:
+    def decode_inner(cls, data: memoryview, offset: int) -> tuple[FaultState, int]:
         """Decode inner fields from wire data."""
         _tag, offset = decode_tag(data, offset)  # opening 0
         raw, offset = extract_context_value(data, offset, 0)
@@ -410,9 +400,7 @@ class FaultStatusFlags:
         return buf
 
     @classmethod
-    def decode_inner(
-        cls, data: memoryview, offset: int
-    ) -> tuple[FaultStatusFlags, int]:
+    def decode_inner(cls, data: memoryview, offset: int) -> tuple[FaultStatusFlags, int]:
         """Decode inner fields from wire data."""
         _tag, offset = decode_tag(data, offset)  # opening 0
         ref, offset = BACnetDeviceObjectPropertyReference.decode(data, offset)
@@ -430,9 +418,7 @@ class FaultStatusFlags:
     def from_dict(cls, d: dict[str, Any]) -> FaultStatusFlags:
         """Reconstruct from a JSON-friendly dict."""
         return cls(
-            status_flags_ref=BACnetDeviceObjectPropertyReference.from_dict(
-                d["status_flags_ref"]
-            ),
+            status_flags_ref=BACnetDeviceObjectPropertyReference.from_dict(d["status_flags_ref"]),
         )
 
 
@@ -468,9 +454,7 @@ def _encode_range_value(choice: int, value: float | int) -> bytes:
     return encode_context_tagged(3, encode_signed(int(value)))
 
 
-def _decode_range_value(
-    data: memoryview, offset: int
-) -> tuple[float | int, int, int]:
+def _decode_range_value(data: memoryview, offset: int) -> tuple[float | int, int, int]:
     """Decode a min/max normal value CHOICE element.
 
     Returns ``(value, choice, new_offset)``.
@@ -522,9 +506,7 @@ class FaultOutOfRange:
         return buf
 
     @classmethod
-    def decode_inner(
-        cls, data: memoryview, offset: int
-    ) -> tuple[FaultOutOfRange, int]:
+    def decode_inner(cls, data: memoryview, offset: int) -> tuple[FaultOutOfRange, int]:
         """Decode inner fields from wire data."""
         _tag, offset = decode_tag(data, offset)  # opening 0
         min_val, min_ch, offset = _decode_range_value(data, offset)
@@ -601,9 +583,7 @@ class FaultListed:
         return buf
 
     @classmethod
-    def decode_inner(
-        cls, data: memoryview, offset: int
-    ) -> tuple[FaultListed, int]:
+    def decode_inner(cls, data: memoryview, offset: int) -> tuple[FaultListed, int]:
         """Decode inner fields from wire data."""
         _tag, offset = decode_tag(data, offset)  # opening 0
         ref, offset = BACnetDeviceObjectPropertyReference.decode(data, offset)
@@ -621,9 +601,7 @@ class FaultListed:
     def from_dict(cls, d: dict[str, Any]) -> FaultListed:
         """Reconstruct from a JSON-friendly dict."""
         return cls(
-            fault_list_ref=BACnetDeviceObjectPropertyReference.from_dict(
-                d["fault_list_ref"]
-            ),
+            fault_list_ref=BACnetDeviceObjectPropertyReference.from_dict(d["fault_list_ref"]),
         )
 
 

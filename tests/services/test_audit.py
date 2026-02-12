@@ -114,9 +114,7 @@ class TestConfirmedAuditNotificationRequest:
         decoded = ConfirmedAuditNotificationRequest.decode(encoded)
         assert len(decoded.notifications) == 1
         assert decoded.notifications[0].operation == AuditOperation.WRITE
-        assert decoded.notifications[0].source_device == ObjectIdentifier(
-            ObjectType.DEVICE, 100
-        )
+        assert decoded.notifications[0].source_device == ObjectIdentifier(ObjectType.DEVICE, 100)
         assert decoded.notifications[0].target_property == 85
 
     def test_round_trip_multiple_notifications(self):

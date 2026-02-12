@@ -231,9 +231,7 @@ class DeviceAssignmentTable:
         """Remove an assignment entry."""
         self._entries.pop((vendor_id, serial_number), None)
 
-    def lookup(
-        self, vendor_id: int, serial_number: str
-    ) -> DeviceAssignmentEntry | None:
+    def lookup(self, vendor_id: int, serial_number: str) -> DeviceAssignmentEntry | None:
         """Look up assignment for a device."""
         return self._entries.get((vendor_id, serial_number))
 
@@ -2260,13 +2258,15 @@ class BACnetClient:
                 pass
 
         self._app.register_temporary_handler(
-            UnconfirmedServiceChoice.WHO_AM_I, _on_who_am_i,
+            UnconfirmedServiceChoice.WHO_AM_I,
+            _on_who_am_i,
         )
         try:
             await asyncio.sleep(timeout)
         finally:
             self._app.unregister_temporary_handler(
-                UnconfirmedServiceChoice.WHO_AM_I, _on_who_am_i,
+                UnconfirmedServiceChoice.WHO_AM_I,
+                _on_who_am_i,
             )
         return results
 
@@ -2452,13 +2452,17 @@ class BACnetClient:
         """
         # Step 1: Start backup
         await self.reinitialize_device(
-            address, ReinitializedState.START_BACKUP, password=password, timeout=timeout,
+            address,
+            ReinitializedState.START_BACKUP,
+            password=password,
+            timeout=timeout,
         )
 
         # Step 2: Poll until preparing phase completes
         device_oid = await self._discover_device_oid(address, timeout=timeout)
         await self._poll_backup_restore_state(
-            address, device_oid,
+            address,
+            device_oid,
             target_states=(
                 BackupAndRestoreState.PERFORMING_A_BACKUP,
                 BackupAndRestoreState.PREPARING_FOR_BACKUP,
@@ -2469,7 +2473,9 @@ class BACnetClient:
 
         # Step 3: Read configuration files list
         ack = await self.read_property(
-            address, device_oid, PropertyIdentifier.CONFIGURATION_FILES,
+            address,
+            device_oid,
+            PropertyIdentifier.CONFIGURATION_FILES,
             timeout=timeout,
         )
         config_file_ids: list[ObjectIdentifier] = []
@@ -2488,7 +2494,10 @@ class BACnetClient:
 
         # Step 5: End backup
         await self.reinitialize_device(
-            address, ReinitializedState.END_BACKUP, password=password, timeout=timeout,
+            address,
+            ReinitializedState.END_BACKUP,
+            password=password,
+            timeout=timeout,
         )
 
         return BackupData(
@@ -2522,13 +2531,17 @@ class BACnetClient:
         """
         # Step 1: Start restore
         await self.reinitialize_device(
-            address, ReinitializedState.START_RESTORE, password=password, timeout=timeout,
+            address,
+            ReinitializedState.START_RESTORE,
+            password=password,
+            timeout=timeout,
         )
 
         # Step 2: Poll until ready for download
         device_oid = await self._discover_device_oid(address, timeout=timeout)
         await self._poll_backup_restore_state(
-            address, device_oid,
+            address,
+            device_oid,
             target_states=(
                 BackupAndRestoreState.PERFORMING_A_RESTORE,
                 BackupAndRestoreState.PREPARING_FOR_RESTORE,
@@ -2540,12 +2553,18 @@ class BACnetClient:
         # Step 3: Upload configuration files
         for file_oid, file_data in backup_data.configuration_files:
             await self.atomic_write_file(
-                address, file_oid, StreamWriteAccess(0, file_data), timeout=timeout,
+                address,
+                file_oid,
+                StreamWriteAccess(0, file_data),
+                timeout=timeout,
             )
 
         # Step 4: End restore
         await self.reinitialize_device(
-            address, ReinitializedState.END_RESTORE, password=password, timeout=timeout,
+            address,
+            ReinitializedState.END_RESTORE,
+            password=password,
+            timeout=timeout,
         )
 
     async def _discover_device_oid(
@@ -2575,7 +2594,8 @@ class BACnetClient:
         """Poll BACKUP_AND_RESTORE_STATE until it reaches a target state."""
         while True:
             ack = await self.read_property(
-                address, device_oid,
+                address,
+                device_oid,
                 PropertyIdentifier.BACKUP_AND_RESTORE_STATE,
                 timeout=timeout,
             )
@@ -2600,7 +2620,9 @@ class BACnetClient:
         file_offset = 0
         while True:
             ack = await self.atomic_read_file(
-                address, file_oid, StreamReadAccess(file_offset, chunk_size),
+                address,
+                file_oid,
+                StreamReadAccess(file_offset, chunk_size),
                 timeout=timeout,
             )
             access = ack.access_method

@@ -49,26 +49,19 @@ class TestDeviceBackupRestoreProperties:
 
     def test_system_status_default(self):
         device = _make_device()
-        assert (
-            device.read_property(PropertyIdentifier.SYSTEM_STATUS)
-            == DeviceStatus.OPERATIONAL
-        )
+        assert device.read_property(PropertyIdentifier.SYSTEM_STATUS) == DeviceStatus.OPERATIONAL
 
 
 class TestBackupStateTransitions:
     def test_start_backup_sets_status(self):
         device = _make_device()
-        device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
-            DeviceStatus.OPERATIONAL
-        )
+        device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.OPERATIONAL
         device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
             BackupAndRestoreState.IDLE
         )
 
         # Simulate START_BACKUP
-        device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
-            DeviceStatus.BACKUP_IN_PROGRESS
-        )
+        device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.BACKUP_IN_PROGRESS
         device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
             BackupAndRestoreState.PREPARING_FOR_BACKUP
         )
@@ -84,25 +77,18 @@ class TestBackupStateTransitions:
 
     def test_end_backup_restores_operational(self):
         device = _make_device()
-        device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
-            DeviceStatus.BACKUP_IN_PROGRESS
-        )
+        device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.BACKUP_IN_PROGRESS
         device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
             BackupAndRestoreState.PREPARING_FOR_BACKUP
         )
 
         # Simulate END_BACKUP
-        device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
-            DeviceStatus.OPERATIONAL
-        )
+        device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.OPERATIONAL
         device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
             BackupAndRestoreState.IDLE
         )
 
-        assert (
-            device.read_property(PropertyIdentifier.SYSTEM_STATUS)
-            == DeviceStatus.OPERATIONAL
-        )
+        assert device.read_property(PropertyIdentifier.SYSTEM_STATUS) == DeviceStatus.OPERATIONAL
         assert (
             device.read_property(PropertyIdentifier.BACKUP_AND_RESTORE_STATE)
             == BackupAndRestoreState.IDLE
@@ -111,9 +97,7 @@ class TestBackupStateTransitions:
     def test_start_restore_sets_download_in_progress(self):
         device = _make_device()
 
-        device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
-            DeviceStatus.DOWNLOAD_IN_PROGRESS
-        )
+        device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.DOWNLOAD_IN_PROGRESS
         device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
             BackupAndRestoreState.PREPARING_FOR_RESTORE
         )
@@ -130,39 +114,28 @@ class TestBackupStateTransitions:
         )
 
         # Simulate END_RESTORE
-        device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
-            DeviceStatus.OPERATIONAL
-        )
+        device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.OPERATIONAL
         device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
             BackupAndRestoreState.IDLE
         )
         device._properties[PropertyIdentifier.LAST_RESTORE_TIME] = 12345
 
-        assert (
-            device.read_property(PropertyIdentifier.LAST_RESTORE_TIME) == 12345
-        )
+        assert device.read_property(PropertyIdentifier.LAST_RESTORE_TIME) == 12345
 
     def test_abort_restore_returns_to_idle(self):
         device = _make_device()
-        device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
-            DeviceStatus.DOWNLOAD_IN_PROGRESS
-        )
+        device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.DOWNLOAD_IN_PROGRESS
         device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
             BackupAndRestoreState.PREPARING_FOR_RESTORE
         )
 
         # Simulate ABORT_RESTORE
-        device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
-            DeviceStatus.OPERATIONAL
-        )
+        device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.OPERATIONAL
         device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
             BackupAndRestoreState.IDLE
         )
 
-        assert (
-            device.read_property(PropertyIdentifier.SYSTEM_STATUS)
-            == DeviceStatus.OPERATIONAL
-        )
+        assert device.read_property(PropertyIdentifier.SYSTEM_STATUS) == DeviceStatus.OPERATIONAL
         assert (
             device.read_property(PropertyIdentifier.BACKUP_AND_RESTORE_STATE)
             == BackupAndRestoreState.IDLE

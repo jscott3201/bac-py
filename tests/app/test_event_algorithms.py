@@ -277,15 +277,11 @@ class TestEvaluateUnsignedOutOfRange:
         assert result is None
 
     def test_deadband_hysteresis_low(self):
-        result = evaluate_unsigned_out_of_range(
-            14, 100, 10, 5, current_state=EventState.LOW_LIMIT
-        )
+        result = evaluate_unsigned_out_of_range(14, 100, 10, 5, current_state=EventState.LOW_LIMIT)
         assert result is EventState.LOW_LIMIT
 
     def test_deadband_clears_low(self):
-        result = evaluate_unsigned_out_of_range(
-            16, 100, 10, 5, current_state=EventState.LOW_LIMIT
-        )
+        result = evaluate_unsigned_out_of_range(16, 100, 10, 5, current_state=EventState.LOW_LIMIT)
         assert result is None
 
 
@@ -414,14 +410,10 @@ class TestEvaluateFloatingLimit:
 
     def test_setpoint_shift_moves_limits(self):
         # Setpoint 80.0 => effective high = 85.0, low = 75.0
-        result = evaluate_floating_limit(
-            78.0, 80.0, self.HIGH_DIFF, self.LOW_DIFF, self.DEADBAND
-        )
+        result = evaluate_floating_limit(78.0, 80.0, self.HIGH_DIFF, self.LOW_DIFF, self.DEADBAND)
         assert result is None
 
-        result = evaluate_floating_limit(
-            86.0, 80.0, self.HIGH_DIFF, self.LOW_DIFF, self.DEADBAND
-        )
+        result = evaluate_floating_limit(86.0, 80.0, self.HIGH_DIFF, self.LOW_DIFF, self.DEADBAND)
         assert result is EventState.HIGH_LIMIT
 
     def test_asymmetric_diff_limits(self):
@@ -590,9 +582,7 @@ class TestEvaluateChangeOfLifeSafety:
         assert result is None
 
     def test_empty_life_safety_alarm_values_never_life_safety_alarm(self):
-        result = evaluate_change_of_life_safety(
-            LifeSafetyState.ALARM, 0, self.ALARM_VALUES, ()
-        )
+        result = evaluate_change_of_life_safety(LifeSafetyState.ALARM, 0, self.ALARM_VALUES, ())
         # ALARM is not in alarm_values, so returns None
         assert result is None
 
@@ -630,8 +620,7 @@ class TestEvaluateChangeOfCharacterstring:
     def test_all_alarm_values_detected(self):
         for val in self.ALARM_VALUES:
             assert (
-                evaluate_change_of_characterstring(val, self.ALARM_VALUES)
-                is EventState.OFFNORMAL
+                evaluate_change_of_characterstring(val, self.ALARM_VALUES) is EventState.OFFNORMAL
             )
 
     def test_empty_alarm_values_never_alarms(self):
@@ -847,15 +836,11 @@ class TestEvaluateBufferReady:
     """Tests for evaluate_buffer_ready (Clause 13.3.10)."""
 
     def test_below_threshold_returns_none(self):
-        result = evaluate_buffer_ready(
-            current_count=5, previous_count=3, notification_threshold=5
-        )
+        result = evaluate_buffer_ready(current_count=5, previous_count=3, notification_threshold=5)
         assert result is None
 
     def test_exactly_at_threshold_returns_offnormal(self):
-        result = evaluate_buffer_ready(
-            current_count=8, previous_count=3, notification_threshold=5
-        )
+        result = evaluate_buffer_ready(current_count=8, previous_count=3, notification_threshold=5)
         assert result is EventState.OFFNORMAL
 
     def test_above_threshold_returns_offnormal(self):
@@ -907,21 +892,15 @@ class TestEvaluateExtended:
         def _check(v, p):
             return EventState.OFFNORMAL if v > p["threshold"] else None
 
-        result = evaluate_extended(
-            42, {"threshold": 10}, vendor_callback=_check
-        )
+        result = evaluate_extended(42, {"threshold": 10}, vendor_callback=_check)
         assert result is EventState.OFFNORMAL
 
     def test_callback_returning_high_limit(self):
-        result = evaluate_extended(
-            100, {}, vendor_callback=lambda v, p: EventState.HIGH_LIMIT
-        )
+        result = evaluate_extended(100, {}, vendor_callback=lambda v, p: EventState.HIGH_LIMIT)
         assert result is EventState.HIGH_LIMIT
 
     def test_callback_returning_low_limit(self):
-        result = evaluate_extended(
-            -100, {}, vendor_callback=lambda v, p: EventState.LOW_LIMIT
-        )
+        result = evaluate_extended(-100, {}, vendor_callback=lambda v, p: EventState.LOW_LIMIT)
         assert result is EventState.LOW_LIMIT
 
     def test_callback_receives_correct_args(self):
@@ -939,9 +918,7 @@ class TestEvaluateExtended:
         def _check(v, p):
             return EventState.OFFNORMAL if v > p["threshold"] else None
 
-        result = evaluate_extended(
-            5, {"threshold": 10}, vendor_callback=_check
-        )
+        result = evaluate_extended(5, {"threshold": 10}, vendor_callback=_check)
         assert result is None
 
     def test_explicit_none_callback(self):

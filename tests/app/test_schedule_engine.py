@@ -33,11 +33,7 @@ class _FakeObjectDB:
         return self._objects.get(oid)
 
     def get_objects_of_type(self, obj_type: ObjectType) -> list[object]:
-        return [
-            o
-            for o in self._objects.values()
-            if getattr(o, "OBJECT_TYPE", None) == obj_type
-        ]
+        return [o for o in self._objects.values() if getattr(o, "OBJECT_TYPE", None) == obj_type]
 
 
 class _FakeApp:
@@ -204,12 +200,8 @@ class TestExceptionSchedule:
 
         # Exception for a specific date
         exc = BACnetSpecialEvent(
-            period=BACnetCalendarEntry(
-                choice=0, value=BACnetDate(2024, 2, 12, 0xFF)
-            ),
-            list_of_time_values=(
-                BACnetTimeValue(time=BACnetTime(0, 0, 0, 0), value=55.0),
-            ),
+            period=BACnetCalendarEntry(choice=0, value=BACnetDate(2024, 2, 12, 0xFF)),
+            list_of_time_values=(BACnetTimeValue(time=BACnetTime(0, 0, 0, 0), value=55.0),),
             event_priority=1,
         )
         sched._properties[PropertyIdentifier.EXCEPTION_SCHEDULE] = [exc]
@@ -226,21 +218,13 @@ class TestExceptionSchedule:
         sched._properties[PropertyIdentifier.SCHEDULE_DEFAULT] = 60.0
 
         exc_low = BACnetSpecialEvent(
-            period=BACnetCalendarEntry(
-                choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)
-            ),
-            list_of_time_values=(
-                BACnetTimeValue(time=BACnetTime(0, 0, 0, 0), value=50.0),
-            ),
+            period=BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)),
+            list_of_time_values=(BACnetTimeValue(time=BACnetTime(0, 0, 0, 0), value=50.0),),
             event_priority=10,
         )
         exc_high = BACnetSpecialEvent(
-            period=BACnetCalendarEntry(
-                choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)
-            ),
-            list_of_time_values=(
-                BACnetTimeValue(time=BACnetTime(0, 0, 0, 0), value=45.0),
-            ),
+            period=BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)),
+            list_of_time_values=(BACnetTimeValue(time=BACnetTime(0, 0, 0, 0), value=45.0),),
             event_priority=5,
         )
         sched._properties[PropertyIdentifier.EXCEPTION_SCHEDULE] = [
@@ -260,9 +244,7 @@ class TestExceptionSchedule:
         # Create a calendar that matches today
         cal = CalendarObject(1)
         cal._properties[PropertyIdentifier.DATE_LIST] = [
-            BACnetCalendarEntry(
-                choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)
-            ),
+            BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)),
         ]
         cal.evaluate(datetime.date(2024, 2, 12))
         db.add(cal)
@@ -272,9 +254,7 @@ class TestExceptionSchedule:
 
         exc = BACnetSpecialEvent(
             period=ObjectIdentifier(ObjectType.CALENDAR, 1),
-            list_of_time_values=(
-                BACnetTimeValue(time=BACnetTime(0, 0, 0, 0), value=42.0),
-            ),
+            list_of_time_values=(BACnetTimeValue(time=BACnetTime(0, 0, 0, 0), value=42.0),),
             event_priority=1,
         )
         sched._properties[PropertyIdentifier.EXCEPTION_SCHEDULE] = [exc]
@@ -302,9 +282,7 @@ class TestOutputWriting:
         sched = ScheduleObject(1)
         sched._properties[PropertyIdentifier.SCHEDULE_DEFAULT] = 72.0
         sched._properties[PropertyIdentifier.PRIORITY_FOR_WRITING] = 10
-        sched._properties[
-            PropertyIdentifier.LIST_OF_OBJECT_PROPERTY_REFERENCES
-        ] = [
+        sched._properties[PropertyIdentifier.LIST_OF_OBJECT_PROPERTY_REFERENCES] = [
             BACnetObjectPropertyReference(
                 object_identifier=ObjectIdentifier(ObjectType.ANALOG_VALUE, 1),
                 property_identifier=int(PropertyIdentifier.PRESENT_VALUE),
@@ -329,9 +307,7 @@ class TestOutputWriting:
         sched = ScheduleObject(1)
         sched._properties[PropertyIdentifier.SCHEDULE_DEFAULT] = 72.0
         sched._properties[PropertyIdentifier.PRIORITY_FOR_WRITING] = 10
-        sched._properties[
-            PropertyIdentifier.LIST_OF_OBJECT_PROPERTY_REFERENCES
-        ] = [
+        sched._properties[PropertyIdentifier.LIST_OF_OBJECT_PROPERTY_REFERENCES] = [
             BACnetObjectPropertyReference(
                 object_identifier=ObjectIdentifier(ObjectType.ANALOG_VALUE, 1),
                 property_identifier=int(PropertyIdentifier.PRESENT_VALUE),
@@ -347,9 +323,7 @@ class TestOutputWriting:
         assert target.read_property(PropertyIdentifier.PRESENT_VALUE) == 72.0
 
         # Override target at higher priority
-        target.write_property(
-            PropertyIdentifier.PRESENT_VALUE, 50.0, priority=1
-        )
+        target.write_property(PropertyIdentifier.PRESENT_VALUE, 50.0, priority=1)
         assert target.read_property(PropertyIdentifier.PRESENT_VALUE) == 50.0
 
         # Second evaluation → same schedule value, no new write
@@ -368,9 +342,7 @@ class TestCalendarInCycle:
         db = _FakeObjectDB()
         cal = CalendarObject(1)
         cal._properties[PropertyIdentifier.DATE_LIST] = [
-            BACnetCalendarEntry(
-                choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)
-            ),
+            BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)),
         ]
         db.add(cal)
 

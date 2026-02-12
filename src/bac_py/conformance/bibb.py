@@ -25,14 +25,10 @@ class BIBBDefinition:
     description: str
     """Human-readable description."""
 
-    confirmed_services: frozenset[ConfirmedServiceChoice] = field(
-        default_factory=frozenset
-    )
+    confirmed_services: frozenset[ConfirmedServiceChoice] = field(default_factory=frozenset)
     """Confirmed services required for this BIBB."""
 
-    unconfirmed_services: frozenset[UnconfirmedServiceChoice] = field(
-        default_factory=frozenset
-    )
+    unconfirmed_services: frozenset[UnconfirmedServiceChoice] = field(default_factory=frozenset)
     """Unconfirmed services required for this BIBB."""
 
     role: str = "A"
@@ -106,23 +102,15 @@ _BIBB_DEFINITIONS: list[BIBBDefinition] = [
     BIBBDefinition(
         name="AE-N-A",
         description="Alarm & Event - Notification - A (Client/Notification Source)",
-        confirmed_services=frozenset(
-            {ConfirmedServiceChoice.CONFIRMED_EVENT_NOTIFICATION}
-        ),
-        unconfirmed_services=frozenset(
-            {UnconfirmedServiceChoice.UNCONFIRMED_EVENT_NOTIFICATION}
-        ),
+        confirmed_services=frozenset({ConfirmedServiceChoice.CONFIRMED_EVENT_NOTIFICATION}),
+        unconfirmed_services=frozenset({UnconfirmedServiceChoice.UNCONFIRMED_EVENT_NOTIFICATION}),
         role="A",
     ),
     BIBBDefinition(
         name="AE-N-B",
         description="Alarm & Event - Notification - B (Server/Notification Sink)",
-        confirmed_services=frozenset(
-            {ConfirmedServiceChoice.CONFIRMED_EVENT_NOTIFICATION}
-        ),
-        unconfirmed_services=frozenset(
-            {UnconfirmedServiceChoice.UNCONFIRMED_EVENT_NOTIFICATION}
-        ),
+        confirmed_services=frozenset({ConfirmedServiceChoice.CONFIRMED_EVENT_NOTIFICATION}),
+        unconfirmed_services=frozenset({UnconfirmedServiceChoice.UNCONFIRMED_EVENT_NOTIFICATION}),
         role="B",
     ),
     BIBBDefinition(
@@ -209,17 +197,13 @@ _BIBB_DEFINITIONS: list[BIBBDefinition] = [
     BIBBDefinition(
         name="DM-DCC-A",
         description="Device Management - DeviceCommunicationControl - A (Client)",
-        confirmed_services=frozenset(
-            {ConfirmedServiceChoice.DEVICE_COMMUNICATION_CONTROL}
-        ),
+        confirmed_services=frozenset({ConfirmedServiceChoice.DEVICE_COMMUNICATION_CONTROL}),
         role="A",
     ),
     BIBBDefinition(
         name="DM-DCC-B",
         description="Device Management - DeviceCommunicationControl - B (Server)",
-        confirmed_services=frozenset(
-            {ConfirmedServiceChoice.DEVICE_COMMUNICATION_CONTROL}
-        ),
+        confirmed_services=frozenset({ConfirmedServiceChoice.DEVICE_COMMUNICATION_CONTROL}),
         role="B",
     ),
     BIBBDefinition(
@@ -237,33 +221,25 @@ _BIBB_DEFINITIONS: list[BIBBDefinition] = [
     BIBBDefinition(
         name="DM-TS-A",
         description="Device Management - TimeSynchronization - A (Client)",
-        unconfirmed_services=frozenset(
-            {UnconfirmedServiceChoice.TIME_SYNCHRONIZATION}
-        ),
+        unconfirmed_services=frozenset({UnconfirmedServiceChoice.TIME_SYNCHRONIZATION}),
         role="A",
     ),
     BIBBDefinition(
         name="DM-TS-B",
         description="Device Management - TimeSynchronization - B (Server)",
-        unconfirmed_services=frozenset(
-            {UnconfirmedServiceChoice.TIME_SYNCHRONIZATION}
-        ),
+        unconfirmed_services=frozenset({UnconfirmedServiceChoice.TIME_SYNCHRONIZATION}),
         role="B",
     ),
     BIBBDefinition(
         name="DM-UTC-A",
         description="Device Management - UTCTimeSynchronization - A (Client)",
-        unconfirmed_services=frozenset(
-            {UnconfirmedServiceChoice.UTC_TIME_SYNCHRONIZATION}
-        ),
+        unconfirmed_services=frozenset({UnconfirmedServiceChoice.UTC_TIME_SYNCHRONIZATION}),
         role="A",
     ),
     BIBBDefinition(
         name="DM-UTC-B",
         description="Device Management - UTCTimeSynchronization - B (Server)",
-        unconfirmed_services=frozenset(
-            {UnconfirmedServiceChoice.UTC_TIME_SYNCHRONIZATION}
-        ),
+        unconfirmed_services=frozenset({UnconfirmedServiceChoice.UTC_TIME_SYNCHRONIZATION}),
         role="B",
     ),
     # --- File Access ---
@@ -387,7 +363,4 @@ class BIBBMatrix:
         # B-role: check server handlers
         return all(
             svc.value in self._registry._confirmed for svc in bibb.confirmed_services
-        ) and all(
-            svc.value in self._registry._unconfirmed
-            for svc in bibb.unconfirmed_services
-        )
+        ) and all(svc.value in self._registry._unconfirmed for svc in bibb.unconfirmed_services)

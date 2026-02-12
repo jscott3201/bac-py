@@ -112,9 +112,7 @@ class TestBACnetAuditLogRecord:
         decoded = BACnetAuditLogRecord.decode(encoded)
         assert decoded.sequence_number == 42
         assert decoded.notification.operation == AuditOperation.CREATE
-        assert decoded.notification.target_object == ObjectIdentifier(
-            ObjectType.ANALOG_INPUT, 10
-        )
+        assert decoded.notification.target_object == ObjectIdentifier(ObjectType.ANALOG_INPUT, 10)
 
     def test_large_sequence_number(self):
         notif = BACnetAuditNotification(operation=AuditOperation.GENERAL)
@@ -131,9 +129,7 @@ class TestAuditQueryByTarget:
         )
         encoded = query.encode()
         decoded = AuditQueryByTarget.decode(encoded)
-        assert decoded.target_device_identifier == ObjectIdentifier(
-            ObjectType.DEVICE, 100
-        )
+        assert decoded.target_device_identifier == ObjectIdentifier(ObjectType.DEVICE, 100)
         assert decoded.target_object_identifier is None
         assert decoded.result_filter == 0
 
@@ -150,13 +146,9 @@ class TestAuditQueryByTarget:
         )
         encoded = query.encode()
         decoded = AuditQueryByTarget.decode(encoded)
-        assert decoded.target_device_identifier == ObjectIdentifier(
-            ObjectType.DEVICE, 100
-        )
+        assert decoded.target_device_identifier == ObjectIdentifier(ObjectType.DEVICE, 100)
         assert decoded.target_device_address == b"\xc0\xa8\x01\x01\xba\xc0"
-        assert decoded.target_object_identifier == ObjectIdentifier(
-            ObjectType.ANALOG_INPUT, 1
-        )
+        assert decoded.target_object_identifier == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
         assert decoded.target_property_identifier == 85
         assert decoded.target_array_index == 0
         assert decoded.target_priority == 8
@@ -171,9 +163,7 @@ class TestAuditQueryBySource:
         )
         encoded = query.encode()
         decoded = AuditQueryBySource.decode(encoded)
-        assert decoded.source_device_identifier == ObjectIdentifier(
-            ObjectType.DEVICE, 200
-        )
+        assert decoded.source_device_identifier == ObjectIdentifier(ObjectType.DEVICE, 200)
         assert decoded.source_object_identifier is None
         assert decoded.result_filter == 0
 
@@ -187,12 +177,8 @@ class TestAuditQueryBySource:
         )
         encoded = query.encode()
         decoded = AuditQueryBySource.decode(encoded)
-        assert decoded.source_device_identifier == ObjectIdentifier(
-            ObjectType.DEVICE, 200
-        )
+        assert decoded.source_device_identifier == ObjectIdentifier(ObjectType.DEVICE, 200)
         assert decoded.source_device_address == b"\x0a\x00\x01\x01\xba\xc0"
-        assert decoded.source_object_identifier == ObjectIdentifier(
-            ObjectType.DEVICE, 200
-        )
+        assert decoded.source_object_identifier == ObjectIdentifier(ObjectType.DEVICE, 200)
         assert decoded.operations == 0xFF
         assert decoded.result_filter == 2

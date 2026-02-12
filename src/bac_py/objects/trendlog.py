@@ -155,9 +155,7 @@ class TrendLogObject(BACnetObject):
         """
         buf: list[BACnetLogRecord] = self._properties[PropertyIdentifier.LOG_BUFFER]
         buf_size: int = self._properties.get(PropertyIdentifier.BUFFER_SIZE, 0)
-        stop_when_full: bool = self._properties.get(
-            PropertyIdentifier.STOP_WHEN_FULL, False
-        )
+        stop_when_full: bool = self._properties.get(PropertyIdentifier.STOP_WHEN_FULL, False)
 
         if buf_size > 0 and len(buf) >= buf_size:
             if stop_when_full:

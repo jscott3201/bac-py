@@ -679,23 +679,19 @@ class BACnetObject:
                 winning_priority = i
                 break
         else:
-            self._properties[prop_id] = self._properties.get(
-                PropertyIdentifier.RELINQUISH_DEFAULT
-            )
+            self._properties[prop_id] = self._properties.get(PropertyIdentifier.RELINQUISH_DEFAULT)
 
         # Update current value source from winning priority slot
         if hasattr(self, "_value_source_array"):
             if winning_priority is not None:
-                self._properties[PropertyIdentifier.VALUE_SOURCE] = (
-                    self._value_source_array[winning_priority]
-                )
-                self._properties[PropertyIdentifier.LAST_COMMAND_TIME] = (
-                    self._command_time_array[winning_priority]
-                )
+                self._properties[PropertyIdentifier.VALUE_SOURCE] = self._value_source_array[
+                    winning_priority
+                ]
+                self._properties[PropertyIdentifier.LAST_COMMAND_TIME] = self._command_time_array[
+                    winning_priority
+                ]
             else:
-                self._properties[PropertyIdentifier.VALUE_SOURCE] = (
-                    BACnetValueSource.none_source()
-                )
+                self._properties[PropertyIdentifier.VALUE_SOURCE] = BACnetValueSource.none_source()
                 self._properties[PropertyIdentifier.LAST_COMMAND_TIME] = None
 
     def _write_array_element(

@@ -689,7 +689,10 @@ class EventEngine:
             return
 
         # Get or create context
-        key = (int(enrollment.object_identifier.object_type), enrollment.object_identifier.instance_number)
+        key = (
+            int(enrollment.object_identifier.object_type),
+            enrollment.object_identifier.instance_number,
+        )
         ctx = self._contexts.get(key)
         if ctx is None:
             ctx = _EnrollmentContext()
@@ -793,7 +796,9 @@ class EventEngine:
             PropertyIdentifier.RELIABILITY, Reliability.NO_FAULT_DETECTED
         )
         fault_result = (
-            reliability if reliability != Reliability.NO_FAULT_DETECTED else Reliability.NO_FAULT_DETECTED
+            reliability
+            if reliability != Reliability.NO_FAULT_DETECTED
+            else Reliability.NO_FAULT_DETECTED
         )
 
         # Check Reliability_Evaluation_Inhibit (Clause 13.2.2, p.638)
@@ -938,7 +943,9 @@ class EventEngine:
             if not isinstance(bitmask, tuple):
                 bitmask = tuple(bitmask)
             if not isinstance(alarm_values, tuple):
-                alarm_values = tuple(tuple(v) if not isinstance(v, tuple) else v for v in alarm_values)
+                alarm_values = tuple(
+                    tuple(v) if not isinstance(v, tuple) else v for v in alarm_values
+                )
             return evaluate_change_of_bitstring(monitored_value, bitmask, alarm_values)
 
         if event_type == EventType.CHANGE_OF_VALUE and isinstance(params, dict):
@@ -1039,9 +1046,7 @@ class EventEngine:
                 previous_flags = tuple(previous_flags)
             if not isinstance(selected_flags, tuple):
                 selected_flags = tuple(selected_flags)
-            return evaluate_change_of_status_flags(
-                current_flags, previous_flags, selected_flags
-            )
+            return evaluate_change_of_status_flags(current_flags, previous_flags, selected_flags)
 
         if event_type == EventType.CHANGE_OF_RELIABILITY and isinstance(params, dict):
             reliability = monitored_value
@@ -1091,7 +1096,9 @@ class EventEngine:
             time_stamp=BACnetTimeStamp(choice=1, value=int(transition.timestamp)),
             notification_class=notification_class_num,
             priority=priority,
-            event_type=event_type if isinstance(event_type, EventType) else EventType.CHANGE_OF_STATE,
+            event_type=event_type
+            if isinstance(event_type, EventType)
+            else EventType.CHANGE_OF_STATE,
             notify_type=notify_type,
             to_state=transition.to_state,
             ack_required=ack_required,
@@ -1183,9 +1190,7 @@ class EventEngine:
                 address = _dest_address(dest)
                 self._send_notification_unconfirmed(notification, destination=address)
 
-    def _send_notification_unconfirmed(
-        self, notification: Any, *, destination: Any
-    ) -> None:
+    def _send_notification_unconfirmed(self, notification: Any, *, destination: Any) -> None:
         """Encode and send an unconfirmed event notification."""
         from bac_py.types.enums import UnconfirmedServiceChoice
 

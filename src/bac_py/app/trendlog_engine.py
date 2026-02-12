@@ -156,9 +156,11 @@ class TrendLogEngine:
             # Align to wall-clock boundaries
             now_wall = datetime.datetime.now().timestamp()
             # Seconds since midnight
-            midnight = datetime.datetime.now().replace(
-                hour=0, minute=0, second=0, microsecond=0
-            ).timestamp()
+            midnight = (
+                datetime.datetime.now()
+                .replace(hour=0, minute=0, second=0, microsecond=0)
+                .timestamp()
+            )
             elapsed = now_wall - midnight + offset_secs
             # Check if we've crossed an interval boundary since last poll
             current_slot = int(elapsed / interval_secs)

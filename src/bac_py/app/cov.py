@@ -593,9 +593,7 @@ class COVManager:
         :returns: The property value, or ``None`` if unavailable.
         """
         try:
-            return obj.read_property(
-                PropertyIdentifier(property_id), array_index=array_index
-            )
+            return obj.read_property(PropertyIdentifier(property_id), array_index=array_index)
         except (BACnetError, ValueError):
             return None
 

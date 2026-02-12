@@ -109,8 +109,8 @@ class AuditLogQueryRequest:
                         scan = t_offset
                 else:
                     scan = t_offset + t.length
-            query_parameters: AuditQueryByTarget | AuditQueryBySource = (
-                AuditQueryByTarget.decode(data[inner_start:inner_end])
+            query_parameters: AuditQueryByTarget | AuditQueryBySource = AuditQueryByTarget.decode(
+                data[inner_start:inner_end]
             )
             offset = scan
         else:
@@ -149,9 +149,7 @@ class AuditLogQueryRequest:
                 )
                 offset = new_offset + tag.length
             elif tag.number == 4:
-                requested_count = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                requested_count = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
             else:
                 break

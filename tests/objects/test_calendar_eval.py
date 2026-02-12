@@ -22,34 +22,24 @@ from bac_py.types.primitives import BACnetDate
 
 class TestMatchesBACnetDate:
     def test_exact_match(self):
-        entry = BACnetCalendarEntry(
-            choice=0, value=BACnetDate(2024, 12, 25, 3)
-        )
+        entry = BACnetCalendarEntry(choice=0, value=BACnetDate(2024, 12, 25, 3))
         assert matches_calendar_entry(entry, 2024, 12, 25, 3)
 
     def test_exact_no_match(self):
-        entry = BACnetCalendarEntry(
-            choice=0, value=BACnetDate(2024, 12, 25, 3)
-        )
+        entry = BACnetCalendarEntry(choice=0, value=BACnetDate(2024, 12, 25, 3))
         assert not matches_calendar_entry(entry, 2024, 12, 26, 4)
 
     def test_wildcard_year(self):
-        entry = BACnetCalendarEntry(
-            choice=0, value=BACnetDate(0xFF, 12, 25, 0xFF)
-        )
+        entry = BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 12, 25, 0xFF))
         assert matches_calendar_entry(entry, 2024, 12, 25, 3)
         assert matches_calendar_entry(entry, 2030, 12, 25, 4)
 
     def test_wildcard_all(self):
-        entry = BACnetCalendarEntry(
-            choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)
-        )
+        entry = BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF))
         assert matches_calendar_entry(entry, 2024, 6, 15, 6)
 
     def test_month_odd(self):
-        entry = BACnetCalendarEntry(
-            choice=0, value=BACnetDate(0xFF, 13, 0xFF, 0xFF)
-        )
+        entry = BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 13, 0xFF, 0xFF))
         # January (odd) → match
         assert matches_calendar_entry(entry, 2024, 1, 15, 1)
         # February (even) → no match
@@ -58,16 +48,12 @@ class TestMatchesBACnetDate:
         assert matches_calendar_entry(entry, 2024, 3, 1, 5)
 
     def test_month_even(self):
-        entry = BACnetCalendarEntry(
-            choice=0, value=BACnetDate(0xFF, 14, 0xFF, 0xFF)
-        )
+        entry = BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 14, 0xFF, 0xFF))
         assert not matches_calendar_entry(entry, 2024, 1, 15, 1)
         assert matches_calendar_entry(entry, 2024, 2, 15, 4)
 
     def test_day_last_of_month(self):
-        entry = BACnetCalendarEntry(
-            choice=0, value=BACnetDate(0xFF, 0xFF, 32, 0xFF)
-        )
+        entry = BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 0xFF, 32, 0xFF))
         # Feb 29 in leap year
         assert matches_calendar_entry(entry, 2024, 2, 29, 4)
         # Feb 28 is NOT last day in leap year
@@ -78,26 +64,20 @@ class TestMatchesBACnetDate:
         assert matches_calendar_entry(entry, 2024, 1, 31, 3)
 
     def test_day_odd(self):
-        entry = BACnetCalendarEntry(
-            choice=0, value=BACnetDate(0xFF, 0xFF, 33, 0xFF)
-        )
+        entry = BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 0xFF, 33, 0xFF))
         assert matches_calendar_entry(entry, 2024, 1, 1, 1)
         assert not matches_calendar_entry(entry, 2024, 1, 2, 2)
         assert matches_calendar_entry(entry, 2024, 1, 31, 3)
 
     def test_day_even(self):
-        entry = BACnetCalendarEntry(
-            choice=0, value=BACnetDate(0xFF, 0xFF, 34, 0xFF)
-        )
+        entry = BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 0xFF, 34, 0xFF))
         assert not matches_calendar_entry(entry, 2024, 1, 1, 1)
         assert matches_calendar_entry(entry, 2024, 1, 2, 2)
         assert matches_calendar_entry(entry, 2024, 1, 30, 2)
 
     def test_day_of_week_match(self):
         # 2024-02-12 is a Monday (isoweekday=1)
-        entry = BACnetCalendarEntry(
-            choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 1)
-        )
+        entry = BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 1))
         assert matches_calendar_entry(entry, 2024, 2, 12, 1)
         assert not matches_calendar_entry(entry, 2024, 2, 13, 2)
 
@@ -171,9 +151,7 @@ class TestMatchesDateRange:
 class TestMatchesWeekNDay:
     def test_specific_week_and_day(self):
         # Second Monday of any month
-        entry = BACnetCalendarEntry(
-            choice=2, value=BACnetWeekNDay(0xFF, 2, 1)
-        )
+        entry = BACnetCalendarEntry(choice=2, value=BACnetWeekNDay(0xFF, 2, 1))
         # 2024-02-12 is Monday, day 12 → week 2 ((12-1)//7+1=2)
         assert matches_calendar_entry(entry, 2024, 2, 12, 1)
         # 2024-02-05 is Monday, day 5 → week 1
@@ -181,9 +159,7 @@ class TestMatchesWeekNDay:
 
     def test_last_week(self):
         # Last Friday of any month (week_of_month=6, day_of_week=5)
-        entry = BACnetCalendarEntry(
-            choice=2, value=BACnetWeekNDay(0xFF, 6, 5)
-        )
+        entry = BACnetCalendarEntry(choice=2, value=BACnetWeekNDay(0xFF, 6, 5))
         # Jan 2024: 31 days, last 7 days = 25-31
         # Jan 26 is Friday (isoweekday=5)
         assert matches_calendar_entry(entry, 2024, 1, 26, 5)
@@ -191,29 +167,21 @@ class TestMatchesWeekNDay:
         assert not matches_calendar_entry(entry, 2024, 1, 19, 5)
 
     def test_any_week_any_day(self):
-        entry = BACnetCalendarEntry(
-            choice=2, value=BACnetWeekNDay(0xFF, 0xFF, 0xFF)
-        )
+        entry = BACnetCalendarEntry(choice=2, value=BACnetWeekNDay(0xFF, 0xFF, 0xFF))
         assert matches_calendar_entry(entry, 2024, 6, 15, 6)
 
     def test_odd_month(self):
-        entry = BACnetCalendarEntry(
-            choice=2, value=BACnetWeekNDay(13, 0xFF, 0xFF)
-        )
+        entry = BACnetCalendarEntry(choice=2, value=BACnetWeekNDay(13, 0xFF, 0xFF))
         assert matches_calendar_entry(entry, 2024, 1, 15, 1)
         assert not matches_calendar_entry(entry, 2024, 2, 15, 4)
 
     def test_even_month(self):
-        entry = BACnetCalendarEntry(
-            choice=2, value=BACnetWeekNDay(14, 0xFF, 0xFF)
-        )
+        entry = BACnetCalendarEntry(choice=2, value=BACnetWeekNDay(14, 0xFF, 0xFF))
         assert not matches_calendar_entry(entry, 2024, 1, 15, 1)
         assert matches_calendar_entry(entry, 2024, 2, 15, 4)
 
     def test_specific_month(self):
-        entry = BACnetCalendarEntry(
-            choice=2, value=BACnetWeekNDay(3, 0xFF, 0xFF)
-        )
+        entry = BACnetCalendarEntry(choice=2, value=BACnetWeekNDay(3, 0xFF, 0xFF))
         assert matches_calendar_entry(entry, 2024, 3, 15, 5)
         assert not matches_calendar_entry(entry, 2024, 4, 15, 1)
 
@@ -233,9 +201,7 @@ class TestCalendarEvaluate:
     def test_matching_entry(self):
         cal = CalendarObject(1)
         cal._properties[PropertyIdentifier.DATE_LIST] = [
-            BACnetCalendarEntry(
-                choice=0, value=BACnetDate(2024, 6, 15, 0xFF)
-            ),
+            BACnetCalendarEntry(choice=0, value=BACnetDate(2024, 6, 15, 0xFF)),
         ]
         result = cal.evaluate(datetime.date(2024, 6, 15))
         assert result is True
@@ -243,9 +209,7 @@ class TestCalendarEvaluate:
     def test_no_matching_entry(self):
         cal = CalendarObject(1)
         cal._properties[PropertyIdentifier.DATE_LIST] = [
-            BACnetCalendarEntry(
-                choice=0, value=BACnetDate(2024, 12, 25, 0xFF)
-            ),
+            BACnetCalendarEntry(choice=0, value=BACnetDate(2024, 12, 25, 0xFF)),
         ]
         result = cal.evaluate(datetime.date(2024, 6, 15))
         assert result is False
@@ -253,9 +217,7 @@ class TestCalendarEvaluate:
     def test_multiple_entries_one_matches(self):
         cal = CalendarObject(1)
         cal._properties[PropertyIdentifier.DATE_LIST] = [
-            BACnetCalendarEntry(
-                choice=0, value=BACnetDate(2024, 12, 25, 0xFF)
-            ),
+            BACnetCalendarEntry(choice=0, value=BACnetDate(2024, 12, 25, 0xFF)),
             BACnetCalendarEntry(
                 choice=1,
                 value=BACnetDateRange(
@@ -270,9 +232,7 @@ class TestCalendarEvaluate:
     def test_evaluate_updates_present_value(self):
         cal = CalendarObject(1)
         cal._properties[PropertyIdentifier.DATE_LIST] = [
-            BACnetCalendarEntry(
-                choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)
-            ),
+            BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)),
         ]
         cal.evaluate(datetime.date(2024, 1, 1))
         assert cal.read_property(PropertyIdentifier.PRESENT_VALUE) is True
@@ -284,9 +244,7 @@ class TestCalendarEvaluate:
     def test_defaults_to_today(self):
         cal = CalendarObject(1)
         cal._properties[PropertyIdentifier.DATE_LIST] = [
-            BACnetCalendarEntry(
-                choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)
-            ),
+            BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)),
         ]
         # Should not raise (uses datetime.date.today())
         result = cal.evaluate()

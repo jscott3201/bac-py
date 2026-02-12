@@ -103,9 +103,7 @@ class TestMinTimeLockStart:
 
         fake_now = 1000.0
         with patch("bac_py.objects.binary.time.monotonic", return_value=fake_now):
-            bo.write_property(
-                PropertyIdentifier.PRESENT_VALUE, BinaryPV.ACTIVE, priority=16
-            )
+            bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.ACTIVE, priority=16)
 
         assert bo._min_time_lock_until == 1030.0
         assert bo._min_time_locked_value == BinaryPV.ACTIVE
@@ -120,9 +118,7 @@ class TestMinTimeLockStart:
 
         fake_now = 2000.0
         with patch("bac_py.objects.binary.time.monotonic", return_value=fake_now):
-            bo.write_property(
-                PropertyIdentifier.PRESENT_VALUE, BinaryPV.INACTIVE, priority=16
-            )
+            bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.INACTIVE, priority=16)
 
         assert bo._min_time_lock_until == 2020.0
         assert bo._min_time_locked_value == BinaryPV.INACTIVE

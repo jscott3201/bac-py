@@ -131,9 +131,7 @@ class ScheduleEngine:
             return
 
         # Step 2: Check exception_schedule (Clause 12.24.5--12.24.7)
-        exception_schedule = sched.read_property(
-            PropertyIdentifier.EXCEPTION_SCHEDULE
-        )
+        exception_schedule = sched.read_property(PropertyIdentifier.EXCEPTION_SCHEDULE)
         if exception_schedule:
             value = self._resolve_exception_schedule(
                 exception_schedule, year, month, day, day_of_week, now, db
@@ -188,9 +186,7 @@ class ScheduleEngine:
                 if not pv:
                     continue
             elif isinstance(exc.period, BACnetCalendarEntry):
-                if not matches_calendar_entry(
-                    exc.period, year, month, day, day_of_week
-                ):
+                if not matches_calendar_entry(exc.period, year, month, day, day_of_week):
                     continue
             else:
                 continue
@@ -245,9 +241,7 @@ class ScheduleEngine:
         self._last_values[oid] = value
 
         priority = sched.read_property(PropertyIdentifier.PRIORITY_FOR_WRITING)
-        targets = sched.read_property(
-            PropertyIdentifier.LIST_OF_OBJECT_PROPERTY_REFERENCES
-        )
+        targets = sched.read_property(PropertyIdentifier.LIST_OF_OBJECT_PROPERTY_REFERENCES)
         if not targets:
             return
 

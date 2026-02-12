@@ -93,9 +93,7 @@ class TestBIBBMatrixWithServices:
     def test_alarm_notification_b(self):
         reg = _make_registry(
             ConfirmedServiceChoice.CONFIRMED_EVENT_NOTIFICATION,
-            unconfirmed=(
-                UnconfirmedServiceChoice.UNCONFIRMED_EVENT_NOTIFICATION,
-            ),
+            unconfirmed=(UnconfirmedServiceChoice.UNCONFIRMED_EVENT_NOTIFICATION,),
         )
         matrix = BIBBMatrix(reg)
         assert "AE-N-B" in matrix.supported_bibb_names()

@@ -573,8 +573,7 @@ class TestFaultParameterFromDict:
             d = variant.to_dict()
             restored = fault_parameter_from_dict(d)
             assert type(restored) is type(variant), (
-                f"Type mismatch for {type(variant).__name__}: "
-                f"got {type(restored).__name__}"
+                f"Type mismatch for {type(variant).__name__}: got {type(restored).__name__}"
             )
 
 

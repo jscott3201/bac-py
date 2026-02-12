@@ -241,7 +241,9 @@ class TestAccessPointObject:
         obj = AccessPointObject(1, object_name="ap-1")
         assert obj.OBJECT_TYPE == ObjectType.ACCESS_POINT
         assert obj.read_property(PropertyIdentifier.ACCESS_EVENT) == AccessEvent.NONE
-        assert obj.read_property(PropertyIdentifier.AUTHORIZATION_MODE) == AuthorizationMode.AUTHORIZE
+        assert (
+            obj.read_property(PropertyIdentifier.AUTHORIZATION_MODE) == AuthorizationMode.AUTHORIZE
+        )
 
 
 class TestAccessZoneObject:
@@ -279,7 +281,10 @@ class TestAccessCredentialObject:
 
         obj = AccessCredentialObject(1, object_name="ac-1")
         assert obj.OBJECT_TYPE == ObjectType.ACCESS_CREDENTIAL
-        assert obj.read_property(PropertyIdentifier.CREDENTIAL_DISABLE) == AccessCredentialDisable.NONE
+        assert (
+            obj.read_property(PropertyIdentifier.CREDENTIAL_DISABLE)
+            == AccessCredentialDisable.NONE
+        )
 
 
 class TestCredentialDataInputObject:
@@ -314,7 +319,10 @@ class TestLiftObject:
         obj = LiftObject(1, object_name="lift-1")
         assert obj.OBJECT_TYPE == ObjectType.LIFT
         assert obj.read_property(PropertyIdentifier.CAR_POSITION) == 0
-        assert obj.read_property(PropertyIdentifier.CAR_ASSIGNED_DIRECTION) == LiftCarDirection.UNKNOWN
+        assert (
+            obj.read_property(PropertyIdentifier.CAR_ASSIGNED_DIRECTION)
+            == LiftCarDirection.UNKNOWN
+        )
 
 
 class TestEscalatorObject:

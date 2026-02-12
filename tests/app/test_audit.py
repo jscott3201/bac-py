@@ -31,9 +31,7 @@ def _make_db(
     reporter = AuditReporterObject(1, object_name="reporter-1")
     reporter._properties[PropertyIdentifier.AUDIT_LEVEL] = audit_level
     if auditable_operations is not None:
-        reporter._properties[PropertyIdentifier.AUDITABLE_OPERATIONS] = (
-            auditable_operations
-        )
+        reporter._properties[PropertyIdentifier.AUDITABLE_OPERATIONS] = auditable_operations
     db.add(reporter)
 
     log = AuditLogObject(1, object_name="audit-log-1")
@@ -113,9 +111,7 @@ class TestAuditManagerRecordOperation:
         )
 
         buffer = log._properties[PropertyIdentifier.LOG_BUFFER]
-        assert buffer[0].notification.target_device == ObjectIdentifier(
-            ObjectType.DEVICE, 1
-        )
+        assert buffer[0].notification.target_device == ObjectIdentifier(ObjectType.DEVICE, 1)
 
 
 class TestAuditLevelFiltering:

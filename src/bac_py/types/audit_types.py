@@ -94,14 +94,10 @@ class BACnetAuditNotification:
         buf.extend(encode_context_enumerated(4, self.operation))
         # [5] source-comment OPTIONAL
         if self.source_comment is not None:
-            buf.extend(
-                encode_context_tagged(5, encode_character_string(self.source_comment))
-            )
+            buf.extend(encode_context_tagged(5, encode_character_string(self.source_comment)))
         # [6] target-comment OPTIONAL
         if self.target_comment is not None:
-            buf.extend(
-                encode_context_tagged(6, encode_character_string(self.target_comment))
-            )
+            buf.extend(encode_context_tagged(6, encode_character_string(self.target_comment)))
         # [7] invoke-id OPTIONAL
         if self.invoke_id is not None:
             buf.extend(encode_context_unsigned(7, self.invoke_id))
@@ -245,15 +241,11 @@ class BACnetAuditNotification:
                 offset = new_offset + tag.length
             elif tag.number == 8 and not tag.is_opening:
                 # [8] source-user-id
-                source_user_id = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                source_user_id = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
             elif tag.number == 9 and not tag.is_opening:
                 # [9] source-user-role
-                source_user_role = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                source_user_role = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
             elif tag.number == 10 and tag.is_opening:
                 # [10] target-device (BACnetRecipient CHOICE)
@@ -279,9 +271,7 @@ class BACnetAuditNotification:
                 # [12] target-property (BACnetPropertyReference)
                 offset = new_offset
                 inner_tag, offset = decode_tag(data, offset)
-                target_property = decode_unsigned(
-                    data[offset : offset + inner_tag.length]
-                )
+                target_property = decode_unsigned(data[offset : offset + inner_tag.length])
                 offset += inner_tag.length
                 # optional array-index [1]
                 if offset < len(data):
@@ -298,9 +288,7 @@ class BACnetAuditNotification:
                 _closing, offset = decode_tag(data, offset)
             elif tag.number == 13 and not tag.is_opening:
                 # [13] target-priority
-                target_priority = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                target_priority = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
             elif tag.number == 14 and tag.is_opening:
                 # [14] target-value (raw)
@@ -344,14 +332,10 @@ class BACnetAuditNotification:
                 # [16] result (Error)
                 offset = new_offset
                 err_tag, offset = decode_tag(data, offset)
-                result_error_class = decode_unsigned(
-                    data[offset : offset + err_tag.length]
-                )
+                result_error_class = decode_unsigned(data[offset : offset + err_tag.length])
                 offset += err_tag.length
                 err_tag, offset = decode_tag(data, offset)
-                result_error_code = decode_unsigned(
-                    data[offset : offset + err_tag.length]
-                )
+                result_error_code = decode_unsigned(data[offset : offset + err_tag.length])
                 offset += err_tag.length
                 _closing, offset = decode_tag(data, offset)
             else:
@@ -621,17 +605,13 @@ class AuditQueryByTarget:
                 break
 
             if tag.number == 1:
-                target_device_address = bytes(
-                    data[new_offset : new_offset + tag.length]
-                )
+                target_device_address = bytes(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
             elif tag.number == 2:
                 obj_type, instance = decode_object_identifier(
                     data[new_offset : new_offset + tag.length]
                 )
-                target_object_identifier = ObjectIdentifier(
-                    ObjectType(obj_type), instance
-                )
+                target_object_identifier = ObjectIdentifier(ObjectType(obj_type), instance)
                 offset = new_offset + tag.length
             elif tag.number == 3:
                 target_property_identifier = decode_unsigned(
@@ -639,24 +619,16 @@ class AuditQueryByTarget:
                 )
                 offset = new_offset + tag.length
             elif tag.number == 4:
-                target_array_index = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                target_array_index = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
             elif tag.number == 5:
-                target_priority = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                target_priority = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
             elif tag.number == 6:
-                operations = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                operations = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
             elif tag.number == 7:
-                result_filter = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                result_filter = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
             else:
                 break
@@ -724,27 +696,19 @@ class AuditQueryBySource:
                 break
 
             if tag.number == 1:
-                source_device_address = bytes(
-                    data[new_offset : new_offset + tag.length]
-                )
+                source_device_address = bytes(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
             elif tag.number == 2:
                 obj_type, instance = decode_object_identifier(
                     data[new_offset : new_offset + tag.length]
                 )
-                source_object_identifier = ObjectIdentifier(
-                    ObjectType(obj_type), instance
-                )
+                source_object_identifier = ObjectIdentifier(ObjectType(obj_type), instance)
                 offset = new_offset + tag.length
             elif tag.number == 3:
-                operations = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                operations = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
             elif tag.number == 4:
-                result_filter = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                result_filter = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
             else:
                 break

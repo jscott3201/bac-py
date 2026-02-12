@@ -28,11 +28,7 @@ class _FakeObjectDB:
         return self._objects.get(oid)
 
     def get_objects_of_type(self, obj_type: ObjectType) -> list[object]:
-        return [
-            o
-            for o in self._objects.values()
-            if getattr(o, "OBJECT_TYPE", None) == obj_type
-        ]
+        return [o for o in self._objects.values() if getattr(o, "OBJECT_TYPE", None) == obj_type]
 
 
 class _FakeApp:

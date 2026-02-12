@@ -190,7 +190,9 @@ class TestConstructedTypeRoundTrips:
     def test_bacnet_timestamp_time_choice(self):
         from bac_py.types.constructed import BACnetTimeStamp
 
-        original = BACnetTimeStamp(choice=0, value=BACnetTime(hour=8, minute=0, second=0, hundredth=0))
+        original = BACnetTimeStamp(
+            choice=0, value=BACnetTime(hour=8, minute=0, second=0, hundredth=0)
+        )
         raw = serialize(original.to_dict())
         d = deserialize(raw)
         restored = BACnetTimeStamp.from_dict(d)
@@ -425,7 +427,9 @@ class TestConstructedTypeRoundTrips:
                 time=BACnetTime(hour=10, minute=30, second=0, hundredth=0),
             ),
             log_datum=72.5,
-            status_flags=StatusFlags(in_alarm=False, fault=False, overridden=False, out_of_service=False),
+            status_flags=StatusFlags(
+                in_alarm=False, fault=False, overridden=False, out_of_service=False
+            ),
         )
         raw = serialize(original.to_dict())
         d = deserialize(raw)
@@ -634,7 +638,9 @@ class TestEventNotificationPayloads:
 
         original = ChangeOfState(
             new_state=b"\x09\x01",  # BinaryPV.ACTIVE encoded
-            status_flags=StatusFlags(in_alarm=True, fault=False, overridden=False, out_of_service=False),
+            status_flags=StatusFlags(
+                in_alarm=True, fault=False, overridden=False, out_of_service=False
+            ),
         )
         raw = serialize(original.to_dict())
         d = deserialize(raw)
@@ -650,7 +656,9 @@ class TestEventNotificationPayloads:
 
         original = OutOfRange(
             exceeding_value=105.5,
-            status_flags=StatusFlags(in_alarm=True, fault=False, overridden=False, out_of_service=False),
+            status_flags=StatusFlags(
+                in_alarm=True, fault=False, overridden=False, out_of_service=False
+            ),
             deadband=2.0,
             exceeded_limit=100.0,
         )
@@ -1024,11 +1032,13 @@ class TestTrendLogDataExport:
         flat = []
         for r in records:
             rd = r.to_dict()
-            flat.append({
-                "date": rd["timestamp"]["date"],
-                "time": rd["timestamp"]["time"],
-                "value": rd["log_datum"],
-            })
+            flat.append(
+                {
+                    "date": rd["timestamp"]["date"],
+                    "time": rd["timestamp"]["time"],
+                    "value": rd["log_datum"],
+                }
+            )
 
         raw = serialize({"rows": flat})
         d = deserialize(raw)

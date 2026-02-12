@@ -131,9 +131,7 @@ class YouAreRequest:
         if offset < len(data):
             tag, new_offset = decode_tag(data, offset)
             if tag.cls == TagClass.CONTEXT and tag.number == 2:
-                device_network_number = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                device_network_number = decode_unsigned(data[new_offset : new_offset + tag.length])
 
         return cls(
             device_identifier=device_identifier,

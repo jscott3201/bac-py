@@ -141,8 +141,15 @@ class TestGetAlarmSummary:
 
 
 class TestGetEnrollmentSummary:
-    def _make_enrollment(self, db, instance, *, event_type=EventType.CHANGE_OF_VALUE,
-                         event_state=EventState.NORMAL, notification_class=0):
+    def _make_enrollment(
+        self,
+        db,
+        instance,
+        *,
+        event_type=EventType.CHANGE_OF_VALUE,
+        event_state=EventState.NORMAL,
+        notification_class=0,
+    ):
         """Create an EventEnrollmentObject with given properties."""
         obj_ref = MagicMock()
         obj_ref.object_identifier = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
@@ -408,7 +415,9 @@ class TestEventNotificationHandlers:
         _, _, _, handlers = _make_app_and_handlers()
         notification = self._make_notification()
         result = await handlers.handle_confirmed_event_notification(
-            0, notification.encode(), SOURCE,
+            0,
+            notification.encode(),
+            SOURCE,
         )
         assert result is None
 
@@ -418,7 +427,9 @@ class TestEventNotificationHandlers:
         _, _, _, handlers = _make_app_and_handlers()
         notification = self._make_notification()
         result = await handlers.handle_unconfirmed_event_notification(
-            0, notification.encode(), SOURCE,
+            0,
+            notification.encode(),
+            SOURCE,
         )
         assert result is None
 
@@ -461,6 +472,7 @@ class TestClientAlarmMethods:
         app.confirmed_request.assert_called_once()
         call_kwargs = app.confirmed_request.call_args
         from bac_py.types.enums import ConfirmedServiceChoice
+
         assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.ACKNOWLEDGE_ALARM
 
     @pytest.mark.asyncio
@@ -468,13 +480,15 @@ class TestClientAlarmMethods:
         """get_alarm_summary sends request and decodes response."""
         client, app = self._make_client()
         # Build a valid ACK response
-        ack = GetAlarmSummaryACK(list_of_alarm_summaries=[
-            AlarmSummary(
-                object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
-                alarm_state=EventState.HIGH_LIMIT,
-                acknowledged_transitions=BitString(b"\xe0", 5),
-            ),
-        ])
+        ack = GetAlarmSummaryACK(
+            list_of_alarm_summaries=[
+                AlarmSummary(
+                    object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                    alarm_state=EventState.HIGH_LIMIT,
+                    acknowledged_transitions=BitString(b"\xe0", 5),
+                ),
+            ]
+        )
         app.confirmed_request.return_value = ack.encode()
 
         result = await client.get_alarm_summary(address=SOURCE)
@@ -486,15 +500,18 @@ class TestClientAlarmMethods:
         """get_enrollment_summary sends request and decodes response."""
         client, app = self._make_client()
         from bac_py.services.alarm_summary import EnrollmentSummary
-        ack = GetEnrollmentSummaryACK(list_of_enrollment_summaries=[
-            EnrollmentSummary(
-                object_identifier=ObjectIdentifier(ObjectType.EVENT_ENROLLMENT, 1),
-                event_type=EventType.CHANGE_OF_VALUE,
-                event_state=EventState.NORMAL,
-                priority=0,
-                notification_class=1,
-            ),
-        ])
+
+        ack = GetEnrollmentSummaryACK(
+            list_of_enrollment_summaries=[
+                EnrollmentSummary(
+                    object_identifier=ObjectIdentifier(ObjectType.EVENT_ENROLLMENT, 1),
+                    event_type=EventType.CHANGE_OF_VALUE,
+                    event_state=EventState.NORMAL,
+                    priority=0,
+                    notification_class=1,
+                ),
+            ]
+        )
         app.confirmed_request.return_value = ack.encode()
 
         result = await client.get_enrollment_summary(
@@ -543,4 +560,8 @@ class TestClientAlarmMethods:
         app.confirmed_request.assert_called_once()
         call_kwargs = app.confirmed_request.call_args
         from bac_py.types.enums import ConfirmedServiceChoice
-        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.CONFIRMED_EVENT_NOTIFICATION
+
+        assert (
+            call_kwargs.kwargs["service_choice"]
+            == ConfirmedServiceChoice.CONFIRMED_EVENT_NOTIFICATION
+        )

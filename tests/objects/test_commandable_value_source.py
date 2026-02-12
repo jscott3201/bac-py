@@ -46,7 +46,10 @@ class TestValueSourceOnWrite:
         source = BACnetValueSource.from_object(ref)
 
         ao._write_with_priority(
-            PropertyIdentifier.PRESENT_VALUE, 72.5, 8, value_source=source,
+            PropertyIdentifier.PRESENT_VALUE,
+            72.5,
+            8,
+            value_source=source,
         )
 
         vsa = ao.read_property(PropertyIdentifier.VALUE_SOURCE_ARRAY)
@@ -63,11 +66,15 @@ class TestValueSourceOnWrite:
         )
 
         ao._write_with_priority(
-            PropertyIdentifier.PRESENT_VALUE, 50.0, 10,
+            PropertyIdentifier.PRESENT_VALUE,
+            50.0,
+            10,
             value_source=BACnetValueSource.from_object(ref_low),
         )
         ao._write_with_priority(
-            PropertyIdentifier.PRESENT_VALUE, 80.0, 5,
+            PropertyIdentifier.PRESENT_VALUE,
+            80.0,
+            5,
             value_source=BACnetValueSource.from_object(ref_high),
         )
 
@@ -82,11 +89,15 @@ class TestValueSourceOnWrite:
         )
 
         ao._write_with_priority(
-            PropertyIdentifier.PRESENT_VALUE, 72.5, 8,
+            PropertyIdentifier.PRESENT_VALUE,
+            72.5,
+            8,
             value_source=BACnetValueSource.from_object(ref),
         )
         ao._write_with_priority(
-            PropertyIdentifier.PRESENT_VALUE, None, 8,
+            PropertyIdentifier.PRESENT_VALUE,
+            None,
+            8,
         )
 
         vsa = ao.read_property(PropertyIdentifier.VALUE_SOURCE_ARRAY)
@@ -105,11 +116,15 @@ class TestValueSourceOnWrite:
         )
 
         ao._write_with_priority(
-            PropertyIdentifier.PRESENT_VALUE, 50.0, 10,
+            PropertyIdentifier.PRESENT_VALUE,
+            50.0,
+            10,
             value_source=BACnetValueSource.from_object(ref_low),
         )
         ao._write_with_priority(
-            PropertyIdentifier.PRESENT_VALUE, 80.0, 5,
+            PropertyIdentifier.PRESENT_VALUE,
+            80.0,
+            5,
             value_source=BACnetValueSource.from_object(ref_high),
         )
 
@@ -136,7 +151,10 @@ class TestValueSourceOnWrite:
         source = BACnetValueSource.from_object(ref)
 
         bo._write_with_priority(
-            PropertyIdentifier.PRESENT_VALUE, 1, 8, value_source=source,
+            PropertyIdentifier.PRESENT_VALUE,
+            1,
+            8,
+            value_source=source,
         )
 
         vs = bo.read_property(PropertyIdentifier.VALUE_SOURCE)

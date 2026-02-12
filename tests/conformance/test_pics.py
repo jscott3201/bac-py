@@ -70,8 +70,8 @@ class TestPICSServicesSupported:
         # Build a bitstring with bit 12 set
         buf = bytearray(6)  # 48 bits
         buf[1] |= 0x08  # bit 12 = byte 1, bit index 4 → but 7-4=3 → 0x08
-        device._properties[PropertyIdentifier.PROTOCOL_SERVICES_SUPPORTED] = (
-            BitString(bytes(buf), 0)
+        device._properties[PropertyIdentifier.PROTOCOL_SERVICES_SUPPORTED] = BitString(
+            bytes(buf), 0
         )
         gen = PICSGenerator(db, device)
         pics = gen.generate()
@@ -92,8 +92,8 @@ class TestPICSObjectTypesSupported:
         # Bit 0 = ANALOG_INPUT
         buf = bytearray(8)
         buf[0] |= 0x80  # bit 0
-        device._properties[PropertyIdentifier.PROTOCOL_OBJECT_TYPES_SUPPORTED] = (
-            BitString(bytes(buf), 0)
+        device._properties[PropertyIdentifier.PROTOCOL_OBJECT_TYPES_SUPPORTED] = BitString(
+            bytes(buf), 0
         )
         gen = PICSGenerator(db, device)
         pics = gen.generate()

@@ -290,9 +290,7 @@ class BACnetPropertyReference:
                 and not tag.is_opening
                 and not tag.is_closing
             ):
-                property_array_index = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                property_array_index = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
 
         return cls(
@@ -607,9 +605,7 @@ class SubscribeCOVPropertyMultipleRequest:
         lifetime, offset = decode_optional_context(data, offset, 2, decode_unsigned)
 
         # [3] maxNotificationDelay (optional)
-        max_notification_delay, offset = decode_optional_context(
-            data, offset, 3, decode_unsigned
-        )
+        max_notification_delay, offset = decode_optional_context(data, offset, 3, decode_unsigned)
 
         # [4] listOfCOVSubscriptionSpecifications -- opening tag 4
         tag, offset = decode_tag(data, offset)
@@ -676,9 +672,7 @@ class COVPropertyValue:
         return bytes(buf)
 
     @classmethod
-    def decode(
-        cls, data: memoryview | bytes, offset: int = 0
-    ) -> tuple[COVPropertyValue, int]:
+    def decode(cls, data: memoryview | bytes, offset: int = 0) -> tuple[COVPropertyValue, int]:
         """Decode COVPropertyValue from data at a given offset.
 
         :param data: Buffer to decode from.

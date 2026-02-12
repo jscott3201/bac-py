@@ -129,9 +129,7 @@ class PICSGenerator:
 
     def _services_supported(self) -> dict[str, list[str]]:
         """Extract supported services from Protocol_Services_Supported."""
-        services_bs = self._device._properties.get(
-            PropertyIdentifier.PROTOCOL_SERVICES_SUPPORTED
-        )
+        services_bs = self._device._properties.get(PropertyIdentifier.PROTOCOL_SERVICES_SUPPORTED)
         confirmed: list[str] = []
         unconfirmed: list[str] = []
 

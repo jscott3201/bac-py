@@ -582,9 +582,7 @@ class BACnetDeviceObjectPropertyReference:
         if offset < len(data):
             tag, new_offset = decode_tag(data, offset)
             if tag.number == 2 and not tag.is_opening and not tag.is_closing:
-                property_array_index = decode_unsigned(
-                    data[new_offset : new_offset + tag.length]
-                )
+                property_array_index = decode_unsigned(data[new_offset : new_offset + tag.length])
                 offset = new_offset + tag.length
 
         # [3] deviceIdentifier OPTIONAL
@@ -1181,7 +1179,9 @@ class BACnetDeviceObjectReference:
         return bytes(buf)
 
     @classmethod
-    def decode(cls, data: memoryview | bytes, offset: int = 0) -> tuple[BACnetDeviceObjectReference, int]:
+    def decode(
+        cls, data: memoryview | bytes, offset: int = 0
+    ) -> tuple[BACnetDeviceObjectReference, int]:
         """Decode from context-tagged wire format."""
         from bac_py.encoding.primitives import decode_object_identifier
         from bac_py.encoding.tags import TagClass, decode_tag
@@ -1194,7 +1194,9 @@ class BACnetDeviceObjectReference:
         tag, new_offset = decode_tag(data, offset)
 
         if tag.cls == TagClass.CONTEXT and tag.number == 0:
-            obj_type, instance = decode_object_identifier(data[new_offset : new_offset + tag.length])
+            obj_type, instance = decode_object_identifier(
+                data[new_offset : new_offset + tag.length]
+            )
             device_identifier = ObjectIdentifier(ObjectType(obj_type), instance)
             new_offset += tag.length
             tag, new_offset = decode_tag(data, new_offset)
@@ -1204,7 +1206,9 @@ class BACnetDeviceObjectReference:
         object_identifier = ObjectIdentifier(ObjectType(obj_type), instance)
         new_offset += tag.length
 
-        return cls(object_identifier=object_identifier, device_identifier=device_identifier), new_offset
+        return cls(
+            object_identifier=object_identifier, device_identifier=device_identifier
+        ), new_offset
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.

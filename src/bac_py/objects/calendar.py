@@ -231,8 +231,7 @@ class CalendarObject(BACnetObject):
 
         date_list = self.read_property(PropertyIdentifier.DATE_LIST)
         result = any(
-            matches_calendar_entry(entry, year, month, day, day_of_week)
-            for entry in date_list
+            matches_calendar_entry(entry, year, month, day, day_of_week) for entry in date_list
         )
 
         self._properties[PropertyIdentifier.PRESENT_VALUE] = result

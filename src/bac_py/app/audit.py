@@ -96,17 +96,13 @@ class AuditManager:
 
             self._append_to_logs(notification)
 
-    def _find_reporters(
-        self, target_oid: ObjectIdentifier | None
-    ) -> list[AuditReporterObject]:
+    def _find_reporters(self, target_oid: ObjectIdentifier | None) -> list[AuditReporterObject]:
         """Find Audit Reporter objects that monitor the target object."""
         reporters: list[AuditReporterObject] = []
         for obj in self._db.get_objects_of_type(ObjectType.AUDIT_REPORTER):
             if not isinstance(obj, AuditReporterObject):
                 continue
-            monitored: list[object] = obj._properties.get(
-                PropertyIdentifier.MONITORED_OBJECTS, []
-            )
+            monitored: list[object] = obj._properties.get(PropertyIdentifier.MONITORED_OBJECTS, [])
             if not monitored:
                 # Empty monitored list means monitor everything
                 reporters.append(obj)
@@ -130,9 +126,7 @@ class AuditManager:
 
     def _resolve_audit_level(self, reporter: AuditReporterObject) -> AuditLevel:
         """Resolve effective audit level from the reporter."""
-        level = reporter._properties.get(
-            PropertyIdentifier.AUDIT_LEVEL, AuditLevel.DEFAULT
-        )
+        level = reporter._properties.get(PropertyIdentifier.AUDIT_LEVEL, AuditLevel.DEFAULT)
         try:
             return AuditLevel(level)
         except ValueError:
@@ -163,9 +157,7 @@ class AuditManager:
                 return False
 
         # Check auditable_operations bitstring
-        auditable_ops = reporter._properties.get(
-            PropertyIdentifier.AUDITABLE_OPERATIONS
-        )
+        auditable_ops = reporter._properties.get(PropertyIdentifier.AUDITABLE_OPERATIONS)
         if auditable_ops is not None and hasattr(auditable_ops, "data"):
             op_bit = int(operation)
             byte_index = op_bit // 8

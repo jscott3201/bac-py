@@ -992,9 +992,7 @@ class DefaultServerHandlers:
                     BackupAndRestoreState.PERFORMING_A_BACKUP,
                 ):
                     raise BACnetError(ErrorClass.DEVICE, ErrorCode.OTHER)
-                device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
-                    DeviceStatus.OPERATIONAL
-                )
+                device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.OPERATIONAL
                 device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
                     BackupAndRestoreState.IDLE
                 )
@@ -1015,14 +1013,12 @@ class DefaultServerHandlers:
                     BackupAndRestoreState.PERFORMING_A_RESTORE,
                 ):
                     raise BACnetError(ErrorClass.DEVICE, ErrorCode.OTHER)
-                device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
-                    DeviceStatus.OPERATIONAL
-                )
+                device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.OPERATIONAL
                 device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
                     BackupAndRestoreState.IDLE
                 )
-                device._properties[PropertyIdentifier.LAST_RESTORE_TIME] = (
-                    BACnetTimeStamp(choice=1, value=0)
+                device._properties[PropertyIdentifier.LAST_RESTORE_TIME] = BACnetTimeStamp(
+                    choice=1, value=0
                 )
 
             elif state == ReinitializedState.ABORT_RESTORE:
@@ -1031,9 +1027,7 @@ class DefaultServerHandlers:
                     BackupAndRestoreState.PERFORMING_A_RESTORE,
                 ):
                     raise BACnetError(ErrorClass.DEVICE, ErrorCode.OTHER)
-                device._properties[PropertyIdentifier.SYSTEM_STATUS] = (
-                    DeviceStatus.OPERATIONAL
-                )
+                device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.OPERATIONAL
                 device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
                     BackupAndRestoreState.IDLE
                 )
@@ -1488,16 +1482,23 @@ class DefaultServerHandlers:
             if event_state_val is None:
                 event_state_val = EventState.NORMAL
 
-            notification_class: int = obj._properties.get(
-                PropertyIdentifier.NOTIFICATION_CLASS, 0
-            )
+            notification_class: int = obj._properties.get(PropertyIdentifier.NOTIFICATION_CLASS, 0)
 
             # Apply request filters
-            if request.event_state_filter is not None and event_state_val != request.event_state_filter:
+            if (
+                request.event_state_filter is not None
+                and event_state_val != request.event_state_filter
+            ):
                 continue
-            if request.event_type_filter is not None and event_type_val != request.event_type_filter:
+            if (
+                request.event_type_filter is not None
+                and event_type_val != request.event_type_filter
+            ):
                 continue
-            if request.notification_class_filter is not None and notification_class != request.notification_class_filter:
+            if (
+                request.notification_class_filter is not None
+                and notification_class != request.notification_class_filter
+            ):
                 continue
 
             # Acknowledgment filter
@@ -1772,9 +1773,7 @@ class DefaultServerHandlers:
                             priority,
                         )
                     except (ValueError, BACnetError):
-                        logger.debug(
-                            "WriteGroup: failed to write channel %d", gcv.channel
-                        )
+                        logger.debug("WriteGroup: failed to write channel %d", gcv.channel)
 
     # --- Device discovery handlers (new in 2020) ---
 
@@ -1846,9 +1845,7 @@ class DefaultServerHandlers:
         )
 
         # Check VT class support
-        vt_classes = self._device._properties.get(
-            PropertyIdentifier.VT_CLASSES_SUPPORTED, []
-        )
+        vt_classes = self._device._properties.get(PropertyIdentifier.VT_CLASSES_SUPPORTED, [])
         if vt_classes and request.vt_class not in vt_classes:
             raise BACnetError(ErrorClass.VT, ErrorCode.UNKNOWN_VT_CLASS)
 
