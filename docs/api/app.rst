@@ -4,6 +4,13 @@ Application
 .. automodule:: bac_py.app
    :no-members:
 
+High-Level Client
+-----------------
+
+.. automodule:: bac_py.client
+   :members:
+   :undoc-members:
+
 BACnet Application
 ------------------
 
@@ -11,8 +18,8 @@ BACnet Application
    :members:
    :undoc-members:
 
-Client
-------
+Protocol-Level Client
+---------------------
 
 .. automodule:: bac_py.app.client
    :members:

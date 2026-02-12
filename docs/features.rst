@@ -158,6 +158,31 @@ properties are writable. See :ref:`serving-objects` for an example of
 creating and hosting objects.
 
 
+.. _device-info-caching:
+
+Device Info Caching
+-------------------
+
+When bac-py discovers devices via Who-Is / I-Am, the I-Am response includes
+``max_apdu_length_accepted`` and ``segmentation_supported`` values. These are
+automatically cached in a per-application :class:`~bac_py.app.application.DeviceInfo`
+store so that subsequent confirmed requests to that device use the correct
+maximum APDU size (Clause 19.4).
+
+This means segmented requests are automatically constrained to the remote
+device's capabilities without any manual configuration. The cache is populated
+transparently from I-Am responses and used in
+:meth:`~bac_py.app.application.BACnetApplication.confirmed_request`. You can
+also query the cache directly:
+
+.. code-block:: python
+
+   info = client.app.get_device_info(device_address)
+   if info is not None:
+       print(f"Max APDU: {info.max_apdu_length}")
+       print(f"Segmentation: {info.segmentation_supported}")
+
+
 .. _segmentation:
 
 Segmentation
@@ -252,6 +277,45 @@ Full BACnet/IPv6 transport per ASHRAE 135-2020 Annex U:
    await transport.start()
 
 
+.. _bacnet-ethernet:
+
+BACnet Ethernet (ISO 8802-3)
+----------------------------
+
+Raw Ethernet transport per Clause 7 for legacy BACnet installations that use
+IEEE 802.3 frames with 802.2 LLC headers instead of IP:
+
+- **802.2 LLC** header (DSAP=0x82, SSAP=0x82, Control=0x03) per Clause 7
+- **6-byte IEEE MAC** addressing
+- **Max NPDU** of 1497 bytes (1500 Ethernet payload minus 3-byte LLC header)
+- **Linux** support via ``AF_PACKET`` / ``SOCK_RAW`` (requires ``CAP_NET_RAW``)
+- **macOS** support via BPF devices (``/dev/bpf*``)
+- **Async I/O** using ``asyncio`` event loop reader integration
+
+.. code-block:: python
+
+   from bac_py.transport.ethernet import EthernetTransport
+
+   transport = EthernetTransport(
+       interface="eth0",
+       mac_address=b"\x00\x11\x22\x33\x44\x55",  # optional on Linux
+   )
+   await transport.start()
+
+Ethernet MAC addresses are supported in :func:`~bac_py.network.address.parse_address`
+using colon-separated hex notation:
+
+.. code-block:: python
+
+   from bac_py.network.address import parse_address
+
+   # Local Ethernet address
+   addr = parse_address("aa:bb:cc:dd:ee:ff")
+
+   # Remote Ethernet address on network 5
+   addr = parse_address("5:aa:bb:cc:dd:ee:ff")
+
+
 .. _bbmd-support:
 
 BBMD Support
@@ -343,6 +407,17 @@ The :class:`~bac_py.app.trendlog_engine.TrendLogEngine` records property
 values from :class:`~bac_py.objects.trendlog.TrendLogObject` instances via
 polling, COV, or triggered acquisition modes. Configurable buffer sizes and
 circular buffer management.
+
+- **Polled** -- reads the monitored property at a fixed interval
+- **COV** -- registers a change-of-value callback on the monitored local object
+  and records a log entry whenever the value changes (Clause 12.25.13)
+- **Triggered** -- records when triggered by an external event
+
+COV-mode trend logging uses the :class:`~bac_py.objects.base.ObjectDatabase`
+change-callback infrastructure to receive property-change notifications from
+local objects without polling. When a monitored property is written, the engine
+creates a :class:`~bac_py.types.constructed.BACnetLogRecord` and appends it to
+the trend log buffer automatically.
 
 See :ref:`trend-logging-example` for a usage example.
 
@@ -478,7 +553,7 @@ Architecture
      segmentation/   Segmented message assembly and transmission
      serialization/  JSON serialization (optional orjson backend)
      services/       Service request/response types and registry
-     transport/      BACnet/IP (Annex J) UDP transport, BVLL, BBMD
+     transport/      BACnet/IP (Annex J) UDP, BACnet/IPv6, Ethernet, BVLL, BBMD
      types/          Primitive types, enumerations, and string parsing
 
 See the :doc:`api/index` for full API documentation of each module.

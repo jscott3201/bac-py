@@ -172,6 +172,12 @@ The convenience API accepts device addresses as plain strings:
    # Routed address (network:ip:port)
    await client.read("5:192.168.1.100:47808", "ai,1", "pv")
 
+   # Ethernet MAC address (colon-separated hex)
+   addr = parse_address("aa:bb:cc:dd:ee:ff")
+
+   # Remote Ethernet address on network 5
+   addr = parse_address("5:aa:bb:cc:dd:ee:ff")
+
 
 .. _configuration:
 

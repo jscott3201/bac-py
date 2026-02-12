@@ -657,7 +657,7 @@ using the :class:`~bac_py.app.trendlog_engine.TrendLogEngine`:
        async with BACnetApplication(config) as app:
            # ... add device and AnalogInput objects ...
 
-           # Log ai,1 present-value every 60 seconds
+           # Log ai,1 present-value every 60 seconds (polled mode)
            app.object_db.add(TrendLogObject(
                instance_number=1,
                object_name="Zone-Temp-Log",
@@ -677,6 +677,30 @@ using the :class:`~bac_py.app.trendlog_engine.TrendLogEngine`:
                await engine.stop()
 
    asyncio.run(serve_with_trendlog())
+
+
+COV-based trend logging
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+For change-of-value recording (Clause 12.25.13), set ``logging_type`` to
+``LoggingType.COV``. The engine registers a change callback on the monitored
+local object and records a log entry whenever the value is written:
+
+.. code-block:: python
+
+   # Log ai,1 present-value on every change (COV mode)
+   app.object_db.add(TrendLogObject(
+       instance_number=2,
+       object_name="Zone-Temp-COV-Log",
+       log_device_object_property=ObjectIdentifier(
+           ObjectType.ANALOG_INPUT, 1),
+       logging_type=LoggingType.COV,
+       buffer_size=1000,
+   ))
+
+COV-mode trend logs do not poll. They only record when the monitored
+property is actually written, which can be more efficient for slowly
+changing values.
 
 
 .. _json-serialization-example:

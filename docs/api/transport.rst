@@ -46,6 +46,13 @@ BACnet/IPv6 Transport
    :members:
    :undoc-members:
 
+BACnet Ethernet
+----------------
+
+.. automodule:: bac_py.transport.ethernet
+   :members:
+   :undoc-members:
+
 Transport Port
 --------------
 
