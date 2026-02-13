@@ -5,6 +5,41 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.2] - 2026-02-13
+
+### Added
+
+- **BACnet/IP-to-SC gateway router example** (`examples/ip_to_sc_router.py`) --
+  Demonstrates bridging a BACnet/IP network and a BACnet Secure Connect network
+  using `NetworkRouter` with dual transports (`BIPTransport` + `SCTransport`).
+  Shows the real-world building modernisation pattern where existing IP
+  controllers communicate transparently with new SC devices through a
+  pure-forwarding gateway.
+
+## [1.3.1] - 2026-02-13
+
+### Added
+
+- **Docker integration tests for BACnet Secure Connect** -- New Scenario 9
+  (`secure-connect` profile) with real cross-container WebSocket communication
+  between separate hub and node containers on Docker bridge networking. Three
+  new container roles: `sc-hub` (SCHubFunction WebSocket server), `sc-node1`
+  and `sc-node2` (SCTransport nodes with echo handlers). 9 test cases covering
+  hub connection, unicast routing to each node, broadcast delivery to all nodes,
+  bidirectional exchange, large NPDU transfer (~1400 bytes), rapid sequential
+  messages (50 messages), and concurrent multi-node traffic.
+- **`make docker-test-sc`** Makefile target for running the SC Docker scenario
+  independently; also added to the `make docker-test` chain.
+- 5 in-process SC integration tests moved from `docker/scenarios/` to
+  `tests/transport/sc/test_sc_integration.py` where they belong alongside the
+  224 existing SC unit tests. Total test count increased from 5,925 to 5,930.
+
+### Changed
+
+- **Docker image now includes SC dependencies** -- Added `--extra secure` to
+  both `uv sync` commands in `docker/Dockerfile` so `websockets` and
+  `cryptography` are available inside containers.
+
 ## [1.3.0] - 2026-02-13
 
 ### Added

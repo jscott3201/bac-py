@@ -3,7 +3,7 @@
 Example Scripts
 ===============
 
-The ``examples/`` directory contains 19 runnable scripts demonstrating bac-py's
+The ``examples/`` directory contains 20 runnable scripts demonstrating bac-py's
 capabilities. Each script is self-contained and uses the high-level
 :class:`~bac_py.client.Client` API with ``asyncio.run()``.
 
@@ -491,3 +491,42 @@ via the Node Switch:
 
    # Hub is now accepting SC node connections on port 4443
    print(f"Connected nodes: {transport.hub_function.connection_count}")
+
+
+ip_to_sc_router.py
+^^^^^^^^^^^^^^^^^^
+
+Bridge a BACnet/IP network and a BACnet/SC network with a pure-forwarding
+gateway router. Existing IP controllers communicate transparently with new
+SC devices -- the router handles all NPDU forwarding in both directions:
+
+.. code-block:: python
+
+   from bac_py.network.router import NetworkRouter, RouterPort
+   from bac_py.transport.bip import BIPTransport
+   from bac_py.transport.sc import SCTransport, SCTransportConfig
+   from bac_py.transport.sc.tls import SCTLSConfig
+
+   # Port 1: BACnet/IP
+   bip_transport = BIPTransport(interface="0.0.0.0", port=0xBAC0)
+   await bip_transport.start()
+   bip_port = RouterPort(
+       port_id=1, network_number=1, transport=bip_transport,
+       mac_address=bip_transport.local_mac,
+       max_npdu_length=bip_transport.max_npdu_length,
+   )
+
+   # Port 2: BACnet/SC
+   sc_transport = SCTransport(SCTransportConfig(
+       primary_hub_uri="ws://192.168.1.200:4443",
+       tls_config=SCTLSConfig(allow_plaintext=True),
+   ))
+   sc_port = RouterPort(
+       port_id=2, network_number=2, transport=sc_transport,
+       mac_address=sc_transport.local_mac,
+       max_npdu_length=sc_transport.max_npdu_length,
+   )
+
+   # Start the gateway (pure forwarding, no local application)
+   router = NetworkRouter([bip_port, sc_port])
+   await router.start()

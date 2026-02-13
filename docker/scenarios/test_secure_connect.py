@@ -1,10 +1,11 @@
-"""Scenario: BACnet Secure Connect (SC) hub + node communication.
+"""Scenario 9: BACnet Secure Connect — cross-container WebSocket communication.
 
-Tests SC hub function, hub connector with failover, direct connections,
-and end-to-end NPDU exchange between SC nodes.
+Tests SC hub routing, unicast/broadcast NPDU exchange, and throughput
+using real Docker networking between separate hub and node containers.
 
-Unlike other Docker scenarios, these tests run entirely in-process using
-loopback WebSocket connections (no TLS / no Docker networking required).
+The sc-hub container runs an SCHubFunction WebSocket server.
+The sc-node1 and sc-node2 containers each run an SCTransport that
+connects to the hub and echoes received NPDUs back with a b"ECHO:" prefix.
 """
 
 from __future__ import annotations
@@ -14,287 +15,243 @@ import asyncio
 import pytest
 
 from bac_py.transport.sc import SCTransport, SCTransportConfig
-from bac_py.transport.sc.hub_function import SCHubConfig, SCHubFunction
-from bac_py.transport.sc.node_switch import SCNodeSwitchConfig
 from bac_py.transport.sc.tls import SCTLSConfig
-from bac_py.transport.sc.vmac import SCVMAC, DeviceUUID
+from bac_py.transport.sc.types import SCHubConnectionStatus
+from bac_py.transport.sc.vmac import SCVMAC
 
 pytestmark = pytest.mark.asyncio
+
+CONNECT_TIMEOUT = 15
+ECHO_TIMEOUT = 10
 
 
 def _plaintext_tls() -> SCTLSConfig:
     return SCTLSConfig(allow_plaintext=True)
 
 
-# --- Hub + Two Nodes ---
-
-
-async def test_two_nodes_exchange_via_hub():
-    """Two SC nodes connect to a hub and exchange unicast NPDUs."""
-    hub = SCHubFunction(
-        SCVMAC.random(),
-        DeviceUUID.generate(),
-        config=SCHubConfig(
-            bind_address="127.0.0.1",
-            bind_port=0,
-            tls_config=_plaintext_tls(),
-        ),
-    )
-    await hub.start()
-    port = hub._server.sockets[0].getsockname()[1]
-
-    received_by_t2: list[tuple[bytes, bytes]] = []
-
-    t1 = SCTransport(
-        SCTransportConfig(
-            primary_hub_uri=f"ws://127.0.0.1:{port}",
-            tls_config=_plaintext_tls(),
-            min_reconnect_time=0.1,
-        )
-    )
-    t2 = SCTransport(
-        SCTransportConfig(
-            primary_hub_uri=f"ws://127.0.0.1:{port}",
-            tls_config=_plaintext_tls(),
-            min_reconnect_time=0.1,
-        )
-    )
-    t2.on_receive(lambda npdu, mac: received_by_t2.append((npdu, mac)))
-
-    await t1.start()
-    await t2.start()
-    await t1.hub_connector.wait_connected(timeout=5)
-    await t2.hub_connector.wait_connected(timeout=5)
-
-    # t1 sends unicast NPDU to t2
-    t1.send_unicast(b"\x01\x04\x00\x05", t2.local_mac)
-    await asyncio.sleep(0.5)
-
-    assert len(received_by_t2) >= 1
-    assert received_by_t2[0][0] == b"\x01\x04\x00\x05"
-
-    await t1.stop()
-    await t2.stop()
-    await hub.stop()
-
-
-async def test_broadcast_reaches_all_nodes():
-    """A broadcast NPDU reaches all other connected nodes."""
-    hub = SCHubFunction(
-        SCVMAC.random(),
-        DeviceUUID.generate(),
-        config=SCHubConfig(
-            bind_address="127.0.0.1",
-            bind_port=0,
-            tls_config=_plaintext_tls(),
-        ),
-    )
-    await hub.start()
-    port = hub._server.sockets[0].getsockname()[1]
-
-    received_by_t2: list[bytes] = []
-    received_by_t3: list[bytes] = []
-
-    t1 = SCTransport(
-        SCTransportConfig(
-            primary_hub_uri=f"ws://127.0.0.1:{port}",
-            tls_config=_plaintext_tls(),
-            min_reconnect_time=0.1,
-        )
-    )
-    t2 = SCTransport(
-        SCTransportConfig(
-            primary_hub_uri=f"ws://127.0.0.1:{port}",
-            tls_config=_plaintext_tls(),
-            min_reconnect_time=0.1,
-        )
-    )
-    t3 = SCTransport(
-        SCTransportConfig(
-            primary_hub_uri=f"ws://127.0.0.1:{port}",
-            tls_config=_plaintext_tls(),
-            min_reconnect_time=0.1,
-        )
-    )
-    t2.on_receive(lambda npdu, _mac: received_by_t2.append(npdu))
-    t3.on_receive(lambda npdu, _mac: received_by_t3.append(npdu))
-
-    await t1.start()
-    await t2.start()
-    await t3.start()
-    await t1.hub_connector.wait_connected(timeout=5)
-    await t2.hub_connector.wait_connected(timeout=5)
-    await t3.hub_connector.wait_connected(timeout=5)
-
-    t1.send_broadcast(b"\x01\x08\x00\xff")
-    await asyncio.sleep(0.5)
-
-    assert len(received_by_t2) >= 1
-    assert len(received_by_t3) >= 1
-    assert received_by_t2[0] == b"\x01\x08\x00\xff"
-    assert received_by_t3[0] == b"\x01\x08\x00\xff"
-
-    await t1.stop()
-    await t2.stop()
-    await t3.stop()
-    await hub.stop()
-
-
-# --- Hub Failover ---
-
-
-async def test_failover_to_secondary_hub():
-    """When the primary hub is unavailable, the connector fails over."""
-    failover_hub = SCHubFunction(
-        SCVMAC.random(),
-        DeviceUUID.generate(),
-        config=SCHubConfig(
-            bind_address="127.0.0.1",
-            bind_port=0,
-            tls_config=_plaintext_tls(),
-        ),
-    )
-    await failover_hub.start()
-    failover_port = failover_hub._server.sockets[0].getsockname()[1]
-
+async def _make_transport(hub_uri: str) -> SCTransport:
+    """Create and start an SCTransport connected to the hub."""
     transport = SCTransport(
         SCTransportConfig(
-            primary_hub_uri="ws://127.0.0.1:19999",  # Unreachable
-            failover_hub_uri=f"ws://127.0.0.1:{failover_port}",
+            primary_hub_uri=hub_uri,
             tls_config=_plaintext_tls(),
-            min_reconnect_time=0.1,
+            min_reconnect_time=0.5,
+            max_reconnect_time=5.0,
         )
     )
     await transport.start()
-    connected = await transport.hub_connector.wait_connected(timeout=10)
-    assert connected
-
-    from bac_py.transport.sc.types import SCHubConnectionStatus
-
-    assert transport.hub_connector.connection_status == SCHubConnectionStatus.CONNECTED_TO_FAILOVER
-
-    await transport.stop()
-    await failover_hub.stop()
+    connected = await transport.hub_connector.wait_connected(timeout=CONNECT_TIMEOUT)
+    assert connected, f"Failed to connect to hub at {hub_uri}"
+    return transport
 
 
-# --- Direct Connections ---
+async def _send_and_wait_echo(
+    transport: SCTransport,
+    dest_vmac: bytes,
+    payload: bytes,
+    timeout: float = ECHO_TIMEOUT,
+) -> bytes:
+    """Send a unicast NPDU and wait for the ECHO: response."""
+    received: asyncio.Queue[tuple[bytes, bytes]] = asyncio.Queue()
+    transport.on_receive(lambda npdu, mac: received.put_nowait((npdu, mac)))
+
+    transport.send_unicast(payload, dest_vmac)
+
+    try:
+        async with asyncio.timeout(timeout):
+            echo_npdu, _source = await received.get()
+    except TimeoutError:
+        pytest.fail(f"No echo response within {timeout}s for payload {payload!r}")
+
+    assert echo_npdu.startswith(b"ECHO:"), f"Expected ECHO: prefix, got {echo_npdu!r}"
+    assert echo_npdu == b"ECHO:" + payload
+    return echo_npdu
 
 
-async def test_direct_connection_between_nodes():
-    """Two nodes establish a direct connection for unicast traffic."""
-    from bac_py.transport.sc.node_switch import SCNodeSwitch
-
-    peer_vmac = SCVMAC.random()
-    peer_uuid = DeviceUUID.generate()
-    peer = SCNodeSwitch(
-        peer_vmac,
-        peer_uuid,
-        config=SCNodeSwitchConfig(
-            enable=True,
-            bind_address="127.0.0.1",
-            bind_port=0,
-            tls_config=_plaintext_tls(),
-        ),
-    )
-    received: list[bytes] = []
-
-    async def on_msg(msg):
-        if hasattr(msg, "payload"):
-            received.append(msg.payload)
-
-    peer.on_message = on_msg
-    await peer.start()
-    port = peer._server.sockets[0].getsockname()[1]
-
-    local = SCNodeSwitch(
-        SCVMAC.random(),
-        DeviceUUID.generate(),
-        config=SCNodeSwitchConfig(
-            enable=True,
-            bind_address="127.0.0.1",
-            bind_port=0,
-            tls_config=_plaintext_tls(),
-        ),
-    )
-    await local.start()
-
-    ok = await local.establish_direct(peer_vmac, [f"ws://127.0.0.1:{port}"])
-    assert ok
-
-    from bac_py.transport.sc.bvlc import SCMessage
-    from bac_py.transport.sc.types import BvlcSCFunction
-
-    msg = SCMessage(
-        BvlcSCFunction.ENCAPSULATED_NPDU,
-        message_id=42,
-        payload=b"\xca\xfe\xba\xbe",
-    )
-    ok = await local.send_direct(peer_vmac, msg)
-    assert ok
-    await asyncio.sleep(0.3)
-    assert len(received) >= 1
-    assert received[0] == b"\xca\xfe\xba\xbe"
-
-    await local.stop()
-    await peer.stop()
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
 
 
-# --- Stress: Concurrent Messages ---
-
-
-async def test_concurrent_messages():
-    """Multiple nodes send messages concurrently without errors."""
-    hub = SCHubFunction(
-        SCVMAC.random(),
-        DeviceUUID.generate(),
-        config=SCHubConfig(
-            bind_address="127.0.0.1",
-            bind_port=0,
-            tls_config=_plaintext_tls(),
-        ),
-    )
-    await hub.start()
-    port = hub._server.sockets[0].getsockname()[1]
-
-    count = 0
-
-    def on_recv(npdu, _mac):
-        nonlocal count
-        count += 1
-
-    receiver = SCTransport(
-        SCTransportConfig(
-            primary_hub_uri=f"ws://127.0.0.1:{port}",
-            tls_config=_plaintext_tls(),
-            min_reconnect_time=0.1,
+async def test_connect_to_hub(sc_hub_uri: str):
+    """Test runner creates SCTransport and connects to the hub."""
+    transport = await _make_transport(sc_hub_uri)
+    try:
+        assert transport.hub_connector.is_connected
+        assert (
+            transport.hub_connector.connection_status == SCHubConnectionStatus.CONNECTED_TO_PRIMARY
         )
-    )
-    receiver.on_receive(on_recv)
-    await receiver.start()
-    await receiver.hub_connector.wait_connected(timeout=5)
+    finally:
+        await transport.stop()
 
-    senders = []
-    for _ in range(3):
-        t = SCTransport(
-            SCTransportConfig(
-                primary_hub_uri=f"ws://127.0.0.1:{port}",
-                tls_config=_plaintext_tls(),
-                min_reconnect_time=0.1,
-            )
+
+async def test_hub_reports_connections(sc_hub_uri: str):
+    """After connecting, verify the hub accepts our connection."""
+    transport = await _make_transport(sc_hub_uri)
+    try:
+        # Our connection is established — the hub has at least our node plus
+        # the two echo nodes, but we can only verify our own connection state
+        assert transport.hub_connector.is_connected
+    finally:
+        await transport.stop()
+
+
+async def test_unicast_to_node1(sc_hub_uri: str, sc_node1_vmac: str):
+    """Send unicast NPDU to node1, verify echo response."""
+    transport = await _make_transport(sc_hub_uri)
+    try:
+        dest = SCVMAC.from_hex(sc_node1_vmac)
+        await _send_and_wait_echo(transport, dest.address, b"\x01\x04\x00\x05")
+    finally:
+        await transport.stop()
+
+
+async def test_unicast_to_node2(sc_hub_uri: str, sc_node2_vmac: str):
+    """Send unicast NPDU to node2, confirm hub routes to correct destination."""
+    transport = await _make_transport(sc_hub_uri)
+    try:
+        dest = SCVMAC.from_hex(sc_node2_vmac)
+        await _send_and_wait_echo(transport, dest.address, b"\x02\x08\x00\xab")
+    finally:
+        await transport.stop()
+
+
+async def test_broadcast_reaches_all_nodes(
+    sc_hub_uri: str, sc_node1_vmac: str, sc_node2_vmac: str
+):
+    """Send broadcast NPDU, both nodes receive it and echo back."""
+    transport = await _make_transport(sc_hub_uri)
+    try:
+        responses: asyncio.Queue[tuple[bytes, bytes]] = asyncio.Queue()
+        transport.on_receive(lambda npdu, mac: responses.put_nowait((npdu, mac)))
+
+        payload = b"\xbb\xcc\xdd\xee"
+        transport.send_broadcast(payload)
+
+        # Collect echo responses from both nodes
+        echoes: list[tuple[bytes, bytes]] = []
+        try:
+            async with asyncio.timeout(ECHO_TIMEOUT):
+                while len(echoes) < 2:
+                    echo_npdu, source_mac = await responses.get()
+                    if echo_npdu.startswith(b"ECHO:"):
+                        echoes.append((echo_npdu, source_mac))
+        except TimeoutError:
+            pass
+
+        assert len(echoes) >= 2, f"Expected 2 echo responses, got {len(echoes)}"
+
+        # Both should echo the original payload
+        for echo_npdu, _ in echoes:
+            assert echo_npdu == b"ECHO:" + payload
+
+        # Verify responses came from different sources
+        source_macs = {mac for _, mac in echoes}
+        assert len(source_macs) >= 2, "Expected echoes from 2 different nodes"
+    finally:
+        await transport.stop()
+
+
+async def test_bidirectional_exchange(sc_hub_uri: str, sc_node1_vmac: str, sc_node2_vmac: str):
+    """Send to node1, get echo, send to node2, get echo — sequential multi-destination."""
+    transport = await _make_transport(sc_hub_uri)
+    try:
+        dest1 = SCVMAC.from_hex(sc_node1_vmac)
+        dest2 = SCVMAC.from_hex(sc_node2_vmac)
+
+        await _send_and_wait_echo(transport, dest1.address, b"MSG-TO-NODE1")
+        await _send_and_wait_echo(transport, dest2.address, b"MSG-TO-NODE2")
+    finally:
+        await transport.stop()
+
+
+async def test_large_npdu_transfer(sc_hub_uri: str, sc_node1_vmac: str):
+    """Send a ~1400 byte NPDU (near max), verify echo response matches."""
+    transport = await _make_transport(sc_hub_uri)
+    try:
+        dest = SCVMAC.from_hex(sc_node1_vmac)
+        large_payload = bytes(range(256)) * 5 + bytes(range(120))  # 1400 bytes
+        assert len(large_payload) == 1400
+
+        await _send_and_wait_echo(transport, dest.address, large_payload)
+    finally:
+        await transport.stop()
+
+
+async def test_rapid_sequential_messages(sc_hub_uri: str, sc_node1_vmac: str):
+    """Send 50 unicast messages rapidly, verify all echoes received."""
+    transport = await _make_transport(sc_hub_uri)
+    try:
+        dest = SCVMAC.from_hex(sc_node1_vmac)
+        responses: asyncio.Queue[tuple[bytes, bytes]] = asyncio.Queue()
+        transport.on_receive(lambda npdu, mac: responses.put_nowait((npdu, mac)))
+
+        num_messages = 50
+        for i in range(num_messages):
+            transport.send_unicast(f"MSG-{i:04d}".encode(), dest.address)
+
+        echoes: list[bytes] = []
+        try:
+            async with asyncio.timeout(ECHO_TIMEOUT * 2):
+                while len(echoes) < num_messages:
+                    echo_npdu, _ = await responses.get()
+                    if echo_npdu.startswith(b"ECHO:"):
+                        echoes.append(echo_npdu)
+        except TimeoutError:
+            pass
+
+        # Allow some tolerance for network conditions
+        assert len(echoes) >= num_messages * 0.9, (
+            f"Expected at least {int(num_messages * 0.9)} echoes, got {len(echoes)}"
         )
-        await t.start()
-        await t.hub_connector.wait_connected(timeout=5)
-        senders.append(t)
+    finally:
+        await transport.stop()
 
-    # Each sender sends 10 unicast messages
-    for sender in senders:
-        for i in range(10):
-            sender.send_unicast(bytes([i]), receiver.local_mac)
 
-    await asyncio.sleep(1.0)
-    assert count >= 25  # Allow for some message loss in test env
+async def test_concurrent_multi_node_traffic(
+    sc_hub_uri: str, sc_node1_vmac: str, sc_node2_vmac: str
+):
+    """Send messages to both nodes concurrently, verify all responses."""
+    transport = await _make_transport(sc_hub_uri)
+    try:
+        dest1 = SCVMAC.from_hex(sc_node1_vmac)
+        dest2 = SCVMAC.from_hex(sc_node2_vmac)
+        responses: asyncio.Queue[tuple[bytes, bytes]] = asyncio.Queue()
+        transport.on_receive(lambda npdu, mac: responses.put_nowait((npdu, mac)))
 
-    for t in senders:
-        await t.stop()
-    await receiver.stop()
-    await hub.stop()
+        num_per_node = 10
+
+        async def send_to(dest_mac: bytes, prefix: str) -> None:
+            for i in range(num_per_node):
+                transport.send_unicast(f"{prefix}-{i:04d}".encode(), dest_mac)
+                await asyncio.sleep(0.01)
+
+        # Send to both nodes concurrently
+        await asyncio.gather(
+            send_to(dest1.address, "N1"),
+            send_to(dest2.address, "N2"),
+        )
+
+        total_expected = num_per_node * 2
+        echoes: list[bytes] = []
+        try:
+            async with asyncio.timeout(ECHO_TIMEOUT * 2):
+                while len(echoes) < total_expected:
+                    echo_npdu, _ = await responses.get()
+                    if echo_npdu.startswith(b"ECHO:"):
+                        echoes.append(echo_npdu)
+        except TimeoutError:
+            pass
+
+        # Verify we got responses for both nodes
+        n1_echoes = [e for e in echoes if b"N1-" in e]
+        n2_echoes = [e for e in echoes if b"N2-" in e]
+
+        assert len(n1_echoes) >= num_per_node * 0.8, (
+            f"Expected at least {int(num_per_node * 0.8)} N1 echoes, got {len(n1_echoes)}"
+        )
+        assert len(n2_echoes) >= num_per_node * 0.8, (
+            f"Expected at least {int(num_per_node * 0.8)} N2 echoes, got {len(n2_echoes)}"
+        )
+    finally:
+        await transport.stop()

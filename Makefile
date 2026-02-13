@@ -1,7 +1,7 @@
 .PHONY: lint typecheck test docs check fix format coverage coverage-html \
        docker-build docker-test docker-stress docker-test-client docker-test-bbmd \
        docker-test-router docker-test-device-mgmt docker-test-cov-advanced \
-       docker-test-events docker-demo docker-demo-auto docker-clean
+       docker-test-events docker-test-sc docker-demo docker-demo-auto docker-clean
 
 lint:
 	uv run ruff check src/ tests/ docker/
@@ -68,6 +68,10 @@ docker-test-events: docker-build
 	$(COMPOSE) --profile events up --abort-on-container-exit --exit-code-from test-events
 	$(COMPOSE) --profile events down -v
 
+docker-test-sc: docker-build
+	$(COMPOSE) --profile secure-connect up --abort-on-container-exit --exit-code-from test-secure-connect
+	$(COMPOSE) --profile secure-connect down -v
+
 docker-test: docker-build
 	$(MAKE) docker-test-client
 	$(MAKE) docker-test-bbmd
@@ -76,6 +80,7 @@ docker-test: docker-build
 	$(MAKE) docker-test-device-mgmt
 	$(MAKE) docker-test-cov-advanced
 	$(MAKE) docker-test-events
+	$(MAKE) docker-test-sc
 
 docker-stress: docker-build
 	$(COMPOSE) --profile stress-runner up --abort-on-container-exit --exit-code-from stress-runner

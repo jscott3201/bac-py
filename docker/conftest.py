@@ -52,3 +52,23 @@ def router_address() -> str:
 def router_instance() -> int:
     """Router device instance from env."""
     return int(os.environ.get("ROUTER_INSTANCE", "300"))
+
+
+@pytest.fixture
+def sc_hub_uri() -> str:
+    """SC hub WebSocket URI from env."""
+    host = os.environ.get("SC_HUB_ADDRESS", "172.30.1.120")
+    port = os.environ.get("SC_HUB_PORT", "4443")
+    return f"ws://{host}:{port}"
+
+
+@pytest.fixture
+def sc_node1_vmac() -> str:
+    """SC node1 VMAC hex string from env."""
+    return os.environ.get("SC_NODE1_VMAC", "02AA00000001")
+
+
+@pytest.fixture
+def sc_node2_vmac() -> str:
+    """SC node2 VMAC hex string from env."""
+    return os.environ.get("SC_NODE2_VMAC", "02AA00000002")

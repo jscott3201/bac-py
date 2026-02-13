@@ -17,13 +17,13 @@ WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 
 # Layer 2: install deps including orjson via serialization extra
-RUN uv sync --frozen --group test --extra serialization --no-install-project
+RUN uv sync --frozen --group test --extra serialization --extra secure --no-install-project
 
 # Layer 3: source code (changes frequently)
 COPY src/ src/
 
 # Install the project itself
-RUN uv sync --frozen --group test --extra serialization
+RUN uv sync --frozen --group test --extra serialization --extra secure
 
 # Remove build deps to keep image lean
 RUN apk del gcc musl-dev

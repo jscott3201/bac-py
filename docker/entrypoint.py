@@ -378,6 +378,103 @@ async def run_server_extended() -> None:
     await app.stop()
 
 
+async def run_sc_hub() -> None:
+    """Run a BACnet/SC hub function (WebSocket server)."""
+    from bac_py.transport.sc.hub_function import SCHubConfig, SCHubFunction
+    from bac_py.transport.sc.tls import SCTLSConfig
+    from bac_py.transport.sc.vmac import SCVMAC, DeviceUUID
+
+    bind_address = os.environ.get("BIND_ADDRESS", "0.0.0.0")
+    bind_port = int(os.environ.get("BIND_PORT", "4443"))
+
+    hub = SCHubFunction(
+        SCVMAC.random(),
+        DeviceUUID.generate(),
+        config=SCHubConfig(
+            bind_address=bind_address,
+            bind_port=bind_port,
+            tls_config=SCTLSConfig(allow_plaintext=True),
+        ),
+    )
+    await hub.start()
+
+    logger.info("SC Hub running on %s:%d", bind_address, bind_port)
+    _write_healthy()
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+    logger.info("Shutting down SC Hub...")
+    await hub.stop()
+
+
+async def run_sc_node() -> None:
+    """Run a BACnet/SC node that connects to a hub and echoes NPDUs."""
+    from bac_py.transport.sc import SCTransport, SCTransportConfig
+    from bac_py.transport.sc.node_switch import SCNodeSwitchConfig
+    from bac_py.transport.sc.tls import SCTLSConfig
+    from bac_py.transport.sc.vmac import SCVMAC
+
+    hub_uri = os.environ.get("HUB_URI", "ws://172.30.1.120:4443")
+    vmac_hex = os.environ.get("VMAC", "")
+    node_switch_port = int(os.environ.get("NODE_SWITCH_PORT", "0"))
+
+    vmac = SCVMAC.from_hex(vmac_hex) if vmac_hex else None
+    tls_config = SCTLSConfig(allow_plaintext=True)
+
+    ns_config = None
+    if node_switch_port:
+        ns_config = SCNodeSwitchConfig(
+            enable=True,
+            bind_address="0.0.0.0",
+            bind_port=node_switch_port,
+            tls_config=tls_config,
+        )
+
+    transport = SCTransport(
+        SCTransportConfig(
+            primary_hub_uri=hub_uri,
+            tls_config=tls_config,
+            vmac=vmac,
+            min_reconnect_time=0.5,
+            max_reconnect_time=5.0,
+            node_switch_config=ns_config,
+        )
+    )
+
+    # Echo handler: on receive (npdu, source_mac) → send back b"ECHO:" + npdu
+    def echo_handler(npdu: bytes, source_mac: bytes) -> None:
+        logger.debug("Received %d bytes from %s, echoing", len(npdu), source_mac.hex())
+        transport.send_unicast(b"ECHO:" + npdu, source_mac)
+
+    transport.on_receive(echo_handler)
+    await transport.start()
+
+    connected = await transport.hub_connector.wait_connected(timeout=30)
+    if connected:
+        logger.info(
+            "SC Node connected to hub %s (VMAC=%s)",
+            hub_uri,
+            ":".join(f"{b:02X}" for b in transport.local_mac),
+        )
+        _write_healthy()
+    else:
+        logger.error("SC Node failed to connect to hub %s", hub_uri)
+        sys.exit(1)
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+    logger.info("Shutting down SC Node...")
+    await transport.stop()
+
+
 def run_test() -> None:
     """Run pytest on a specific scenario file."""
     test_file = os.environ.get("TEST_FILE", "")
@@ -445,6 +542,10 @@ def main() -> None:
         asyncio.run(run_bbmd())
     elif role == "router":
         asyncio.run(run_router())
+    elif role == "sc-hub":
+        asyncio.run(run_sc_hub())
+    elif role == "sc-node":
+        asyncio.run(run_sc_node())
     elif role == "test":
         run_test()
     elif role == "stress":
@@ -456,7 +557,7 @@ def main() -> None:
     else:
         logger.error(
             "Unknown ROLE: %r (expected: server, server-extended, bbmd, router, "
-            "test, stress, thermostat, demo-client)",
+            "sc-hub, sc-node, test, stress, thermostat, demo-client)",
             role,
         )
         sys.exit(1)
