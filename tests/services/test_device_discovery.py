@@ -73,3 +73,38 @@ class TestYouAreRequest:
         encoded = request.encode()
         decoded = YouAreRequest.decode(encoded)
         assert decoded.device_mac_address == b"\x01"
+
+
+# ---------------------------------------------------------------------------
+# Coverage: device_discovery.py branch partial 133->136
+# ---------------------------------------------------------------------------
+
+
+class TestYouAreRequestOptionalNetworkNumber:
+    """Branch 133->136: optional deviceNetworkNumber check in YouAreRequest.decode.
+
+    When offset < len(data) is True but the tag is NOT context tag 2, the
+    code falls through to the return without setting device_network_number.
+    """
+
+    def test_non_matching_tag_after_mac_address(self):
+        """Extra data with a non-matching context tag after MAC address."""
+        from bac_py.encoding.primitives import (
+            encode_context_object_id,
+            encode_context_tagged,
+            encode_unsigned,
+        )
+
+        buf = bytearray()
+        # [0] deviceIdentifier
+        buf.extend(encode_context_object_id(0, ObjectIdentifier(ObjectType.DEVICE, 1234)))
+        # [1] deviceMACAddress
+        mac = b"\xc0\xa8\x01\x64\xba\xc0"
+        buf.extend(encode_context_tagged(1, mac))
+        # Append a context tag with number 5 (not 2) -- should be ignored
+        buf.extend(encode_context_tagged(5, encode_unsigned(999)))
+
+        decoded = YouAreRequest.decode(bytes(buf))
+        assert decoded.device_identifier == ObjectIdentifier(ObjectType.DEVICE, 1234)
+        assert decoded.device_mac_address == mac
+        assert decoded.device_network_number is None

@@ -1348,3 +1348,145 @@ class TestErrorHandling:
     def test_from_dict_unknown_type_raises_valueerror(self):
         with pytest.raises(ValueError, match="Unknown"):
             notification_parameters_from_dict({"type": "not-a-real-type"})
+
+    def test_mismatched_closing_tag_raises(self):
+        """Lines 1665-1669: mismatched closing tag raises ValueError."""
+        # Encode an OutOfRange variant (tag 5), then replace closing tag 5 with tag 6
+        variant = OutOfRange(
+            exceeding_value=85.5,
+            status_flags=StatusFlags(),
+            deadband=1.0,
+            exceeded_limit=80.0,
+        )
+        encoded = bytearray(variant.encode())
+        # Find and replace the closing tag at the end
+        # Closing tag for tag 5 is encoded as: 0x5F (tag 5, closing)
+        # We need to replace it with closing tag 6: 0x6F
+        assert encoded[-1] == 0x5F  # closing tag 5
+        encoded[-1] = 0x6F  # closing tag 6
+        with pytest.raises(ValueError, match="Expected closing tag"):
+            decode_notification_parameters(memoryview(bytes(encoded)))
+
+
+# ---------------------------------------------------------------------------
+# Coverage: branch partials for optional fields in decode_inner
+# ---------------------------------------------------------------------------
+
+
+class TestAccessEventDecodeInnerNoTrailingData:
+    """Branch 861->866: offset >= len(data) after mandatory fields.
+
+    When decode_inner is called with data ending right after the
+    access_credential closing tag, there's no data left to peek for
+    authentication_factor, so the optional check is skipped entirely.
+    """
+
+    def test_no_data_after_mandatory_fields(self):
+        from bac_py.encoding.primitives import (
+            encode_context_enumerated,
+            encode_context_tagged,
+            encode_unsigned,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+        from bac_py.types.notification_params import AccessEvent, _encode_sf
+
+        # Build inner data for AccessEvent WITHOUT outer opening/closing tags
+        # and WITHOUT authentication_factor, and WITHOUT trailing closing tag
+        buf = bytearray()
+        # [0] access_event
+        buf.extend(encode_context_enumerated(0, 1))
+        # [1] status_flags
+        buf.extend(_encode_sf(1, StatusFlags()))
+        # [2] access_event_tag
+        buf.extend(encode_context_tagged(2, encode_unsigned(0)))
+        # [3] access_event_time
+        buf.extend(encode_opening_tag(3))
+        buf.extend(b"\x21\x01")  # some inner data
+        buf.extend(encode_closing_tag(3))
+        # [4] access_credential
+        buf.extend(encode_opening_tag(4))
+        buf.extend(b"\x21\x02")  # some inner data
+        buf.extend(encode_closing_tag(4))
+        # NO trailing data -- offset will == len(data)
+
+        data = memoryview(bytes(buf))
+        result, offset = AccessEvent.decode_inner(data, 0)
+        assert result.authentication_factor is None
+        assert offset == len(data)
+
+
+class TestChangeOfTimerDecodeInnerNoOptionals:
+    """Branches 1463->1468, 1469->1479: offset >= len(data) after mandatory fields.
+
+    When decode_inner is called with data ending right after
+    last_state_change, there's no data left for initial_timeout
+    or expiration_time.
+    """
+
+    def test_no_data_after_last_state_change(self):
+        from bac_py.encoding.primitives import (
+            encode_context_enumerated,
+            encode_date,
+            encode_time,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+        from bac_py.types.notification_params import ChangeOfTimer, _encode_sf
+
+        # Build inner data for ChangeOfTimer WITHOUT optional fields
+        # and WITHOUT trailing closing tag
+        buf = bytearray()
+        # [0] new_state = IDLE (0)
+        buf.extend(encode_context_enumerated(0, 0))
+        # [1] status_flags
+        buf.extend(_encode_sf(1, StatusFlags()))
+        # [2] update_time (opening tag 2, date, time, closing tag 2)
+        buf.extend(encode_opening_tag(2))
+        buf.extend(encode_date(BACnetDate(2024, 1, 15, 1)))
+        buf.extend(encode_time(BACnetTime(10, 30, 0, 0)))
+        buf.extend(encode_closing_tag(2))
+        # [3] last_state_change
+        buf.extend(encode_context_enumerated(3, 0))
+        # NO trailing data -- offset will == len(data)
+
+        data = memoryview(bytes(buf))
+        result, offset = ChangeOfTimer.decode_inner(data, 0)
+        assert result.initial_timeout is None
+        assert result.expiration_time is None
+        assert offset == len(data)
+
+    def test_initial_timeout_present_no_expiration(self):
+        """Exercise the path where initial_timeout is present but data ends.
+
+        Before expiration_time check (branch 1469->1479).
+        """
+        from bac_py.encoding.primitives import (
+            encode_context_enumerated,
+            encode_context_tagged,
+            encode_date,
+            encode_time,
+            encode_unsigned,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+        from bac_py.types.notification_params import ChangeOfTimer, _encode_sf
+
+        buf = bytearray()
+        # [0] new_state
+        buf.extend(encode_context_enumerated(0, 1))  # RUNNING
+        # [1] status_flags
+        buf.extend(_encode_sf(1, StatusFlags()))
+        # [2] update_time
+        buf.extend(encode_opening_tag(2))
+        buf.extend(encode_date(BACnetDate(2024, 6, 15, 3)))
+        buf.extend(encode_time(BACnetTime(14, 30, 0, 0)))
+        buf.extend(encode_closing_tag(2))
+        # [3] last_state_change
+        buf.extend(encode_context_enumerated(3, 1))
+        # [4] initial_timeout = 60
+        buf.extend(encode_context_tagged(4, encode_unsigned(60)))
+        # NO expiration_time, NO trailing data
+
+        data = memoryview(bytes(buf))
+        result, offset = ChangeOfTimer.decode_inner(data, 0)
+        assert result.initial_timeout == 60
+        assert result.expiration_time is None
+        assert offset == len(data)

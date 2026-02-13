@@ -628,3 +628,29 @@ class TestAppendToLogsIteration:
             operation=AuditOperation.WRITE,
             target_object=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
         )
+
+
+class TestAppendToLogsDirect:
+    """Test _append_to_logs directly appends to AuditLogObject (branch 177->176)."""
+
+    def test_append_to_logs_appends_notification(self):
+        """_append_to_logs appends notification to AuditLogObject."""
+        db = ObjectDatabase()
+        device = DeviceObject(1, object_name="test-device")
+        db.add(device)
+
+        log = AuditLogObject(1, object_name="audit-log-1")
+        log._properties[PropertyIdentifier.LOG_ENABLE] = True
+        log._properties[PropertyIdentifier.BUFFER_SIZE] = 100
+        db.add(log)
+
+        mgr = AuditManager(db)
+        notif = BACnetAuditNotification(
+            operation=AuditOperation.WRITE,
+            target_object=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+        )
+        mgr._append_to_logs(notif)
+
+        buffer = log._properties[PropertyIdentifier.LOG_BUFFER]
+        assert len(buffer) == 1
+        assert buffer[0].notification.operation == AuditOperation.WRITE

@@ -116,3 +116,89 @@ class TestUTCTimeSynchronization:
         assert decoded.date.year == 2024
         assert decoded.date.month == 1
         assert decoded.time.hour == 12
+
+
+# ---------------------------------------------------------------------------
+# Coverage: device_mgmt.py lines 84, 95, 154
+# ---------------------------------------------------------------------------
+
+
+class TestDeviceCommunicationControlPassword:
+    """Line 84: time_duration > 65535 raises BACnetRejectError."""
+
+    def test_time_duration_overflow_raises(self):
+        import pytest
+
+        # Build request with time_duration > 65535 manually
+        from bac_py.encoding.primitives import (
+            encode_context_tagged,
+            encode_enumerated,
+            encode_unsigned,
+        )
+        from bac_py.services.errors import BACnetRejectError
+
+        buf = bytearray()
+        # [0] timeDuration = 70000 (> 65535)
+        buf.extend(encode_context_tagged(0, encode_unsigned(70000)))
+        # [1] enable-disable = DISABLE (1)
+        buf.extend(encode_context_tagged(1, encode_enumerated(EnableDisable.DISABLE)))
+        with pytest.raises(BACnetRejectError):
+            DeviceCommunicationControlRequest.decode(bytes(buf))
+
+    def test_password_out_of_range_raises(self):
+        """Line 95: password length > 20 raises BACnetRejectError."""
+        import pytest
+
+        from bac_py.encoding.primitives import (
+            encode_character_string,
+            encode_context_tagged,
+            encode_enumerated,
+        )
+        from bac_py.services.errors import BACnetRejectError
+
+        buf = bytearray()
+        # [1] enable-disable = ENABLE (0)
+        buf.extend(encode_context_tagged(1, encode_enumerated(EnableDisable.ENABLE)))
+        # [2] password = "a" * 25 (> 20 chars)
+        buf.extend(encode_context_tagged(2, encode_character_string("a" * 25)))
+        with pytest.raises(BACnetRejectError):
+            DeviceCommunicationControlRequest.decode(bytes(buf))
+
+
+class TestTimeSynchronizationFields:
+    """Line 95 in TimeSynchronizationRequest: decode date/time fields."""
+
+    def test_round_trip_midnight(self):
+        """Verify midnight time round-trips correctly."""
+        date = BACnetDate(2025, 12, 31, 3)
+        time = BACnetTime(0, 0, 0, 0)
+        request = TimeSynchronizationRequest(date=date, time=time)
+        encoded = request.encode()
+        decoded = TimeSynchronizationRequest.decode(encoded)
+        assert decoded.date.year == 2025
+        assert decoded.date.month == 12
+        assert decoded.date.day == 31
+        assert decoded.time.hour == 0
+        assert decoded.time.minute == 0
+
+
+class TestReinitializeDevicePasswordOutOfRange:
+    """Line 154: password length > 20 raises BACnetRejectError."""
+
+    def test_password_too_long_raises(self):
+        import pytest
+
+        from bac_py.encoding.primitives import (
+            encode_character_string,
+            encode_context_tagged,
+            encode_enumerated,
+        )
+        from bac_py.services.errors import BACnetRejectError
+
+        buf = bytearray()
+        # [0] reinitializedStateOfDevice = COLDSTART (0)
+        buf.extend(encode_context_tagged(0, encode_enumerated(ReinitializedState.COLDSTART)))
+        # [1] password = "a" * 25 (> 20 chars)
+        buf.extend(encode_context_tagged(1, encode_character_string("a" * 25)))
+        with pytest.raises(BACnetRejectError):
+            ReinitializeDeviceRequest.decode(bytes(buf))

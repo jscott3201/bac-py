@@ -1,8 +1,12 @@
 """Tests for BACnet constructed data types."""
 
+import pytest
+
 from bac_py.encoding.primitives import (
     decode_all_application_values,
+    encode_context_tagged,
     encode_property_value,
+    encode_unsigned,
 )
 from bac_py.types.constructed import (
     BACnetAddress,
@@ -10,14 +14,18 @@ from bac_py.types.constructed import (
     BACnetDateRange,
     BACnetDateTime,
     BACnetDestination,
+    BACnetDeviceObjectPropertyReference,
     BACnetLogRecord,
     BACnetObjectPropertyReference,
     BACnetPriorityArray,
     BACnetPriorityValue,
     BACnetRecipient,
     BACnetRecipientProcess,
+    BACnetScale,
     BACnetSpecialEvent,
+    BACnetTimeStamp,
     BACnetTimeValue,
+    BACnetValueSource,
     StatusFlags,
 )
 from bac_py.types.enums import ObjectType, PropertyIdentifier
@@ -336,3 +344,390 @@ class TestBACnetPriorityArrayEncode:
     def test_encode_matches_property_value(self):
         pa = BACnetPriorityArray()
         assert pa.encode() == encode_property_value(pa)
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests
+# ---------------------------------------------------------------------------
+
+
+class TestStatusFlagsReprCoverage:
+    def test_repr_overridden_flag(self):
+        """StatusFlags repr includes OVERRIDDEN when set."""
+        sf = StatusFlags(overridden=True)
+        r = repr(sf)
+        assert "OVERRIDDEN" in r
+
+    def test_repr_out_of_service_flag(self):
+        """StatusFlags repr includes OUT_OF_SERVICE when set."""
+        sf = StatusFlags(out_of_service=True)
+        r = repr(sf)
+        assert "OUT_OF_SERVICE" in r
+
+    def test_repr_all_flags(self):
+        """StatusFlags repr includes all flags when all set."""
+        sf = StatusFlags(in_alarm=True, fault=True, overridden=True, out_of_service=True)
+        r = repr(sf)
+        assert "IN_ALARM" in r
+        assert "FAULT" in r
+        assert "OVERRIDDEN" in r
+        assert "OUT_OF_SERVICE" in r
+
+
+class TestBACnetTimeStampDecodeCoverage:
+    def test_decode_sequence_number(self):
+        """BACnetTimeStamp decode with choice=1 (sequence number)."""
+        ts = BACnetTimeStamp(choice=1, value=42)
+        encoded = ts.encode()
+        decoded, offset = BACnetTimeStamp.decode(encoded)
+        assert decoded.choice == 1
+        assert decoded.value == 42
+        assert offset == len(encoded)
+
+    def test_decode_datetime(self):
+        """BACnetTimeStamp decode with choice=2 (datetime)."""
+        dt = BACnetDateTime(
+            date=BACnetDate(year=2024, month=6, day=15, day_of_week=6),
+            time=BACnetTime(hour=10, minute=30, second=0, hundredth=0),
+        )
+        ts = BACnetTimeStamp(choice=2, value=dt)
+        encoded = ts.encode()
+        decoded, offset = BACnetTimeStamp.decode(encoded)
+        assert decoded.choice == 2
+        assert isinstance(decoded.value, BACnetDateTime)
+        assert decoded.value == dt
+        assert offset == len(encoded)
+
+    def test_decode_invalid_tag_raises(self):
+        """BACnetTimeStamp decode with invalid context tag raises ValueError."""
+        # Context tag 5 is not valid for BACnetTimeStamp
+        data = encode_context_tagged(5, encode_unsigned(42))
+        with pytest.raises(ValueError, match="Invalid BACnetTimeStamp context tag"):
+            BACnetTimeStamp.decode(data)
+
+
+class TestBACnetSpecialEventEncodeCoverage:
+    def test_encode_with_object_identifier_period(self):
+        """BACnetSpecialEvent encode with ObjectIdentifier period (calendar reference)."""
+        event = BACnetSpecialEvent(
+            period=ObjectIdentifier(ObjectType.CALENDAR, 1),
+            list_of_time_values=(BACnetTimeValue(time=BACnetTime(0, 0, 0, 0), value=72.0),),
+            event_priority=5,
+        )
+        encoded = event.encode()
+        assert isinstance(encoded, bytes)
+        assert len(encoded) > 0
+
+    def test_special_event_calendar_reference_dict_round_trip(self):
+        """BACnetSpecialEvent to_dict/from_dict with calendar reference."""
+        event = BACnetSpecialEvent(
+            period=ObjectIdentifier(ObjectType.CALENDAR, 1),
+            list_of_time_values=(BACnetTimeValue(time=BACnetTime(0, 0, 0, 0), value=72.0),),
+            event_priority=5,
+        )
+        d = event.to_dict()
+        assert d["period_type"] == "calendar_reference"
+        restored = BACnetSpecialEvent.from_dict(d)
+        assert isinstance(restored.period, ObjectIdentifier)
+        assert restored.period == ObjectIdentifier(ObjectType.CALENDAR, 1)
+        assert restored.event_priority == 5
+
+
+class TestDeviceObjectPropertyReferenceCoverage:
+    def test_encode_decode_with_device_identifier(self):
+        """DeviceObjectPropertyReference encode/decode with optional device_identifier."""
+        ref = BACnetDeviceObjectPropertyReference(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            property_array_index=None,
+            device_identifier=ObjectIdentifier(ObjectType.DEVICE, 100),
+        )
+        encoded = ref.encode()
+        decoded, _offset = BACnetDeviceObjectPropertyReference.decode(encoded)
+        assert decoded.device_identifier is not None
+        assert decoded.device_identifier == ObjectIdentifier(ObjectType.DEVICE, 100)
+        assert decoded.object_identifier == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
+
+
+class TestBACnetRecipientEncodeCoverage:
+    def test_encode_device_recipient(self):
+        """BACnetRecipient.encode() with device set."""
+        recip = BACnetRecipient(device=ObjectIdentifier(ObjectType.DEVICE, 10))
+        encoded = recip.encode()
+        assert isinstance(encoded, bytes)
+        assert len(encoded) > 0
+
+    def test_encode_address_recipient(self):
+        """BACnetRecipient.encode() with address set."""
+        from bac_py.types.constructed import BACnetAddress
+
+        addr = BACnetAddress(network_number=1, mac_address=b"\x0a")
+        recip = BACnetRecipient(address=addr)
+        encoded = recip.encode()
+        assert isinstance(encoded, bytes)
+        assert len(encoded) > 0
+
+    def test_encode_empty_recipient(self):
+        """BACnetRecipient.encode() with neither device nor address set."""
+        recip = BACnetRecipient()
+        encoded = recip.encode()
+        assert isinstance(encoded, bytes)
+
+
+class TestBACnetScaleCoverage:
+    def test_to_dict_float_scale(self):
+        """BACnetScale to_dict with float_scale."""
+        scale = BACnetScale(float_scale=1.5)
+        d = scale.to_dict()
+        assert d == {"type": "float", "value": 1.5}
+
+    def test_to_dict_integer_scale(self):
+        """BACnetScale to_dict with integer_scale."""
+        scale = BACnetScale(integer_scale=10)
+        d = scale.to_dict()
+        assert d == {"type": "integer", "value": 10}
+
+    def test_to_dict_neither_set(self):
+        """BACnetScale to_dict with neither set."""
+        scale = BACnetScale()
+        d = scale.to_dict()
+        assert d == {"type": "float", "value": None}
+
+    def test_from_dict_float(self):
+        """BACnetScale from_dict with float type."""
+        d = {"type": "float", "value": 2.5}
+        scale = BACnetScale.from_dict(d)
+        assert scale.float_scale == 2.5
+        assert scale.integer_scale is None
+
+    def test_from_dict_integer(self):
+        """BACnetScale from_dict with integer type."""
+        d = {"type": "integer", "value": 10}
+        scale = BACnetScale.from_dict(d)
+        assert scale.integer_scale == 10
+        assert scale.float_scale is None
+
+
+class TestBACnetLogRecordCoverage:
+    def test_log_record_without_status_flags(self):
+        """BACnetLogRecord to_dict omits status_flags when None."""
+        rec = BACnetLogRecord(
+            timestamp=BACnetDateTime(
+                date=BACnetDate(124, 6, 15, 6),
+                time=BACnetTime(10, 30, 0, 0),
+            ),
+            log_datum=42.5,
+        )
+        d = rec.to_dict()
+        assert "status_flags" not in d
+
+    def test_log_record_with_status_flags(self):
+        """BACnetLogRecord to_dict includes status_flags when set."""
+        rec = BACnetLogRecord(
+            timestamp=BACnetDateTime(
+                date=BACnetDate(124, 6, 15, 6),
+                time=BACnetTime(10, 30, 0, 0),
+            ),
+            log_datum=42.5,
+            status_flags=StatusFlags(in_alarm=True),
+        )
+        d = rec.to_dict()
+        assert "status_flags" in d
+        assert d["status_flags"]["in_alarm"] is True
+
+    def test_log_record_with_object_log_datum(self):
+        """BACnetLogRecord to_dict with a log_datum that has to_dict."""
+        oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        rec = BACnetLogRecord(
+            timestamp=BACnetDateTime(
+                date=BACnetDate(124, 6, 15, 6),
+                time=BACnetTime(10, 30, 0, 0),
+            ),
+            log_datum=oid,
+        )
+        d = rec.to_dict()
+        assert d["log_datum"] == {"object_type": "analog-input", "instance": 1}
+
+
+class TestBACnetValueSourceCoverage:
+    def test_encode_invalid_choice_raises(self):
+        """BACnetValueSource encode with invalid choice raises ValueError."""
+        vs = BACnetValueSource(choice=99, value=None)
+        with pytest.raises(ValueError, match="Invalid BACnetValueSource choice"):
+            vs.encode()
+
+    def test_decode_invalid_choice_tag_raises(self):
+        """BACnetValueSource decode with invalid context tag raises ValueError."""
+        data = encode_context_tagged(5, encode_unsigned(0))
+        with pytest.raises(ValueError, match="Invalid BACnetValueSource choice tag"):
+            BACnetValueSource.decode(data)
+
+    def test_to_dict_invalid_choice_raises(self):
+        """BACnetValueSource to_dict with invalid choice raises ValueError."""
+        vs = BACnetValueSource(choice=99, value=None)
+        with pytest.raises(ValueError, match="Invalid BACnetValueSource choice"):
+            vs.to_dict()
+
+    def test_from_dict_invalid_choice_raises(self):
+        """BACnetValueSource from_dict with invalid choice raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid BACnetValueSource choice"):
+            BACnetValueSource.from_dict({"choice": "unknown", "value": None})
+
+
+# ---------------------------------------------------------------------------
+# Coverage: constructed.py remaining lines
+# ---------------------------------------------------------------------------
+
+
+class TestBACnetTimeStampApplicationTag:
+    """Line 218-219: BACnetTimeStamp.decode with application tag raises ValueError."""
+
+    def test_decode_application_tag_raises(self):
+        from bac_py.encoding.primitives import encode_application_unsigned
+
+        # Application-tagged unsigned value (not a context tag)
+        data = encode_application_unsigned(42)
+        with pytest.raises(ValueError, match="Expected context tag for BACnetTimeStamp"):
+            BACnetTimeStamp.decode(data)
+
+
+class TestBACnetTimeValueToDict:
+    """Line 478: BACnetTimeValue.to_dict calls value.to_dict() when available."""
+
+    def test_to_dict_with_complex_value(self):
+        oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        tv = BACnetTimeValue(
+            time=BACnetTime(hour=8, minute=0, second=0, hundredth=0),
+            value=oid,
+        )
+        d = tv.to_dict()
+        assert d["value"] == {"object_type": "analog-input", "instance": 1}
+
+
+class TestBACnetDeviceObjectPropertyReferenceArrayIndex:
+    """Line 627: encode optional propertyArrayIndex in DeviceObjectPropertyReference."""
+
+    def test_encode_decode_with_array_index(self):
+        ref = BACnetDeviceObjectPropertyReference(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            property_array_index=5,
+            device_identifier=None,
+        )
+        encoded = ref.encode()
+        decoded, _offset = BACnetDeviceObjectPropertyReference.decode(encoded)
+        assert decoded.property_array_index == 5
+        assert decoded.device_identifier is None
+
+
+class TestBACnetDeviceObjectPropertyReferenceArrayIndexDecode:
+    """Lines 668-672: decode propertyArrayIndex when present."""
+
+    def test_decode_with_array_index_and_device(self):
+        ref = BACnetDeviceObjectPropertyReference(
+            object_identifier=ObjectIdentifier(ObjectType.BINARY_OUTPUT, 10),
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            property_array_index=3,
+            device_identifier=ObjectIdentifier(ObjectType.DEVICE, 50),
+        )
+        encoded = ref.encode()
+        decoded, _offset = BACnetDeviceObjectPropertyReference.decode(encoded)
+        assert decoded.property_array_index == 3
+        assert decoded.device_identifier == ObjectIdentifier(ObjectType.DEVICE, 50)
+
+
+class TestBACnetRecipientToDict:
+    """Line 883: BACnetRecipient.to_dict with neither device nor address."""
+
+    def test_to_dict_empty_recipient(self):
+        recip = BACnetRecipient()
+        d = recip.to_dict()
+        assert d == {"type": "device", "device": None}
+
+
+class TestBACnetRecipientFromDictEmpty:
+    """Line 896: BACnetRecipient.from_dict with device=None."""
+
+    def test_from_dict_device_none(self):
+        d = {"type": "device", "device": None}
+        recip = BACnetRecipient.from_dict(d)
+        assert recip.device is None
+        assert recip.address is None
+
+
+class TestBACnetPriorityValueToDict:
+    """Line 1248: BACnetPriorityValue.to_dict calls value.to_dict() when available."""
+
+    def test_to_dict_with_complex_value(self):
+        oid = ObjectIdentifier(ObjectType.BINARY_INPUT, 5)
+        pv = BACnetPriorityValue(value=oid)
+        d = pv.to_dict()
+        assert d["value"] == {"object_type": "binary-input", "instance": 5}
+
+
+class TestBACnetValueSourceDecodeApplicationTag:
+    """Lines 1513-1514: BACnetValueSource.decode with application tag raises ValueError."""
+
+    def test_decode_application_tag_raises(self):
+        from bac_py.encoding.primitives import encode_application_unsigned
+
+        data = encode_application_unsigned(0)
+        with pytest.raises(ValueError, match="Expected context tag for BACnetValueSource"):
+            BACnetValueSource.decode(data)
+
+
+# ---------------------------------------------------------------------------
+# Coverage: constructed.py branch partials
+# ---------------------------------------------------------------------------
+
+
+class TestDeviceObjectPropertyReferenceNoOptionalFields:
+    """Branch 668->675: decode with no propertyArrayIndex and no deviceIdentifier.
+
+    When data ends right after the propertyIdentifier, the offset >= len(data)
+    checks at line 668 and 676 both skip, leaving both optional fields as None.
+    """
+
+    def test_decode_only_required_fields(self):
+        ref = BACnetDeviceObjectPropertyReference(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            property_array_index=None,
+            device_identifier=None,
+        )
+        encoded = ref.encode()
+        decoded, _offset = BACnetDeviceObjectPropertyReference.decode(encoded)
+        assert decoded.property_array_index is None
+        assert decoded.device_identifier is None
+        assert decoded.object_identifier == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
+
+
+class TestBACnetValueSourceDecodeMemoryview:
+    """Branch 1507->1510: data is already a memoryview, skip bytes conversion."""
+
+    def test_decode_with_memoryview_input(self):
+        vs = BACnetValueSource.none_source()
+        encoded = vs.encode()
+        # Pass a memoryview directly (not bytes) to skip the isinstance check
+        decoded, offset = BACnetValueSource.decode(memoryview(encoded))
+        assert decoded.choice == 0
+        assert offset == len(encoded)
+
+
+class TestBACnetValueSourceDecodePrimitiveNull:
+    """Branch 1518->1520: context tag [0] that is NOT opening (primitive null).
+
+    When choice 0 is encoded as a primitive context tag instead of
+    opening+closing, the is_opening check is False and we skip directly
+    to returning none_source().
+    """
+
+    def test_decode_primitive_context_null(self):
+        # Craft a primitive context tag [0] with length 0
+        # Byte: (tag_number << 4) | (cls << 3) | lvt = (0 << 4) | (1 << 3) | 0 = 0x08
+        data = bytes([0x08])
+        decoded, offset = BACnetValueSource.decode(data)
+        assert decoded.choice == 0
+        assert offset == 1

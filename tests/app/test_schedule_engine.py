@@ -736,3 +736,148 @@ class TestApplyValueErrors:
         engine._evaluate_schedule(sched, today, datetime.time(10, 0), db)
         # Valid target should still be written despite the missing one
         assert target.read_property(PropertyIdentifier.PRESENT_VALUE) == 72.0
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage tests for schedule_engine.py
+# ---------------------------------------------------------------------------
+
+
+class TestExceptionScheduleDateRange:
+    """Exception schedule with a date-range period (BACnetDateRange inside BACnetCalendarEntry)."""
+
+    def test_exception_with_date_range_period(self):
+        """Exception using BACnetCalendarEntry choice=1 (dateRange) overrides weekly."""
+        db = _FakeObjectDB()
+        sched = ScheduleObject(1)
+
+        # Weekly schedule: Monday 08:00 → 72.0
+        monday_entries = [
+            BACnetTimeValue(time=BACnetTime(8, 0, 0, 0), value=72.0),
+        ]
+        weekly = [monday_entries] + [[] for _ in range(6)]
+        sched._properties[PropertyIdentifier.WEEKLY_SCHEDULE] = weekly
+        sched._properties[PropertyIdentifier.SCHEDULE_DEFAULT] = 60.0
+
+        # Exception with a date-range period: Feb 1 through Feb 28
+        exc = BACnetSpecialEvent(
+            period=BACnetCalendarEntry(
+                choice=1,
+                value=BACnetDateRange(
+                    start_date=BACnetDate(2024, 2, 1, 0xFF),
+                    end_date=BACnetDate(2024, 2, 28, 0xFF),
+                ),
+            ),
+            list_of_time_values=(BACnetTimeValue(time=BACnetTime(0, 0, 0, 0), value=55.0),),
+            event_priority=1,
+        )
+        sched._properties[PropertyIdentifier.EXCEPTION_SCHEDULE] = [exc]
+        db.add(sched)
+
+        engine = _make_engine(db)
+        today = datetime.date(2024, 2, 12)  # Monday, within range
+        engine._evaluate_schedule(sched, today, datetime.time(10, 0), db)
+        assert sched.read_property(PropertyIdentifier.PRESENT_VALUE) == 55.0
+
+
+class TestApplyValueNoTargets:
+    """_apply_value with no target references."""
+
+    def test_apply_value_no_targets(self):
+        """Schedule with empty LIST_OF_OBJECT_PROPERTY_REFERENCES writes present_value only."""
+        db = _FakeObjectDB()
+        sched = ScheduleObject(1)
+        sched._properties[PropertyIdentifier.SCHEDULE_DEFAULT] = 72.0
+        sched._properties[PropertyIdentifier.PRIORITY_FOR_WRITING] = 10
+        sched._properties[PropertyIdentifier.LIST_OF_OBJECT_PROPERTY_REFERENCES] = []
+        db.add(sched)
+
+        engine = _make_engine(db)
+        today = datetime.date(2024, 2, 12)
+        engine._evaluate_schedule(sched, today, datetime.time(10, 0), db)
+
+        # present_value should still be set
+        assert sched.read_property(PropertyIdentifier.PRESENT_VALUE) == 72.0
+
+
+class TestWeeklyScheduleEmptyDay:
+    """A day in the weekly schedule that has no time-value entries."""
+
+    def test_empty_day_entries_falls_to_default(self):
+        """Day with no time-value entries falls through to schedule_default.
+
+        This covers the branch where _resolve_time_values returns _SENTINEL
+        for an empty day, and the weekly_schedule path falls through to
+        schedule_default (line 148->156 branch).
+        """
+        db = _FakeObjectDB()
+        sched = ScheduleObject(1)
+
+        # Monday (index 0) has no entries; other days also empty
+        weekly = [[] for _ in range(7)]
+        sched._properties[PropertyIdentifier.WEEKLY_SCHEDULE] = weekly
+        sched._properties[PropertyIdentifier.SCHEDULE_DEFAULT] = 65.0
+        db.add(sched)
+
+        engine = _make_engine(db)
+        today = datetime.date(2024, 2, 12)  # Monday
+        engine._evaluate_schedule(sched, today, datetime.time(10, 0), db)
+        assert sched.read_property(PropertyIdentifier.PRESENT_VALUE) == 65.0
+
+
+class TestExceptionScheduleTimeNotReached:
+    """Exception matches but time values are all after current time => SENTINEL."""
+
+    def test_exception_time_not_yet_reached(self):
+        """Exception matches today but all time values are in the future.
+
+        This covers the branch 196->175 where _resolve_time_values returns
+        _SENTINEL for a matched exception, so the loop continues.
+        """
+        db = _FakeObjectDB()
+        sched = ScheduleObject(1)
+        sched._properties[PropertyIdentifier.SCHEDULE_DEFAULT] = 60.0
+
+        # Exception matches today, but time values are at 23:59
+        exc = BACnetSpecialEvent(
+            period=BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 0xFF, 0xFF, 0xFF)),
+            list_of_time_values=(BACnetTimeValue(time=BACnetTime(23, 59, 0, 0), value=99.0),),
+            event_priority=1,
+        )
+        sched._properties[PropertyIdentifier.EXCEPTION_SCHEDULE] = [exc]
+        db.add(sched)
+
+        engine = _make_engine(db)
+        today = datetime.date(2024, 2, 12)
+        # At 06:00, the 23:59 time value hasn't been reached yet
+        engine._evaluate_schedule(sched, today, datetime.time(6, 0), db)
+        # Falls to schedule_default since exception time not reached
+        assert sched.read_property(PropertyIdentifier.PRESENT_VALUE) == 60.0
+
+
+class TestWeeklyScheduleShortList:
+    """Weekly schedule with fewer than 7 days (line 148->156 branch)."""
+
+    def test_weekly_schedule_short_list(self):
+        """Weekly schedule with fewer than 7 entries causes day_index out of range.
+
+        This covers the branch 148->156 where day_index >= len(weekly_schedule).
+        """
+        db = _FakeObjectDB()
+        sched = ScheduleObject(1)
+
+        # Only 3 days of entries (Mon, Tue, Wed), but today is Thursday (index 3)
+        weekly = [
+            [BACnetTimeValue(time=BACnetTime(8, 0, 0, 0), value=72.0)],
+            [BACnetTimeValue(time=BACnetTime(8, 0, 0, 0), value=73.0)],
+            [BACnetTimeValue(time=BACnetTime(8, 0, 0, 0), value=74.0)],
+        ]
+        sched._properties[PropertyIdentifier.WEEKLY_SCHEDULE] = weekly
+        sched._properties[PropertyIdentifier.SCHEDULE_DEFAULT] = 60.0
+        db.add(sched)
+
+        engine = _make_engine(db)
+        # Thursday = isoweekday() 4, day_index = 3, but weekly only has 3 entries (0-2)
+        today = datetime.date(2024, 2, 15)  # Thursday
+        engine._evaluate_schedule(sched, today, datetime.time(10, 0), db)
+        assert sched.read_property(PropertyIdentifier.PRESENT_VALUE) == 60.0

@@ -547,3 +547,103 @@ class TestApplicationTaggedConvenience:
         tag, _offset = decode_tag(result, 0)
         assert tag.number == 8
         assert tag.cls == TagClass.APPLICATION
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests
+# ---------------------------------------------------------------------------
+
+
+class TestBitStringDataTooShort:
+    """Lines 306-307: decode_bit_string raises on empty data."""
+
+    def test_empty_data_raises(self):
+        with pytest.raises(ValueError, match="BitString data too short"):
+            decode_bit_string(b"")
+
+    def test_memoryview_empty_raises(self):
+        with pytest.raises(ValueError, match="BitString data too short"):
+            decode_bit_string(memoryview(b""))
+
+
+class TestDateYearOutOfRange:
+    """Lines 327-328: encode_date raises when year is out of range."""
+
+    def test_year_too_low(self):
+        date = BACnetDate(year=1899, month=1, day=1, day_of_week=1)
+        with pytest.raises(ValueError, match="BACnetDate year must be 1900-2155"):
+            encode_date(date)
+
+    def test_year_too_high(self):
+        date = BACnetDate(year=2156, month=1, day=1, day_of_week=1)
+        with pytest.raises(ValueError, match="BACnetDate year must be 1900-2155"):
+            encode_date(date)
+
+    def test_year_zero_raises(self):
+        date = BACnetDate(year=0, month=1, day=1, day_of_week=1)
+        with pytest.raises(ValueError, match="BACnetDate year must be 1900-2155"):
+            encode_date(date)
+
+
+class TestDateDataTooShort:
+    """Lines 342-343: decode_date raises when data is < 4 bytes."""
+
+    def test_empty_data(self):
+        with pytest.raises(ValueError, match="Date data too short"):
+            decode_date(b"")
+
+    def test_three_bytes(self):
+        with pytest.raises(ValueError, match="Date data too short"):
+            decode_date(b"\x7c\x07\x0f")
+
+    def test_one_byte(self):
+        with pytest.raises(ValueError, match="Date data too short"):
+            decode_date(b"\x7c")
+
+
+class TestTimeDataTooShort:
+    """Lines 368-369: decode_time raises when data is < 4 bytes."""
+
+    def test_empty_data(self):
+        with pytest.raises(ValueError, match="Time data too short"):
+            decode_time(b"")
+
+    def test_three_bytes(self):
+        with pytest.raises(ValueError, match="Time data too short"):
+            decode_time(b"\x0e\x1e\x2d")
+
+    def test_one_byte(self):
+        with pytest.raises(ValueError, match="Time data too short"):
+            decode_time(b"\x0e")
+
+
+class TestUnknownApplicationTag:
+    """Lines 750-752: decode_application_value with unknown tag number."""
+
+    def test_tag_number_13_raises(self):
+        from bac_py.encoding.primitives import decode_application_value
+
+        # Application tag 13, class=application(0), length=1
+        # Byte: (13 << 4) | (0 << 3) | 1 = 0xD1
+        data = bytes([0xD1, 0x00])
+        with pytest.raises(ValueError, match="Unknown application tag number"):
+            decode_application_value(data)
+
+    def test_tag_number_14_raises(self):
+        from bac_py.encoding.primitives import decode_application_value
+
+        # Application tag 14, class=application(0), length=1
+        # Byte: (14 << 4) | (0 << 3) | 1 = 0xE1
+        data = bytes([0xE1, 0x00])
+        with pytest.raises(ValueError, match="Unknown application tag number"):
+            decode_application_value(data)
+
+
+class TestUnsupportedValueType:
+    """Line 995: encode_property_value raises for unsupported type."""
+
+    def test_unsupported_type_raises(self):
+        from bac_py.encoding.primitives import encode_property_value
+
+        with pytest.raises(TypeError, match="Cannot encode value of type"):
+            encode_property_value(object())

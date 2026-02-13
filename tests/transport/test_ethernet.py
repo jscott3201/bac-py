@@ -833,3 +833,57 @@ class TestOnReadable:
         transport._socket.recv.side_effect = OSError("read failed")
 
         transport._on_readable()  # Should not raise
+
+
+# ---------------------------------------------------------------------------
+# Coverage: stop() with unsupported socket type (branch 254->264)
+# ---------------------------------------------------------------------------
+
+
+class TestEthernetTransportStopUnsupportedSocket:
+    """Branch 254->264: stop() when socket has no close() and is not an int."""
+
+    async def test_stop_with_non_closable_non_int_socket(self):
+        """stop() with socket that has no close() and is not int skips close."""
+        mac = b"\xaa\xbb\xcc\xdd\xee\xff"
+        transport = EthernetTransport("eth0", mac_address=mac)
+        transport._running = True
+
+        # Use an object without close attribute and not an int
+        class FakeSocket:
+            def fileno(self):
+                return 10
+
+        transport._socket = FakeSocket()
+
+        mock_loop = MagicMock()
+        with patch(
+            "bac_py.transport.ethernet.asyncio.get_running_loop",
+            return_value=mock_loop,
+        ):
+            await transport.stop()
+
+        assert transport._running is False
+        assert transport._socket is None
+
+
+# ---------------------------------------------------------------------------
+# Coverage: _send_frame() with unsupported socket type (branch 333->exit)
+# ---------------------------------------------------------------------------
+
+
+class TestSendFrameUnsupportedSocket:
+    """Branch 333->exit: _send_frame when socket has no send() and is not int."""
+
+    def test_send_frame_non_sendable_non_int_socket(self):
+        """_send_frame with socket that has no send() and is not int does nothing."""
+        transport = EthernetTransport("eth0", mac_address=b"\x00" * 6)
+
+        # Use an object without send attribute and not an int
+        class FakeSocket:
+            pass
+
+        transport._socket = FakeSocket()
+
+        # Should not raise -- the frame is silently dropped
+        transport._send_frame(b"\x00" * 60)

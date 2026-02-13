@@ -15,16 +15,16 @@ __all__ = ["Serializer", "deserialize", "get_serializer", "serialize"]
 class Serializer(Protocol):
     """Interface for format-specific serialization backends."""
 
-    def encode(self, data: dict[str, Any]) -> bytes:
+    def encode(self, data: dict[str, Any]) -> bytes:  # pragma: no cover
         """Encode a dict to the target format."""
         ...
 
-    def decode(self, raw: bytes) -> dict[str, Any]:
+    def decode(self, raw: bytes) -> dict[str, Any]:  # pragma: no cover
         """Decode bytes in the target format to a dict."""
         ...
 
     @property
-    def content_type(self) -> str:
+    def content_type(self) -> str:  # pragma: no cover
         """MIME type for the output format (e.g. 'application/json')."""
         ...
 

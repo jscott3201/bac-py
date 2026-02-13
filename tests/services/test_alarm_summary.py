@@ -375,6 +375,48 @@ class TestGetEventInformationACK:
         assert len(decoded.list_of_event_summaries) == 0
         assert decoded.more_events is False
 
+    def test_round_trip_enrollment_filter_skip(self):
+        """Lines 251-260: decode skips enrollmentFilter [1] if present."""
+        # Build a request with all optional filters so the decode path
+        # that skips enrollmentFilter [1] is exercised.
+        # We encode manually: [0] ack filter, [1] enrollment filter (constructed),
+        # [2] event_state, [3] event_type, [4] priority, [5] notification_class
+        from bac_py.encoding.primitives import (
+            encode_application_unsigned,
+            encode_context_enumerated,
+            encode_context_tagged,
+            encode_unsigned,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = bytearray()
+        # [0] acknowledgmentFilter = ALL (0)
+        buf.extend(encode_context_enumerated(0, 0))
+        # [1] enrollmentFilter (constructed, must be skipped by decoder)
+        buf.extend(encode_opening_tag(1))
+        # Put some dummy data inside the constructed block
+        buf.extend(encode_application_unsigned(42))
+        buf.extend(encode_closing_tag(1))
+        # [2] eventStateFilter = OFFNORMAL (2)
+        buf.extend(encode_context_enumerated(2, int(EventState.OFFNORMAL)))
+        # [3] eventTypeFilter = CHANGE_OF_VALUE (2)
+        buf.extend(encode_context_enumerated(3, 2))
+        # [4] priority range
+        buf.extend(encode_opening_tag(4))
+        buf.extend(encode_application_unsigned(10))
+        buf.extend(encode_application_unsigned(200))
+        buf.extend(encode_closing_tag(4))
+        # [5] notificationClassFilter
+        buf.extend(encode_context_tagged(5, encode_unsigned(7)))
+
+        decoded = GetEnrollmentSummaryRequest.decode(bytes(buf))
+        assert decoded.acknowledgment_filter == AcknowledgmentFilter.ALL
+        assert decoded.event_state_filter == EventState.OFFNORMAL
+        assert decoded.event_type_filter == EventType.CHANGE_OF_VALUE
+        assert decoded.priority_min == 10
+        assert decoded.priority_max == 200
+        assert decoded.notification_class_filter == 7
+
     def test_round_trip_with_time_timestamps(self):
         """EventSummary with Time-of-day timestamps."""
         from bac_py.types.primitives import BACnetTime
@@ -407,6 +449,31 @@ class TestGetEventInformationACK:
         assert s.notify_type == NotifyType.EVENT
         assert s.event_priorities == (10, 20, 30)
 
+    def test_enrollment_filter_with_nested_opening_tags(self):
+        """Line 256: nested opening tag inside enrollmentFilter increments depth."""
+        from bac_py.encoding.primitives import (
+            encode_application_unsigned,
+            encode_context_enumerated,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = bytearray()
+        # [0] acknowledgmentFilter = ALL (0)
+        buf.extend(encode_context_enumerated(0, 0))
+        # [1] enrollmentFilter (constructed, with nested opening/closing)
+        buf.extend(encode_opening_tag(1))
+        # Nested constructed element inside filter
+        buf.extend(encode_opening_tag(0))
+        buf.extend(encode_application_unsigned(99))
+        buf.extend(encode_closing_tag(0))
+        buf.extend(encode_closing_tag(1))
+        # [2] eventStateFilter = OFFNORMAL (2)
+        buf.extend(encode_context_enumerated(2, int(EventState.OFFNORMAL)))
+
+        decoded = GetEnrollmentSummaryRequest.decode(bytes(buf))
+        assert decoded.acknowledgment_filter == AcknowledgmentFilter.ALL
+        assert decoded.event_state_filter == EventState.OFFNORMAL
+
     def test_round_trip_various_priorities(self):
         """EventSummary with different priorities per transition."""
         summary = EventSummary(
@@ -431,3 +498,68 @@ class TestGetEventInformationACK:
 
         s = decoded.list_of_event_summaries[0]
         assert s.event_priorities == (0, 128, 255)
+
+
+# ---------------------------------------------------------------------------
+# Coverage: alarm_summary.py branch partials 259->253, 537->548
+# ---------------------------------------------------------------------------
+
+
+class TestGetEnrollmentSummaryRequestEnrollmentFilterPrimitiveTags:
+    """Branch 259->253: the while loop in enrollmentFilter skip logic.
+
+    When the enrollment filter contains primitive (non-opening, non-closing)
+    tags, the code advances offset by t.length (line 260). The branch
+    259->253 is the loop-back from line 259 to 253 -- specifically the case
+    where a primitive tag inside the enrollment filter causes offset += t.length.
+    This is already exercised by existing tests with dummy data inside the filter.
+    The untaken direction is the while-loop exiting via the condition
+    (depth > 0 and offset < len(data)) becoming false -- i.e., data ends
+    before the enrollment filter closing tag is found.
+    """
+
+    def test_enrollment_filter_with_only_primitive_tags(self):
+        """Enrollment filter containing only primitive tags (no nesting).
+
+        Exercises the 'elif not t.is_opening and not t.is_closing' branch
+        (line 259) followed by loop-back to 253.
+        """
+        from bac_py.encoding.primitives import (
+            encode_application_unsigned,
+            encode_context_enumerated,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = bytearray()
+        # [0] acknowledgmentFilter = ALL (0)
+        buf.extend(encode_context_enumerated(0, 0))
+        # [1] enrollmentFilter with multiple primitive tags inside
+        buf.extend(encode_opening_tag(1))
+        buf.extend(encode_application_unsigned(1))
+        buf.extend(encode_application_unsigned(2))
+        buf.extend(encode_application_unsigned(3))
+        buf.extend(encode_closing_tag(1))
+
+        decoded = GetEnrollmentSummaryRequest.decode(bytes(buf))
+        assert decoded.acknowledgment_filter == AcknowledgmentFilter.ALL
+        assert decoded.event_state_filter is None
+
+
+class TestGetEventInformationACKEmptySummariesWhileExit:
+    """Branch 537->548: while loop exit in GetEventInformationACK.decode.
+
+    While loop in GetEventInformationACK.decode exits because the first tag
+    read is the closing tag [0], causing a break which jumps to line 548
+    (moreEvents).
+    """
+
+    def test_empty_event_summaries_list(self):
+        """Empty listOfEventSummaries: while loop enters and immediately breaks."""
+        ack = GetEventInformationACK(
+            list_of_event_summaries=[],
+            more_events=True,
+        )
+        encoded = ack.encode()
+        decoded = GetEventInformationACK.decode(encoded)
+        assert len(decoded.list_of_event_summaries) == 0
+        assert decoded.more_events is True

@@ -656,3 +656,249 @@ class TestNewWrapperDelegation:
         root_arg = mock.traverse_hierarchy.call_args[0][1]
         assert addr_arg == addr
         assert root_arg == oid
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests
+# ---------------------------------------------------------------------------
+
+
+class TestClientAppPropertyError:
+    """Test Client.app property raises before start."""
+
+    def test_app_property_raises_before_start(self):
+        """Accessing .app before starting the context manager raises RuntimeError."""
+        client = Client()
+        with pytest.raises(RuntimeError, match="Client not started"):
+            _ = client.app
+
+
+class TestRequireClientEnforcement:
+    """Test _require_client raises when not started."""
+
+    def test_require_client_raises_when_none(self):
+        """_require_client raises RuntimeError when _client is None."""
+        client = Client()
+        with pytest.raises(RuntimeError, match="Client not started"):
+            client._require_client()
+
+    async def test_write_before_start_raises(self):
+        """Calling write before start raises RuntimeError."""
+        client = Client()
+        with pytest.raises(RuntimeError, match="Client not started"):
+            await client.write("192.168.1.100", "av,1", "pv", 72.5)
+
+
+class TestBBMDRegistration:
+    """Test BBMD foreign device registration during context manager."""
+
+    @patch("bac_py.client.BACnetApplication")
+    async def test_bbmd_registration_on_start(self, mock_app_cls):
+        """Context manager registers as foreign device when bbmd_address is set."""
+        mock_app = MagicMock()
+        mock_app.start = AsyncMock()
+        mock_app.stop = AsyncMock()
+        mock_app.register_as_foreign_device = AsyncMock()
+        mock_app.wait_for_registration = AsyncMock()
+        mock_app_cls.return_value = mock_app
+
+        async with Client(bbmd_address="192.168.1.1", bbmd_ttl=120):
+            pass
+
+        mock_app.register_as_foreign_device.assert_called_once_with("192.168.1.1", 120)
+        mock_app.wait_for_registration.assert_called_once_with(timeout=10.0)
+        mock_app.stop.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage tests for Client
+# ---------------------------------------------------------------------------
+
+
+def _make_protocol_mock_client():
+    """Create a Client with a mock BACnetClient for protocol delegation tests."""
+    client = Client.__new__(Client)
+    client._config = DeviceConfig(instance_number=999)
+    client._app = MagicMock()
+    client._bbmd_address = None
+    client._bbmd_ttl = 60
+    mock = MagicMock()
+    # Make async methods return coroutines
+    mock.write_multiple = AsyncMock()
+    mock.get_object_list = AsyncMock(return_value=[])
+    mock.subscribe_cov_ex = AsyncMock()
+    mock.unsubscribe_cov_ex = AsyncMock()
+    mock.read_property = AsyncMock(return_value=MagicMock())
+    mock.write_property = AsyncMock()
+    mock.read_property_multiple = AsyncMock(return_value=MagicMock())
+    mock.write_property_multiple = AsyncMock()
+    mock.read_range = AsyncMock(return_value=MagicMock())
+    mock.create_object = AsyncMock(return_value=ObjectIdentifier(ObjectType.ANALOG_VALUE, 1))
+    mock.read_bdt = AsyncMock(return_value=[])
+    mock.read_fdt = AsyncMock(return_value=[])
+    mock.write_bdt = AsyncMock()
+    mock.delete_fdt_entry = AsyncMock()
+    mock.who_is_router_to_network = AsyncMock(return_value=[])
+    client._client = mock
+    return client, mock
+
+
+class TestClientAexit:
+    """Test __aexit__ early return when app is None."""
+
+    async def test_aexit_no_app(self):
+        """__aexit__ with _app=None should be a no-op."""
+        client = Client.__new__(Client)
+        client._app = None
+        client._client = None
+        client._bbmd_address = None
+        client._bbmd_ttl = 60
+        # Should not raise
+        await client.__aexit__(None, None, None)
+        assert client._app is None
+
+
+class TestClientProtocolDelegation:
+    """Test Client protocol-level delegation methods."""
+
+    async def test_write_multiple_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        await client.write_multiple("10.0.0.1", {"av,1": {"pv": 42.0}})
+        mock.write_multiple.assert_called_once()
+
+    async def test_get_object_list_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        result = await client.get_object_list("10.0.0.1", 1)
+        mock.get_object_list.assert_called_once()
+        assert result == []
+
+    async def test_subscribe_cov_ex_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        await client.subscribe_cov_ex("10.0.0.1", "av,1", 1)
+        mock.subscribe_cov_ex.assert_called_once()
+
+    async def test_unsubscribe_cov_ex_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        await client.unsubscribe_cov_ex("10.0.0.1", "av,1", 1)
+        mock.unsubscribe_cov_ex.assert_called_once()
+
+    async def test_read_property_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        addr = parse_address("10.0.0.1")
+        oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        await client.read_property(addr, oid, PropertyIdentifier.PRESENT_VALUE)
+        mock.read_property.assert_called_once()
+
+    async def test_write_property_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        addr = parse_address("10.0.0.1")
+        oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        await client.write_property(
+            addr, oid, PropertyIdentifier.PRESENT_VALUE, b"\x44\x42\x28\x00\x00"
+        )
+        mock.write_property.assert_called_once()
+
+    async def test_read_property_multiple_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        addr = parse_address("10.0.0.1")
+        await client.read_property_multiple(addr, [])
+        mock.read_property_multiple.assert_called_once()
+
+    async def test_write_property_multiple_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        addr = parse_address("10.0.0.1")
+        await client.write_property_multiple(addr, [])
+        mock.write_property_multiple.assert_called_once()
+
+    async def test_read_range_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        addr = parse_address("10.0.0.1")
+        oid = ObjectIdentifier(ObjectType.TREND_LOG, 1)
+        await client.read_range(addr, oid, PropertyIdentifier.LOG_BUFFER)
+        mock.read_range.assert_called_once()
+
+
+class TestClientCreateObjectStringType:
+    """Test Client.create_object with string object_type resolution."""
+
+    async def test_create_object_with_string_type(self):
+        client, mock = _make_protocol_mock_client()
+        result = await client.create_object("10.0.0.1", object_type="analog-value")
+        mock.create_object.assert_called_once()
+        assert result == ObjectIdentifier(ObjectType.ANALOG_VALUE, 1)
+
+    async def test_create_object_with_object_identifier(self):
+        client, mock = _make_protocol_mock_client()
+        await client.create_object("10.0.0.1", object_identifier="av,1")
+        mock.create_object.assert_called_once()
+
+    async def test_create_object_with_object_type_enum(self):
+        """create_object with ObjectType enum resolves correctly (branch 1035->1039)."""
+        client, mock = _make_protocol_mock_client()
+        result = await client.create_object("10.0.0.1", object_type=ObjectType.ANALOG_VALUE)
+        mock.create_object.assert_called_once()
+        call_args = mock.create_object.call_args
+        # The resolved_type should be ObjectType.ANALOG_VALUE (not None)
+        assert call_args[0][1] == ObjectType.ANALOG_VALUE
+        assert result == ObjectIdentifier(ObjectType.ANALOG_VALUE, 1)
+
+
+class TestClientForeignDeviceAPI:
+    """Test foreign device API delegations."""
+
+    async def test_register_as_foreign_device(self):
+        client, _mock = _make_protocol_mock_client()
+        client._app.register_as_foreign_device = AsyncMock()
+        await client.register_as_foreign_device("10.0.0.1", 120)
+        client._app.register_as_foreign_device.assert_called_once_with("10.0.0.1", 120)
+
+    async def test_deregister_foreign_device(self):
+        client, _mock = _make_protocol_mock_client()
+        client._app.deregister_foreign_device = AsyncMock()
+        await client.deregister_foreign_device()
+        client._app.deregister_foreign_device.assert_called_once()
+
+    def test_is_foreign_device(self):
+        client, _mock = _make_protocol_mock_client()
+        client._app.is_foreign_device = True
+        assert client.is_foreign_device is True
+
+    def test_foreign_device_status(self):
+        client, _mock = _make_protocol_mock_client()
+        client._app.foreign_device_status = None
+        assert client.foreign_device_status is None
+
+    async def test_wait_for_registration(self):
+        client, _mock = _make_protocol_mock_client()
+        client._app.wait_for_registration = AsyncMock(return_value=True)
+        result = await client.wait_for_registration(timeout=5.0)
+        assert result is True
+
+    async def test_read_bdt_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        await client.read_bdt("10.0.0.1")
+        mock.read_bdt.assert_called_once()
+
+    async def test_read_fdt_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        await client.read_fdt("10.0.0.1")
+        mock.read_fdt.assert_called_once()
+
+    async def test_write_bdt_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        await client.write_bdt("10.0.0.1", [])
+        mock.write_bdt.assert_called_once()
+
+    async def test_delete_fdt_entry_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        await client.delete_fdt_entry("10.0.0.1", "10.0.0.2")
+        mock.delete_fdt_entry.assert_called_once()
+
+
+class TestClientWhoIsRouterDelegation:
+    """Test who_is_router_to_network delegation."""
+
+    async def test_who_is_router_to_network_delegates(self):
+        client, mock = _make_protocol_mock_client()
+        await client.who_is_router_to_network(network=100)
+        mock.who_is_router_to_network.assert_called_once()

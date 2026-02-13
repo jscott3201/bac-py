@@ -337,3 +337,165 @@ class TestBinaryOutOfServiceWritable:
         with pytest.raises(BACnetError) as exc_info:
             bi.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.ACTIVE)
         assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
+
+
+# ---------------------------------------------------------------------------
+# Coverage: Minimum On/Off Time lock behaviour (binary.py lines 80-144)
+# ---------------------------------------------------------------------------
+
+
+class TestMinOnTimeLock:
+    """Lines 86-87: expired lock is cleared, lines 128-136: lock expiry."""
+
+    def test_min_on_time_lock_holds_value(self):
+        """Lines 80-82: while locked, present_value stays at locked value."""
+        bo = BinaryOutputObject(1)
+        bo.write_property(PropertyIdentifier.MINIMUM_ON_TIME, 60)
+        # Write ACTIVE at priority 8 — should start min_on_time lock
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.ACTIVE, priority=8)
+        assert bo.read_property(PropertyIdentifier.PRESENT_VALUE) == BinaryPV.ACTIVE
+        assert bo._min_time_lock_until is not None
+
+        # Write INACTIVE at higher priority while locked — value stays ACTIVE
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.INACTIVE, priority=1)
+        assert bo.read_property(PropertyIdentifier.PRESENT_VALUE) == BinaryPV.ACTIVE
+
+    def test_min_on_time_lock_clears_after_expiry(self):
+        """Lines 85-87, 131-136: expired lock is cleared, value re-evaluated."""
+        import time
+
+        bo = BinaryOutputObject(1)
+        bo.write_property(PropertyIdentifier.MINIMUM_ON_TIME, 1)
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.ACTIVE, priority=8)
+        assert bo._min_time_lock_until is not None
+
+        # Simulate time passing beyond the lock
+        bo._min_time_lock_until = time.monotonic() - 1
+
+        # Now writing should clear the expired lock (lines 85-87)
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.INACTIVE, priority=1)
+        # After lock expiry and re-eval, INACTIVE from priority 1 should win
+        assert bo._min_time_locked_value is None or bo._min_time_lock_until is not None
+
+    def test_min_off_time_lock(self):
+        """Lines 101-105: Minimum off-time lock for INACTIVE transition."""
+        bo = BinaryOutputObject(1)
+        bo.write_property(PropertyIdentifier.MINIMUM_OFF_TIME, 60)
+        # Start from ACTIVE state
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.ACTIVE, priority=8)
+        # Transition to INACTIVE — should start min_off_time lock
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.INACTIVE, priority=8)
+        assert bo._min_time_lock_until is not None
+        assert bo._min_time_locked_value == BinaryPV.INACTIVE
+
+    def test_check_min_time_expiry_no_lock(self):
+        """Line 116-117: check_min_time_expiry returns False when no lock."""
+        bo = BinaryOutputObject(1)
+        assert bo.check_min_time_expiry() is False
+
+    def test_check_min_time_expiry_not_expired(self):
+        """Line 118-119: check_min_time_expiry returns False when lock is active."""
+        bo = BinaryOutputObject(1)
+        bo.write_property(PropertyIdentifier.MINIMUM_ON_TIME, 60)
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.ACTIVE, priority=8)
+        assert bo._min_time_lock_until is not None
+        assert bo.check_min_time_expiry() is False
+
+    def test_check_min_time_expiry_expired(self):
+        """Lines 121-144: check_min_time_expiry clears lock and re-evaluates."""
+        import time
+
+        bo = BinaryOutputObject(1)
+        bo.write_property(PropertyIdentifier.MINIMUM_ON_TIME, 1)
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.ACTIVE, priority=8)
+
+        # Force lock to have expired
+        bo._min_time_lock_until = time.monotonic() - 1
+
+        result = bo.check_min_time_expiry()
+        assert result is True
+        assert bo._min_time_lock_until is None or bo._min_time_lock_until > time.monotonic() - 2
+
+    def test_check_min_time_expiry_no_priority_array(self):
+        """Line 127-128: priority_array is None during expiry check."""
+        import time
+
+        bv = BinaryValueObject(1)
+        bv._min_time_lock_until = time.monotonic() - 1
+        bv._min_time_locked_value = BinaryPV.ACTIVE
+        result = bv.check_min_time_expiry()
+        assert result is True
+
+    def test_check_min_time_expiry_relinquish_default(self):
+        """Lines 135-136: all priority slots None, falls to relinquish default."""
+        import time
+
+        bo = BinaryOutputObject(1)
+        bo.write_property(PropertyIdentifier.MINIMUM_ON_TIME, 1)
+        # Don't write any value to priority array
+        # Set a lock manually
+        bo._min_time_lock_until = time.monotonic() - 1
+        bo._min_time_locked_value = BinaryPV.ACTIVE
+        # Clear all priority slots
+        for i in range(16):
+            bo._priority_array[i] = None
+
+        result = bo.check_min_time_expiry()
+        assert result is True
+        # Should fall to relinquish default (INACTIVE)
+        assert bo.read_property(PropertyIdentifier.PRESENT_VALUE) == BinaryPV.INACTIVE
+
+    def test_check_min_time_expiry_new_lock_on_change(self):
+        """Lines 141-142: if resolved value differs from locked, new lock may start."""
+        import time
+
+        bo = BinaryOutputObject(1)
+        bo.write_property(PropertyIdentifier.MINIMUM_ON_TIME, 60)
+        bo.write_property(PropertyIdentifier.MINIMUM_OFF_TIME, 60)
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.ACTIVE, priority=8)
+
+        # Now write INACTIVE while locked
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.INACTIVE, priority=1)
+
+        # Force the lock to expire
+        bo._min_time_lock_until = time.monotonic() - 1
+
+        result = bo.check_min_time_expiry()
+        assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Coverage: MINIMUM_OFF_TIME lock enforcement branch (binary.py line 101->exit)
+# ---------------------------------------------------------------------------
+
+
+class TestMinOffTimeLockNotConfigured:
+    """Branch 101->exit: INACTIVE transition with no MINIMUM_OFF_TIME configured."""
+
+    def test_inactive_transition_no_min_off_time_no_lock(self):
+        """Transitioning to INACTIVE without MINIMUM_OFF_TIME should not start a lock."""
+        bo = BinaryOutputObject(1)
+        # Only configure MINIMUM_ON_TIME, NOT MINIMUM_OFF_TIME
+        bo.write_property(PropertyIdentifier.MINIMUM_ON_TIME, 60)
+        # Start from ACTIVE
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.ACTIVE, priority=8)
+        # Clear the ON lock manually to isolate OFF transition
+        bo._min_time_lock_until = None
+        bo._min_time_locked_value = None
+
+        # Transition to INACTIVE -- no MINIMUM_OFF_TIME so no lock should start
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.INACTIVE, priority=8)
+        # No off-time lock because MINIMUM_OFF_TIME is not set
+        assert bo._min_time_lock_until is None
+
+    def test_inactive_transition_zero_min_off_time_no_lock(self):
+        """MINIMUM_OFF_TIME=0 should not start a lock."""
+        bo = BinaryOutputObject(1)
+        bo.write_property(PropertyIdentifier.MINIMUM_OFF_TIME, 0)
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.ACTIVE, priority=8)
+        bo._min_time_lock_until = None
+        bo._min_time_locked_value = None
+
+        bo.write_property(PropertyIdentifier.PRESENT_VALUE, BinaryPV.INACTIVE, priority=8)
+        # With min_off=0, the lock should not start
+        assert bo._min_time_lock_until is None

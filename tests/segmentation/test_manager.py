@@ -513,3 +513,78 @@ class TestSequenceWrapping:
                 assert action in (SegmentAction.SEND_ACK, SegmentAction.CONTINUE)
 
         assert receiver.reassemble() == original
+
+
+# --- Coverage gap tests: lines 238-243 ---
+
+
+class TestSegmentSenderSeqFallback:
+    def test_seq_to_idx_fallback_unmapped(self):
+        """Lines 238-243: Unmapped seq number falls back to _window_start_idx.
+
+        When no segment index matches the sequence number,
+        _seq_to_idx falls back to the current _window_start_idx.
+        """
+        # Create a sender with a small payload (2 segments)
+        max_payload = compute_max_segment_payload(480, "confirmed_request")
+        sender = SegmentSender.create(
+            payload=bytes(max_payload + 10),
+            invoke_id=1,
+            service_choice=12,
+            max_apdu_length=480,
+            pdu_type="confirmed_request",
+            proposed_window_size=16,
+        )
+        assert sender.total_segments == 2
+
+        # ACK segment 1 to complete
+        sender.handle_segment_ack(1, 16, negative=False)
+        assert sender.is_complete is True
+
+        # Now call _seq_to_idx with a sequence number that doesn't match
+        # any segment index at or above the search start.
+        # _window_start_idx is 2 (past end), search_start = max(0, 2-16) = 0.
+        # Segments are at indices 0 and 1 with seq 0 and 1.
+        # Searching for seq 99 won't match anything -> fallback.
+        result = sender._seq_to_idx(99)
+        assert result == sender._window_start_idx
+
+    def test_complex_ack_header_accounting(self):
+        """ComplexACK segmentation uses less overhead (5 bytes vs 6 for ConfirmedRequest)."""
+        payload_size = 500
+        sender_cr = SegmentSender.create(
+            payload=bytes(payload_size),
+            invoke_id=1,
+            service_choice=12,
+            max_apdu_length=50,
+            pdu_type="confirmed_request",
+            proposed_window_size=16,
+        )
+        sender_ca = SegmentSender.create(
+            payload=bytes(payload_size),
+            invoke_id=1,
+            service_choice=12,
+            max_apdu_length=50,
+            pdu_type="complex_ack",
+            proposed_window_size=16,
+        )
+        # ComplexACK has 1 byte less overhead, so fits more data per segment,
+        # resulting in fewer total segments
+        assert sender_ca.total_segments <= sender_cr.total_segments
+
+    def test_minimum_apdu_payload(self):
+        """Segment with very small max APDU still works, produces many segments."""
+        # Minimum viable: overhead is 6 for confirmed_request, so max_apdu must be > 6
+        sender = SegmentSender.create(
+            payload=bytes(100),
+            invoke_id=1,
+            service_choice=12,
+            max_apdu_length=7,  # Only 1 byte per segment payload
+            pdu_type="confirmed_request",
+            proposed_window_size=16,
+        )
+        assert sender.total_segments == 100  # 100 bytes / 1 byte per segment
+
+        # Verify all data can be reassembled
+        reassembled = b"".join(sender.segments)
+        assert reassembled == bytes(100)

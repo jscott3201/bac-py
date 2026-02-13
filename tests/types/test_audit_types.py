@@ -744,3 +744,110 @@ class TestAuditLogRecordSerialization:
         assert decoded.notification.target_array_index == 3
         assert decoded.notification.target_value == b"\x44\x42\xc8\x00\x00"
         assert decoded.notification.result_error_class == 2
+
+
+# ---------------------------------------------------------------------------
+# Coverage: branch partials for timestamp loop bodies and property ref
+# ---------------------------------------------------------------------------
+
+
+class TestTimestampLoopMultiplePrimitiveTags:
+    """Branches 187->181 and 199->193: loop continuation with multiple primitive tags.
+
+    These branches exercise the loop body in the source/target-timestamp
+    decoders where primitive tags (not opening/closing) advance the offset
+    and loop back to the while condition.
+    """
+
+    def test_source_timestamp_with_multiple_inner_tags(self):
+        """Multiple primitive tags inside [0] source-timestamp exercises loop back."""
+        buf = bytearray()
+        # [0] opening — source-timestamp
+        buf.extend(encode_opening_tag(0))
+        # First primitive tag with 2 bytes
+        buf.extend(encode_tag(0, TagClass.CONTEXT, 2))
+        buf.extend(b"\x01\x02")
+        # Second primitive tag with 1 byte — causes another iteration (187->181)
+        buf.extend(encode_tag(1, TagClass.CONTEXT, 1))
+        buf.extend(b"\x03")
+        # [0] closing
+        buf.extend(encode_closing_tag(0))
+        # [4] operation
+        buf.extend(encode_context_enumerated(4, AuditOperation.WRITE))
+
+        decoded = BACnetAuditNotification.decode(bytes(buf))
+        assert decoded.operation == AuditOperation.WRITE
+
+    def test_target_timestamp_with_multiple_inner_tags(self):
+        """Multiple primitive tags inside [1] target-timestamp exercises loop back."""
+        buf = bytearray()
+        # [1] opening — target-timestamp
+        buf.extend(encode_opening_tag(1))
+        # First primitive tag
+        buf.extend(encode_tag(0, TagClass.CONTEXT, 2))
+        buf.extend(b"\x04\x05")
+        # Second primitive tag — causes another iteration (199->193)
+        buf.extend(encode_tag(1, TagClass.CONTEXT, 2))
+        buf.extend(b"\x06\x07")
+        # Third primitive tag — yet another iteration
+        buf.extend(encode_tag(2, TagClass.CONTEXT, 1))
+        buf.extend(b"\x08")
+        # [1] closing
+        buf.extend(encode_closing_tag(1))
+        # [4] operation
+        buf.extend(encode_context_enumerated(4, AuditOperation.READ))
+
+        decoded = BACnetAuditNotification.decode(bytes(buf))
+        assert decoded.operation == AuditOperation.READ
+
+
+class TestPropertyRefPeekClosingTag:
+    """Branch 279->290: peek at tag after property-identifier sees closing tag.
+
+    When [12] target-property has only [0] property-identifier and the
+    next tag is the [12] closing tag, the peek condition at line 281-284
+    is False (closing tag, not context tag [1]), so we skip array-index.
+    """
+
+    def test_property_ref_closing_tag_immediately_after_property_id(self):
+        """The immediate next tag after property_id is closing [12]."""
+        buf = bytearray()
+        # [4] operation
+        buf.extend(encode_context_enumerated(4, AuditOperation.WRITE))
+        # [12] target-property
+        buf.extend(encode_opening_tag(12))
+        buf.extend(encode_context_unsigned(0, 85))  # property-identifier = 85
+        # Closing [12] immediately — no array index
+        buf.extend(encode_closing_tag(12))
+
+        decoded = BACnetAuditNotification.decode(bytes(buf))
+        assert decoded.target_property == 85
+        assert decoded.target_array_index is None
+
+
+class TestUnknownTagSkipMultiplePrimitiveTags:
+    """Branch 354->348: unknown constructed tag with multiple primitive inner tags.
+
+    The skip-loop body processes multiple primitive tags, each advancing
+    offset and looping back (354->348).
+    """
+
+    def test_unknown_constructed_with_multiple_primitives(self):
+        """Unknown tag [25] with 3 primitive inner tags — full loop exercise."""
+        buf = bytearray()
+        # Unknown constructed [25]
+        buf.extend(encode_opening_tag(25))
+        # Multiple primitive inner tags
+        buf.extend(encode_tag(0, TagClass.CONTEXT, 2))
+        buf.extend(b"\xaa\xbb")
+        buf.extend(encode_tag(1, TagClass.CONTEXT, 1))
+        buf.extend(b"\xcc")
+        buf.extend(encode_tag(2, TagClass.CONTEXT, 3))
+        buf.extend(b"\xdd\xee\xff")
+        # Closing [25]
+        buf.extend(encode_closing_tag(25))
+        # [4] operation
+        buf.extend(encode_context_enumerated(4, AuditOperation.GENERAL))
+
+        decoded = BACnetAuditNotification.decode(bytes(buf))
+        assert decoded.operation == AuditOperation.GENERAL

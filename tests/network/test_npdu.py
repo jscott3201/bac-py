@@ -370,3 +370,148 @@ class TestVariableMacLengths:
         slen_offset = 5 + dst_mac_len + 2  # after DADR + 2 bytes SNET
         assert encoded[slen_offset] == src_mac_len
         assert encoded[slen_offset + 1 : slen_offset + 1 + src_mac_len] == src_mac
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage tests for encode/decode validation edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestEncodeDestinationNetworkMissing:
+    """Test that encoding with destination present but network=None raises."""
+
+    def test_destination_network_none_raises(self):
+        dest = BACnetAddress(mac_address=b"\xaa\xbb\xcc\xdd\xee\xff")
+        assert dest.network is None
+        npdu = NPDU(destination=dest, apdu=b"\x01")
+        with pytest.raises(ValueError, match="Destination network must be set"):
+            encode_npdu(npdu)
+
+
+class TestEncodeSnetZero:
+    """Test that encoding with SNET=0 raises ValueError.
+
+    BACnetAddress.__post_init__ rejects network=0 directly, so we must
+    bypass the dataclass validation by using object.__setattr__.
+    """
+
+    def test_snet_zero_encode_raises(self):
+        # Bypass frozen=True to set network=0
+        fake_src = BACnetAddress.__new__(BACnetAddress)
+        object.__setattr__(fake_src, "network", 0)
+        object.__setattr__(fake_src, "mac_address", b"\x01")
+        npdu = NPDU(source=fake_src, apdu=b"\x01")
+        with pytest.raises(ValueError, match="SNET cannot be 0"):
+            encode_npdu(npdu)
+
+
+class TestEncodeNetworkMessageMissing:
+    """Test that is_network_message=True with message_type=None raises."""
+
+    def test_message_type_none_raises(self):
+        npdu = NPDU(is_network_message=True, message_type=None, network_message_data=b"\x01")
+        with pytest.raises(ValueError, match="message_type must be set"):
+            encode_npdu(npdu)
+
+
+class TestProprietaryNetworkMessage:
+    """Test encoding/decoding of proprietary network messages (type >= 0x80)."""
+
+    def test_encode_proprietary_message(self):
+        npdu = NPDU(
+            is_network_message=True,
+            message_type=0x80,
+            vendor_id=42,
+            network_message_data=b"\xfe\xed",
+        )
+        encoded = encode_npdu(npdu)
+        decoded = decode_npdu(encoded)
+        assert decoded.is_network_message is True
+        assert decoded.message_type == 0x80
+        assert decoded.vendor_id == 42
+        assert decoded.network_message_data == b"\xfe\xed"
+
+    def test_encode_proprietary_message_default_vendor(self):
+        """Proprietary message with vendor_id=None defaults to 0."""
+        npdu = NPDU(
+            is_network_message=True,
+            message_type=0xFF,
+            vendor_id=None,
+            network_message_data=b"\xaa",
+        )
+        encoded = encode_npdu(npdu)
+        decoded = decode_npdu(encoded)
+        assert decoded.message_type == 0xFF
+        assert decoded.vendor_id == 0
+        assert decoded.network_message_data == b"\xaa"
+
+    def test_standard_message_no_vendor_id(self):
+        """Standard message (type < 0x80) should not have vendor_id."""
+        npdu = NPDU(
+            is_network_message=True,
+            message_type=0x00,
+            network_message_data=b"",
+        )
+        encoded = encode_npdu(npdu)
+        decoded = decode_npdu(encoded)
+        assert decoded.vendor_id is None
+
+
+class TestDecodeSourceValidation:
+    """Test decode-time source address validation for SNET=0xFFFF, SNET=0, SLEN=0."""
+
+    def test_decode_snet_ffff_raises(self):
+        """SNET=0xFFFF in incoming data should raise ValueError."""
+        # Build raw bytes manually: version=1, control=0x08 (source present)
+        # SNET=0xFFFF, SLEN=1, SADR=0x01
+        raw = bytes(
+            [
+                0x01,  # version
+                0x08,  # control: source present
+                0xFF,
+                0xFF,  # SNET = 0xFFFF
+                0x01,  # SLEN = 1
+                0x01,  # SADR
+            ]
+        )
+        with pytest.raises(ValueError, match="Source SNET cannot be 0xFFFF"):
+            decode_npdu(raw)
+
+    def test_decode_snet_zero_raises(self):
+        """SNET=0 in incoming data should raise ValueError."""
+        raw = bytes(
+            [
+                0x01,  # version
+                0x08,  # control: source present
+                0x00,
+                0x00,  # SNET = 0
+                0x01,  # SLEN = 1
+                0x01,  # SADR
+            ]
+        )
+        with pytest.raises(ValueError, match="Source SNET cannot be 0"):
+            decode_npdu(raw)
+
+    def test_decode_slen_zero_raises(self):
+        """SLEN=0 with source present should raise ValueError."""
+        raw = bytes(
+            [
+                0x01,  # version
+                0x08,  # control: source present
+                0x00,
+                0x05,  # SNET = 5
+                0x00,  # SLEN = 0
+            ]
+        )
+        with pytest.raises(ValueError, match="Source SLEN cannot be 0"):
+            decode_npdu(raw)
+
+    def test_decode_too_short_raises(self):
+        """Data shorter than 2 bytes should raise ValueError."""
+        with pytest.raises(ValueError, match="NPDU data too short"):
+            decode_npdu(b"\x01")
+
+    def test_decode_wrong_version_raises(self):
+        """Unsupported protocol version should raise ValueError."""
+        with pytest.raises(ValueError, match="Unsupported BACnet protocol version"):
+            decode_npdu(b"\x02\x00")

@@ -887,3 +887,101 @@ class TestEvaluateOutsideTimeWindow:
         )
         engine._evaluate_cycle()
         assert tl.object_identifier not in engine._cov_subscriptions
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests: uncovered branches
+# ---------------------------------------------------------------------------
+
+
+class TestOutsideTimeWindowSkips:
+    """Test outside time window skips logging (branch 140->exit)."""
+
+    def test_polled_outside_time_window_skips(self):
+        """Polled logging outside time window does not record (branch 140->exit)."""
+        db = _FakeObjectDB()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 42.0
+        db.add(ai)
+
+        tl = _make_trendlog(
+            target_oid=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            log_interval=100,
+            logging_type=LoggingType.POLLED,
+        )
+        # Set stop_time in the past (outside time window)
+        tl._properties[PropertyIdentifier.STOP_TIME] = BACnetDateTime(
+            date=BACnetDate(2000, 1, 1, 6),
+            time=BACnetTime(0, 0, 0, 0),
+        )
+        db.add(tl)
+
+        engine = _make_engine(db)
+        engine._last_poll[tl.object_identifier] = 0.0
+        engine._evaluate_cycle()
+
+        buf = tl.read_property(PropertyIdentifier.LOG_BUFFER)
+        assert len(buf) == 0
+
+
+class TestPolledSameSlotSuppression:
+    """Test same slot suppression in polled logging (branch 184->193)."""
+
+    def test_polled_aligned_same_slot_does_not_record(self):
+        """Aligned polled logging in same slot does not record (branch 184->193)."""
+        db = _FakeObjectDB()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 5.0
+        db.add(ai)
+
+        tl = _make_trendlog(
+            target_oid=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            log_interval=360000,  # 1 hour in centiseconds
+        )
+        tl._properties[PropertyIdentifier.ALIGN_INTERVALS] = True
+        tl._properties[PropertyIdentifier.INTERVAL_OFFSET] = 0
+        db.add(tl)
+
+        engine = _make_engine(db)
+        oid = tl.object_identifier
+
+        # Set last_poll to very recent -- same 1-hour slot
+        engine._last_poll[oid] = time.monotonic() - 0.001
+        engine._evaluate_cycle()
+
+        buf = tl.read_property(PropertyIdentifier.LOG_BUFFER)
+        assert len(buf) == 0
+
+
+class TestCOVUnregisterOnDelete:
+    """Test COV callback unregistration on delete (branch 254->257)."""
+
+    def test_unregister_cov_removes_callback(self):
+        """_unregister_cov unregisters the change callback (branch 254->257)."""
+        db = ObjectDatabase()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.PRESENT_VALUE] = 10.0
+        ai._properties[PropertyIdentifier.OUT_OF_SERVICE] = True
+        db.add(ai)
+
+        tl = _make_trendlog(
+            target_oid=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            logging_type=LoggingType.COV,
+        )
+        db.add(tl)
+
+        engine = _make_engine(db)
+        engine._evaluate_cycle()
+        assert tl.object_identifier in engine._cov_subscriptions
+
+        # Ensure the COV callback attribute exists
+        assert hasattr(tl, "_cov_callback")
+
+        # Now unregister
+        engine._unregister_cov(tl)
+        assert tl.object_identifier not in engine._cov_subscriptions
+
+        # After unregistration, property changes should not record
+        ai.write_property(PropertyIdentifier.PRESENT_VALUE, 99.0)
+        buf = tl.read_property(PropertyIdentifier.LOG_BUFFER)
+        assert len(buf) == 0

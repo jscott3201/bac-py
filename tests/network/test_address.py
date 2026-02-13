@@ -694,3 +694,81 @@ class TestAddressStrRoundTrip:
         assert s == "10.1.2.3:12345"
         restored = parse_address(s)
         assert restored == addr
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage tests for address validation edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestEthernetAddressBadMac:
+    """EthernetAddress with wrong MAC length."""
+
+    def test_too_short(self):
+        with pytest.raises(ValueError, match="6 bytes"):
+            EthernetAddress(mac=b"\x01\x02\x03\x04\x05")
+
+    def test_too_long(self):
+        with pytest.raises(ValueError, match="6 bytes"):
+            EthernetAddress(mac=b"\x01\x02\x03\x04\x05\x06\x07")
+
+    def test_empty(self):
+        with pytest.raises(ValueError, match="6 bytes"):
+            EthernetAddress(mac=b"")
+
+    def test_one_byte(self):
+        with pytest.raises(ValueError, match="6 bytes"):
+            EthernetAddress(mac=b"\x01")
+
+
+class TestBACnetAddressNetworkRange:
+    """BACnetAddress network number validation."""
+
+    def test_network_zero_raises(self):
+        with pytest.raises(ValueError, match="Network number must be 1-65534"):
+            BACnetAddress(network=0, mac_address=b"\x01")
+
+    def test_network_negative_raises(self):
+        with pytest.raises(ValueError, match="Network number must be 1-65534"):
+            BACnetAddress(network=-1, mac_address=b"\x01")
+
+    def test_network_65535_is_valid_global_broadcast(self):
+        """0xFFFF (65535) is the special global broadcast value, allowed."""
+        addr = BACnetAddress(network=0xFFFF)
+        assert addr.is_global_broadcast is True
+
+    def test_network_65535_with_mac_allowed(self):
+        addr = BACnetAddress(network=0xFFFF, mac_address=b"\x01")
+        assert addr.network == 0xFFFF
+
+    def test_network_1_valid(self):
+        addr = BACnetAddress(network=1, mac_address=b"\x01")
+        assert addr.network == 1
+
+    def test_network_65534_valid(self):
+        addr = BACnetAddress(network=65534, mac_address=b"\x01")
+        assert addr.network == 65534
+
+
+class TestParseAddressPortRange:
+    """Port number out-of-range validation in parse_address."""
+
+    def test_ipv6_port_out_of_range(self):
+        """IPv6 address with port > 65535 should raise ValueError."""
+        with pytest.raises(ValueError, match="Port number out of range"):
+            parse_address("[::1]:70000")
+
+    def test_ipv4_port_out_of_range(self):
+        """IPv4 address with port > 65535 should raise ValueError."""
+        with pytest.raises(ValueError, match="Port number out of range"):
+            parse_address("192.168.1.1:70000")
+
+    def test_ipv6_port_negative_implicit(self):
+        """Negative port number cannot be parsed (regex won't match negative)."""
+        with pytest.raises(ValueError, match="Cannot parse address"):
+            parse_address("[::1]:-1")
+
+    def test_ipv6_invalid_address(self):
+        """Invalid IPv6 address in brackets should raise ValueError."""
+        with pytest.raises(ValueError, match="Invalid IPv6 address"):
+            parse_address("[not-valid-ipv6]")

@@ -117,3 +117,52 @@ class TestEncodeErrors:
     def test_forwarded_npdu_with_none_originating_address_raises(self):
         with pytest.raises(ValueError, match="Forwarded-NPDU requires originating_address"):
             encode_bvll(BvlcFunction.FORWARDED_NPDU, b"\x01", originating_address=None)
+
+
+# --- Coverage gap tests: lines 73-74, 78-79 ---
+
+
+class TestDecodeBvllEdgeCases:
+    def test_decode_bvll_too_short(self):
+        """Lines 58-60: Data shorter than 4 bytes should raise ValueError."""
+        with pytest.raises(ValueError, match="BVLL data too short"):
+            decode_bvll(b"\x81\x0a")
+
+        with pytest.raises(ValueError, match="BVLL data too short"):
+            decode_bvll(b"\x81")
+
+        with pytest.raises(ValueError, match="BVLL data too short"):
+            decode_bvll(b"")
+
+    def test_decode_bvll_length_mismatch_too_small(self):
+        """Lines 72-74: Declared length < BVLL_HEADER_LENGTH should raise."""
+        # Valid type byte, valid function, but length field declares 3 (less than header=4)
+        bad_data = bytes([0x81, 0x0A, 0x00, 0x03, 0x01])
+        with pytest.raises(ValueError, match="Invalid BVLL length"):
+            decode_bvll(bad_data)
+
+    def test_decode_bvll_length_mismatch_too_large(self):
+        """Lines 72-74: Declared length > actual data length should raise."""
+        # Declare length 100 but only provide 5 bytes total
+        bad_data = bytes([0x81, 0x0A, 0x00, 0x64, 0x01])
+        with pytest.raises(ValueError, match="Invalid BVLL length"):
+            decode_bvll(bad_data)
+
+    def test_decode_bvll_forwarded_npdu_truncated(self):
+        """Lines 77-79: Forwarded-NPDU with length < header + 6 (originating addr) should raise."""
+        # BvlcFunction.FORWARDED_NPDU = 0x04
+        # Build a valid BVLL header for Forwarded-NPDU but with length that's too short
+        # for the 6-byte originating address. Length = 8 (< 4 + 6 = 10)
+        bad_data = bytes([0x81, 0x04, 0x00, 0x08, 0xC0, 0xA8, 0x01, 0x01])
+        with pytest.raises(ValueError, match="Forwarded-NPDU too short"):
+            decode_bvll(bad_data)
+
+    def test_decode_bvll_forwarded_npdu_exactly_minimum(self):
+        """Forwarded-NPDU with exactly minimum length (header + 6) should succeed."""
+        orig = BIPAddress(host="192.168.1.50", port=47808)
+        # Encode a Forwarded-NPDU with empty payload -- minimum valid size
+        encoded = encode_bvll(BvlcFunction.FORWARDED_NPDU, b"", originating_address=orig)
+        decoded = decode_bvll(encoded)
+        assert decoded.function == BvlcFunction.FORWARDED_NPDU
+        assert decoded.data == b""
+        assert decoded.originating_address is not None

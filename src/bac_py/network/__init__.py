@@ -47,4 +47,4 @@ class NetworkSender(Protocol):
             (affects NPDU control flags).
         :param priority: Network priority level for the message.
         """
-        ...
+        ...  # pragma: no cover

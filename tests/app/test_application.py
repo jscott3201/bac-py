@@ -1768,3 +1768,670 @@ class TestCOVAndTaskManagement:
         dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
         # Should not raise
         await app._send_confirmed_cov(b"\x00", dest, 1)
+
+
+# ==================== Section 2: Coverage gap tests ====================
+
+
+class TestDCCEnforcementPaths:
+    """Test DCC (DeviceCommunicationControl) enforcement on request paths."""
+
+    async def test_dcc_disable_blocks_confirmed_request(self):
+        """DCC DISABLE drops confirmed requests (except DCC/Reinitialize)."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE
+
+        # Create a mock transaction
+        txn = MagicMock()
+        txn.invoke_id = 1
+        txn.client_max_apdu_length = 1476
+
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        # ReadProperty (service choice 12) should be blocked by DCC DISABLE
+        await app._dispatch_request(txn, ConfirmedServiceChoice.READ_PROPERTY, b"\x00", source)
+        # No response should be sent (request was dropped)
+        app._network.send.assert_not_called()
+
+    async def test_dcc_disable_allows_dcc_request(self):
+        """DCC DISABLE still allows DeviceCommunicationControl requests."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE
+
+        txn = MagicMock()
+        txn.invoke_id = 1
+        txn.client_max_apdu_length = 1476
+
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        # DCC service should be dispatched even when DISABLE
+        app._service_registry.dispatch_confirmed = AsyncMock(return_value=None)
+        await app._dispatch_request(
+            txn,
+            ConfirmedServiceChoice.DEVICE_COMMUNICATION_CONTROL,
+            b"\x00",
+            source,
+        )
+        # Response should be sent (not blocked)
+        app._network.send.assert_called_once()
+
+    async def test_dcc_disable_initiation_blocks_outbound_unconfirmed(self):
+        """DCC DISABLE_INITIATION suppresses outbound unconfirmed requests."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE_INITIATION
+
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        # Should silently return without sending
+        app.unconfirmed_request(
+            destination=dest,
+            service_choice=UnconfirmedServiceChoice.I_AM,
+            service_data=b"\x00",
+        )
+        app._network.send.assert_not_called()
+
+    async def test_dcc_disable_blocks_outbound_unconfirmed(self):
+        """DCC DISABLE suppresses outbound unconfirmed requests."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE
+
+        dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        # Should silently return without sending
+        app.unconfirmed_request(
+            destination=dest,
+            service_choice=UnconfirmedServiceChoice.I_AM,
+            service_data=b"\x00",
+        )
+        app._network.send.assert_not_called()
+
+    async def test_dcc_disable_drops_inbound_unconfirmed(self):
+        """DCC DISABLE drops incoming unconfirmed requests."""
+        from bac_py.encoding.apdu import UnconfirmedRequestPDU
+
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE
+
+        pdu = UnconfirmedRequestPDU(
+            service_choice=UnconfirmedServiceChoice.WHO_IS,
+            service_request=b"\x00",
+        )
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        app._service_registry.dispatch_unconfirmed = AsyncMock()
+
+        await app._handle_unconfirmed_request(pdu, source)
+        # Should NOT be dispatched
+        app._service_registry.dispatch_unconfirmed.assert_not_called()
+
+    async def test_dcc_disable_initiation_drops_non_whois_unconfirmed(self):
+        """DCC DISABLE_INITIATION drops non-Who-Is unconfirmed requests."""
+        from bac_py.encoding.apdu import UnconfirmedRequestPDU
+
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE_INITIATION
+
+        pdu = UnconfirmedRequestPDU(
+            service_choice=UnconfirmedServiceChoice.I_AM,
+            service_request=b"\x00",
+        )
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        app._service_registry.dispatch_unconfirmed = AsyncMock()
+
+        await app._handle_unconfirmed_request(pdu, source)
+        # I-AM should be blocked under DISABLE_INITIATION
+        app._service_registry.dispatch_unconfirmed.assert_not_called()
+
+
+class TestDCCTimerExpiry:
+    """Test DCC timer auto-re-enable functionality."""
+
+    async def test_dcc_timer_expired_re_enables(self):
+        """_dcc_timer_expired re-enables communication."""
+        app = _make_started_app()
+        app._dcc_state = EnableDisable.DISABLE
+        app._dcc_timer = MagicMock()
+
+        app._dcc_timer_expired()
+
+        assert app._dcc_state == EnableDisable.ENABLE
+        assert app._dcc_timer is None
+
+    async def test_set_dcc_state_with_duration(self):
+        """set_dcc_state with duration schedules auto-re-enable timer."""
+        app = _make_started_app()
+
+        app.set_dcc_state(EnableDisable.DISABLE, duration=1)
+        assert app._dcc_state == EnableDisable.DISABLE
+        assert app._dcc_timer is not None
+
+        # Clean up the timer
+        app._dcc_timer.cancel()
+        app._dcc_timer = None
+
+    async def test_set_dcc_state_cancels_previous_timer(self):
+        """set_dcc_state cancels any existing timer before setting new state."""
+        app = _make_started_app()
+        old_timer = MagicMock()
+        app._dcc_timer = old_timer
+
+        app.set_dcc_state(EnableDisable.ENABLE)
+
+        old_timer.cancel.assert_called_once()
+        assert app._dcc_state == EnableDisable.ENABLE
+        assert app._dcc_timer is None
+
+
+class TestDeviceInfoCachePaths:
+    """Test I-Am caching for max APDU size per Clause 19.4."""
+
+    async def test_handle_i_am_for_cache_populates(self):
+        """_handle_i_am_for_cache stores device info from I-Am."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        iam = IAmRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 42),
+            max_apdu_length=480,
+            segmentation_supported=Segmentation.BOTH,
+            vendor_id=7,
+        )
+        await app._handle_i_am_for_cache(UnconfirmedServiceChoice.I_AM, iam.encode(), source)
+
+        info = app._device_info_cache.get(source)
+        assert info is not None
+        assert info.max_apdu_length == 480
+        assert info.segmentation_supported == int(Segmentation.BOTH)
+
+    async def test_handle_i_am_for_cache_decode_error(self):
+        """_handle_i_am_for_cache handles decode errors gracefully."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        # Malformed data should not raise
+        await app._handle_i_am_for_cache(UnconfirmedServiceChoice.I_AM, b"\xff\xff", source)
+        assert source not in app._device_info_cache
+
+    async def test_confirmed_request_uses_cached_max_apdu(self):
+        """confirmed_request constrains APDU size using cached device info."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        # Populate cache with a device that has smaller max APDU
+        app._device_info_cache[source] = DeviceInfo(
+            max_apdu_length=480,
+            segmentation_supported=int(Segmentation.BOTH),
+        )
+
+        await app.confirmed_request(
+            destination=source,
+            service_choice=ConfirmedServiceChoice.READ_PROPERTY,
+            service_data=b"\x00",
+        )
+
+        # Verify send_request was called with max_apdu_override=480
+        call_kwargs = app._client_tsm.send_request.call_args
+        assert call_kwargs.kwargs.get("max_apdu_override") == 480
+
+    def test_get_device_info_returns_cached(self):
+        """get_device_info returns cached info or None."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        assert app.get_device_info(source) is None
+
+        app._device_info_cache[source] = DeviceInfo(
+            max_apdu_length=480,
+            segmentation_supported=0,
+        )
+        info = app.get_device_info(source)
+        assert info is not None
+        assert info.max_apdu_length == 480
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage tests for BACnetApplication
+# ---------------------------------------------------------------------------
+
+
+class TestApplicationStartError:
+    """Test start() error when neither router nor network is available."""
+
+    async def test_start_runtime_error_no_network(self):
+        """start() raises RuntimeError when neither router nor network init (lines 302-303)."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+
+        # Patch the start methods to not actually create network/router
+        with patch.object(app, "_start_non_router_mode", new=AsyncMock()):
+            # After _start_non_router_mode, _network is still None
+            app._network = None
+            app._router = None
+            with pytest.raises(RuntimeError, match="Neither router nor network"):
+                await app.start()
+
+
+class TestApplicationStopBranches:
+    """Test stop() cleanup branches (lines 396-432)."""
+
+    async def test_stop_cleans_up_event_engine(self):
+        """stop() shuts down event engine."""
+        app = _make_started_app()
+        mock_engine = MagicMock()
+        mock_engine.stop = AsyncMock()
+        app._event_engine = mock_engine
+        app._cov_manager = None
+        app._dcc_timer = None
+        app._transport = MagicMock()
+        app._transport.stop = AsyncMock()
+
+        await app.stop()
+        mock_engine.stop.assert_called_once()
+        assert app._event_engine is None
+
+    async def test_stop_shuts_down_cov_manager(self):
+        """stop() calls cov_manager.shutdown()."""
+        app = _make_started_app()
+        mock_cov = MagicMock()
+        app._cov_manager = mock_cov
+        app._event_engine = None
+        app._dcc_timer = None
+        app._transport = MagicMock()
+        app._transport.stop = AsyncMock()
+
+        await app.stop()
+        mock_cov.shutdown.assert_called_once()
+        assert app._cov_manager is None
+
+    async def test_stop_cancels_dcc_timer(self):
+        """stop() cancels DCC timer."""
+        app = _make_started_app()
+        mock_timer = MagicMock()
+        app._dcc_timer = mock_timer
+        app._event_engine = None
+        app._cov_manager = None
+        app._transport = MagicMock()
+        app._transport.stop = AsyncMock()
+
+        await app.stop()
+        mock_timer.cancel.assert_called_once()
+        assert app._dcc_timer is None
+
+    async def test_stop_cancels_client_transactions(self):
+        """stop() cancels pending client transactions."""
+        app = _make_started_app()
+        mock_future = MagicMock()
+        mock_future.done.return_value = False
+        mock_txn = MagicMock()
+        mock_txn.future = mock_future
+        app._client_tsm.active_transactions.return_value = [mock_txn]
+        app._event_engine = None
+        app._cov_manager = None
+        app._dcc_timer = None
+        app._transport = MagicMock()
+        app._transport.stop = AsyncMock()
+
+        await app.stop()
+        mock_future.cancel.assert_called_once()
+
+    async def test_stop_router_mode(self):
+        """stop() calls router.stop() in router mode."""
+        app = _make_started_app()
+        mock_router = MagicMock()
+        mock_router.stop = AsyncMock()
+        app._router = mock_router
+        app._transport = None
+        app._event_engine = None
+        app._cov_manager = None
+        app._dcc_timer = None
+
+        await app.stop()
+        mock_router.stop.assert_called_once()
+
+
+class TestApplicationRunMethod:
+    """Test run() method (lines 438-441)."""
+
+    async def test_run_starts_and_stops(self):
+        """run() starts the app and blocks until stop."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app.start = AsyncMock()
+        app.stop = AsyncMock()
+        app._stop_event = asyncio.Event()
+
+        # Set the stop event after a short delay
+        async def set_stop():
+            await asyncio.sleep(0.01)
+            app._stop_event.set()
+
+        task = asyncio.create_task(app.run())
+        stop_task = asyncio.create_task(set_stop())
+
+        await task
+        await stop_task
+        app.start.assert_called_once()
+        app.stop.assert_called_once()
+
+
+class TestAPDUDispatchWithoutClientTSM:
+    """Test _on_apdu_received dispatch paths when client_tsm is None."""
+
+    def test_segmented_complex_ack_no_client_tsm(self):
+        """Segmented ComplexACK without client_tsm is a no-op (lines 859-860)."""
+        app = _make_started_app()
+        app._client_tsm = None
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        pdu = ComplexAckPDU(
+            segmented=True,
+            more_follows=True,
+            invoke_id=1,
+            sequence_number=0,
+            proposed_window_size=2,
+            service_choice=12,
+            service_ack=b"\xaa",
+        )
+        apdu_bytes = encode_apdu(pdu)
+        # Should not crash
+        app._on_apdu_received(apdu_bytes, source)
+
+    def test_error_pdu_no_client_tsm(self):
+        """ErrorPDU without client_tsm is a no-op (lines 867-868)."""
+        app = _make_started_app()
+        app._client_tsm = None
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        from bac_py.types.enums import ErrorClass, ErrorCode
+
+        pdu = ErrorPDU(
+            invoke_id=1,
+            service_choice=12,
+            error_class=ErrorClass.OBJECT,
+            error_code=ErrorCode.UNKNOWN_OBJECT,
+        )
+        apdu_bytes = encode_apdu(pdu)
+        app._on_apdu_received(apdu_bytes, source)
+
+    def test_reject_pdu_no_client_tsm(self):
+        """RejectPDU without client_tsm is a no-op (lines 878-879)."""
+        app = _make_started_app()
+        app._client_tsm = None
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        pdu = RejectPDU(
+            invoke_id=1,
+            reject_reason=RejectReason.UNRECOGNIZED_SERVICE,
+        )
+        apdu_bytes = encode_apdu(pdu)
+        app._on_apdu_received(apdu_bytes, source)
+
+    def test_abort_pdu_no_client_tsm(self):
+        """AbortPDU without client_tsm is a no-op (lines 883-884)."""
+        app = _make_started_app()
+        app._client_tsm = None
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        pdu = AbortPDU(
+            sent_by_server=True,
+            invoke_id=1,
+            abort_reason=AbortReason.OTHER,
+        )
+        apdu_bytes = encode_apdu(pdu)
+        app._on_apdu_received(apdu_bytes, source)
+
+    def test_segment_ack_server_no_client_tsm(self):
+        """SegmentACK (sent_by_server=True) without client_tsm is a no-op (lines 891-892)."""
+        from bac_py.encoding.apdu import SegmentAckPDU
+
+        app = _make_started_app()
+        app._client_tsm = None
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        pdu = SegmentAckPDU(
+            negative_ack=False,
+            sent_by_server=True,
+            invoke_id=1,
+            sequence_number=0,
+            actual_window_size=2,
+        )
+        apdu_bytes = encode_apdu(pdu)
+        app._on_apdu_received(apdu_bytes, source)
+
+    def test_segment_ack_client_no_server_tsm(self):
+        """SegmentACK (sent_by_server=False) without server_tsm is a no-op (lines 895-896)."""
+        from bac_py.encoding.apdu import SegmentAckPDU
+
+        app = _make_started_app()
+        app._server_tsm = None
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        pdu = SegmentAckPDU(
+            negative_ack=False,
+            sent_by_server=False,
+            invoke_id=1,
+            sequence_number=0,
+            actual_window_size=2,
+        )
+        apdu_bytes = encode_apdu(pdu)
+        app._on_apdu_received(apdu_bytes, source)
+
+
+class TestHandleSegmentedRequestDispatch:
+    """Test _handle_segmented_request with service_data dispatch (lines 911-914)."""
+
+    async def test_segmented_request_dispatches_when_complete(self):
+        """_handle_segmented_request dispatches when service_data is not None (line 914)."""
+        app = _make_started_app()
+        txn = MagicMock()
+        app._server_tsm.receive_confirmed_request.return_value = (txn, b"\x01\x02")
+
+        pdu = MagicMock(spec=ConfirmedRequestPDU)
+        pdu.service_choice = 12
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        # Mock _spawn_task to avoid asyncio.create_task needing a real loop
+        app._spawn_task = MagicMock()
+        app._handle_segmented_request(pdu, source)
+        app._spawn_task.assert_called_once()
+
+    async def test_segmented_request_no_dispatch_when_data_none(self):
+        """_handle_segmented_request does NOT dispatch when service_data is None."""
+        app = _make_started_app()
+        txn = MagicMock()
+        app._server_tsm.receive_confirmed_request.return_value = (txn, None)
+
+        pdu = MagicMock(spec=ConfirmedRequestPDU)
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        app._spawn_task = MagicMock()
+        app._handle_segmented_request(pdu, source)
+        app._spawn_task.assert_not_called()
+
+
+# ==================== Coverage gap tests: uncovered lines/branches ====================
+
+
+class TestRouterBBMDConfig:
+    """Test BBMD config attach during router setup (line 369)."""
+
+    async def test_router_port_with_bbmd_config(self):
+        """Router port with bbmd_config calls transport.attach_bbmd."""
+        from bac_py.app.application import BBMDConfig
+
+        bbmd_cfg = BBMDConfig(bdt_entries=[])
+        router_cfg = DeviceConfig(
+            instance_number=1,
+            router_config=RouterConfig(
+                ports=[
+                    RouterPortConfig(port_id=1, network_number=100, port=0, bbmd_config=bbmd_cfg),
+                ],
+                application_port_id=1,
+            ),
+        )
+        app = BACnetApplication(router_cfg)
+
+        mock_t = _make_mock_transport()
+        mock_t.attach_bbmd = AsyncMock()
+
+        with (
+            patch(
+                "bac_py.app.application.BIPTransport",
+                return_value=mock_t,
+            ),
+            patch("bac_py.app.application.NetworkRouter") as mock_router_cls,
+        ):
+            mock_router_instance = MagicMock()
+            mock_router_instance.start = AsyncMock()
+            mock_router_instance.stop = AsyncMock()
+            mock_router_cls.return_value = mock_router_instance
+
+            await app.start()
+            try:
+                mock_t.attach_bbmd.assert_called_once_with(None)
+            finally:
+                await app.stop()
+
+
+class TestAPDUIsInstanceGuards:
+    """Test PDU type isinstance guards in _on_apdu_received (lines 843-888).
+
+    These guards return early if decode_apdu returns a type that doesn't match
+    the PDU type nibble. We mock decode_apdu to return mismatched types.
+    """
+
+    def _make_apdu_bytes(self, pdu_type_nibble: int) -> bytes:
+        """Create minimal APDU bytes with the given PDU type nibble."""
+        # Byte 0: PDU type nibble in upper 4 bits, flags in lower 4 bits
+        # Add enough padding bytes to prevent decode errors before our mock kicks in
+        return bytes([pdu_type_nibble << 4, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00])
+
+    def test_confirmed_request_isinstance_guard(self):
+        """ConfirmedRequest type but decode returns wrong type (line 843-844)."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        with patch("bac_py.app.application.decode_apdu", return_value=MagicMock()):
+            # PDU type 0 = CONFIRMED_REQUEST but decode returns non-ConfirmedRequestPDU
+            app._on_apdu_received(self._make_apdu_bytes(0), source)
+        # Should return early without crashing; no TSM calls
+        app._server_tsm.receive_confirmed_request.assert_not_called()
+
+    def test_simple_ack_isinstance_guard(self):
+        """SimpleAck type but decode returns wrong type (line 852-853)."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        with patch("bac_py.app.application.decode_apdu", return_value=MagicMock()):
+            app._on_apdu_received(self._make_apdu_bytes(2), source)
+        app._client_tsm.handle_simple_ack.assert_not_called()
+
+    def test_complex_ack_isinstance_guard(self):
+        """ComplexAck type but decode returns wrong type (line 857-858)."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        with patch("bac_py.app.application.decode_apdu", return_value=MagicMock()):
+            app._on_apdu_received(self._make_apdu_bytes(3), source)
+        app._client_tsm.handle_complex_ack.assert_not_called()
+        app._client_tsm.handle_segmented_complex_ack.assert_not_called()
+
+    def test_error_isinstance_guard(self):
+        """Error type but decode returns wrong type (line 866-867)."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        with patch("bac_py.app.application.decode_apdu", return_value=MagicMock()):
+            app._on_apdu_received(self._make_apdu_bytes(5), source)
+        app._client_tsm.handle_error.assert_not_called()
+
+    def test_reject_isinstance_guard(self):
+        """Reject type but decode returns wrong type (line 877-878)."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        with patch("bac_py.app.application.decode_apdu", return_value=MagicMock()):
+            app._on_apdu_received(self._make_apdu_bytes(6), source)
+        app._client_tsm.handle_reject.assert_not_called()
+
+    def test_abort_isinstance_guard(self):
+        """Abort type but decode returns wrong type (line 882-883)."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        with patch("bac_py.app.application.decode_apdu", return_value=MagicMock()):
+            app._on_apdu_received(self._make_apdu_bytes(7), source)
+        app._client_tsm.handle_abort.assert_not_called()
+
+    def test_segment_ack_isinstance_guard(self):
+        """SegmentAck type but decode returns wrong type (line 887-888)."""
+        app = _make_started_app()
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        with patch("bac_py.app.application.decode_apdu", return_value=MagicMock()):
+            app._on_apdu_received(self._make_apdu_bytes(4), source)
+        app._client_tsm.handle_segment_ack.assert_not_called()
+        app._server_tsm.handle_segment_ack_for_response.assert_not_called()
+
+
+class TestStopBranchPartials:
+    """Test shutdown branch partials: 411->416, 413->412, 429->432, 438->441."""
+
+    async def test_stop_client_tsm_with_done_future(self):
+        """stop() skips cancelling already-done futures (branch 413->412)."""
+        app = _make_started_app()
+        mock_future = MagicMock()
+        mock_future.done.return_value = True  # Already done
+        mock_txn = MagicMock()
+        mock_txn.future = mock_future
+        app._client_tsm.active_transactions.return_value = [mock_txn]
+        app._event_engine = None
+        app._cov_manager = None
+        app._dcc_timer = None
+        app._transport = MagicMock()
+        app._transport.stop = AsyncMock()
+
+        await app.stop()
+        mock_future.cancel.assert_not_called()
+
+    async def test_stop_no_router_no_transport(self):
+        """stop() with neither router nor transport (branch 429->432)."""
+        app = _make_started_app()
+        app._router = None
+        app._transport = None
+        app._event_engine = None
+        app._cov_manager = None
+        app._dcc_timer = None
+        app._client_tsm = None
+
+        # Should not crash
+        await app.stop()
+        assert app._running is False
+
+    async def test_run_with_no_stop_event(self):
+        """run() with _stop_event=None skips wait (branch 438->441)."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        app.start = AsyncMock()
+        app.stop = AsyncMock()
+        app._stop_event = None
+
+        await app.run()
+        app.start.assert_called_once()
+        app.stop.assert_called_once()
+
+
+class TestConfirmedRequestDispatchLine933:
+    """Test _handle_confirmed_request dispatches to _dispatch_request (line 933)."""
+
+    async def test_handle_confirmed_request_dispatches(self):
+        """When TSM returns (txn, service_data), _dispatch_request is called."""
+        app = _make_started_app()
+        txn = MagicMock()
+        txn.invoke_id = 1
+        txn.client_max_apdu_length = 1476
+        app._server_tsm.receive_confirmed_request.return_value = (txn, b"\x01\x02")
+
+        pdu = MagicMock(spec=ConfirmedRequestPDU)
+        pdu.service_choice = 12
+        pdu.segmented = False
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        app._service_registry.dispatch_confirmed = AsyncMock(return_value=None)
+        await app._handle_confirmed_request(pdu, source)
+        # Should have sent a SimpleAck response
+        app._network.send.assert_called_once()

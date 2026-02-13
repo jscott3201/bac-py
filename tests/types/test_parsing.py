@@ -202,3 +202,32 @@ class TestParsePropertyIdentifier:
         for alias, expected_prop in PROPERTY_ALIASES.items():
             result = parse_property_identifier(alias)
             assert result == expected_prop
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests for error branches
+# ---------------------------------------------------------------------------
+
+
+class TestParseObjectIdentifierTypeErrors:
+    def test_invalid_input_type_raises(self):
+        """parse_object_identifier with invalid type raises ValueError."""
+        with pytest.raises(ValueError, match="Cannot parse object identifier from"):
+            parse_object_identifier(12345)  # type: ignore[arg-type]
+
+    def test_tuple_with_invalid_type_part_raises(self):
+        """parse_object_identifier tuple with non-str/int/ObjectType type_part raises."""
+        with pytest.raises(ValueError, match="Cannot parse object type from"):
+            parse_object_identifier((3.14, 1))  # type: ignore[arg-type]
+
+
+class TestParsePropertyIdentifierTypeErrors:
+    def test_invalid_input_type_raises(self):
+        """parse_property_identifier with invalid type raises ValueError."""
+        with pytest.raises(ValueError, match="Cannot parse property identifier from"):
+            parse_property_identifier([1, 2, 3])  # type: ignore[arg-type]
+
+    def test_none_input_raises(self):
+        """parse_property_identifier with None raises ValueError."""
+        with pytest.raises(ValueError, match="Cannot parse property identifier from"):
+            parse_property_identifier(None)  # type: ignore[arg-type]

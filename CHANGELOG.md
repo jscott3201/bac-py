@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] - 2026-02-13
+
+### Added
+
+- **Test coverage improvements** -- Added ~640 new unit tests covering encoding
+  edge cases, network layer validation, event engine branches, application
+  lifecycle, server handler error paths, object model operations, transport
+  frame validation, conformance PICS generation, segmentation accounting,
+  service decode branch partials, and type system optional-field paths.
+  Coverage improved from 95% (472 uncovered lines) to 99% (15 uncovered lines).
+  Total test count increased from 5,061 to 5,701.
+
+### Fixed
+
+- **Protocol stub coverage exclusions** -- Added `# pragma: no cover` to
+  `TransportPort`, `Serializer`, and `NetworkSender` protocol class stubs
+  (`transport/port.py`, `serialization/__init__.py`, `network/__init__.py`)
+  since abstract method bodies (`...`) are untestable by design.
+
 ## [1.2.1] - 2026-02-12
 
 ### Fixed

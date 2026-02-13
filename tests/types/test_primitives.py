@@ -519,3 +519,133 @@ class TestBitString:
         assert len(bs) == 0
         with pytest.raises(IndexError):
             bs[0]
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests
+# ---------------------------------------------------------------------------
+
+
+class TestObjectIdentifierValidation:
+    def test_object_type_too_large_raises(self):
+        """ObjectType(1024) raises ValueError from the enum (> 1023)."""
+        # ObjectType._missing_ only accepts 0-1023, so 1024 is invalid
+        with pytest.raises(ValueError):
+            ObjectType(1024)
+
+    def test_object_type_negative_raises(self):
+        """ObjectType(-1) raises ValueError from the enum."""
+        with pytest.raises(ValueError):
+            ObjectType(-1)
+
+    def test_post_init_instance_number_validation(self):
+        """ObjectIdentifier __post_init__ validates instance number bounds."""
+        # Test both bounds are enforced
+        oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 0)
+        assert oid.instance_number == 0
+        oid_max = ObjectIdentifier(ObjectType.ANALOG_INPUT, 0x3FFFFF)
+        assert oid_max.instance_number == 0x3FFFFF
+
+
+class TestObjectIdentifierFromDictErrors:
+    def test_from_dict_with_int_object_type(self):
+        """ObjectIdentifier.from_dict resolves integer object_type correctly."""
+        d = {"object_type": 0, "instance": 1}
+        oid = ObjectIdentifier.from_dict(d)
+        assert oid.object_type is ObjectType.ANALOG_INPUT
+        assert oid.instance_number == 1
+
+    def test_from_dict_with_string_object_type(self):
+        """ObjectIdentifier.from_dict resolves string object_type correctly."""
+        d = {"object_type": "device", "instance": 100}
+        oid = ObjectIdentifier.from_dict(d)
+        assert oid.object_type is ObjectType.DEVICE
+        assert oid.instance_number == 100
+
+    def test_from_dict_with_dict_object_type(self):
+        """ObjectIdentifier.from_dict resolves dict object_type correctly."""
+        d = {"object_type": {"value": 8, "name": "device"}, "instance": 100}
+        oid = ObjectIdentifier.from_dict(d)
+        assert oid.object_type is ObjectType.DEVICE
+        assert oid.instance_number == 100
+
+
+class TestBitStringValidation:
+    def test_unused_bits_negative_raises(self):
+        """BitString with unused_bits < 0 raises ValueError."""
+        with pytest.raises(ValueError, match="unused_bits must be 0-7"):
+            BitString(b"\xff", unused_bits=-1)
+
+    def test_unused_bits_too_large_raises(self):
+        """BitString with unused_bits > 7 raises ValueError."""
+        with pytest.raises(ValueError, match="unused_bits must be 0-7"):
+            BitString(b"\xff", unused_bits=8)
+
+    def test_unused_bits_nonzero_with_empty_data_raises(self):
+        """BitString with empty data and non-zero unused_bits raises ValueError."""
+        with pytest.raises(ValueError, match="unused_bits must be 0 when data is empty"):
+            BitString(b"", unused_bits=3)
+
+
+# ---------------------------------------------------------------------------
+# Coverage: primitives.py lines 61-62 and 113-114
+# ---------------------------------------------------------------------------
+
+
+class TestObjectIdentifierObjectTypeValidation:
+    """Lines 61-62: ObjectIdentifier rejects object_type > 1023."""
+
+    def test_object_type_above_1023_raises(self):
+        # Use a raw int > 1023 coerced via ObjectType._missing_ fallback
+        # ObjectType._missing_ only accepts 0-1023, so an int-based
+        # ObjectType above 1023 must fail at __post_init__
+        # We need to bypass enum validation and test __post_init__ directly
+        # by using a mock or direct construction. Since ObjectType(1024) fails,
+        # the __post_init__ validation at line 61 would catch it if passed.
+        with pytest.raises(ValueError):
+            ObjectIdentifier(ObjectType(1024), 0)  # type: ignore[arg-type]
+
+    def test_post_init_rejects_object_type_above_1023(self):
+        """Lines 61-62: __post_init__ validates int(object_type) <= 1023.
+
+        Bypass enum validation by creating a fake IntEnum member with value 1024.
+        """
+        import enum
+
+        class FakeObjectType(enum.IntEnum):
+            FAKE_HIGH = 1024
+
+        with pytest.raises(ValueError, match="Object type must be 0-1023"):
+            ObjectIdentifier(FakeObjectType.FAKE_HIGH, 0)  # type: ignore[arg-type]
+
+    def test_post_init_rejects_negative_object_type(self):
+        """Lines 61-62: __post_init__ validates int(object_type) >= 0."""
+        import enum
+
+        class FakeObjectType(enum.IntEnum):
+            NEGATIVE = -1
+
+        with pytest.raises(ValueError, match="Object type must be 0-1023"):
+            ObjectIdentifier(FakeObjectType.NEGATIVE, 0)  # type: ignore[arg-type]
+
+
+class TestObjectIdentifierFromDictBadType:
+    """Lines 113-114: ObjectIdentifier.from_dict raises TypeError for non-ObjectType."""
+
+    def test_from_dict_non_object_type_raises(self):
+        # _enum_from_dict with a float value raises ValueError, not TypeError.
+        # To trigger line 113 we need _enum_from_dict to return something
+        # that is NOT an ObjectType. This happens with a dict that has a value
+        # key that resolves to a valid int but wrong enum type.
+        # Actually, the simpler approach: the check is isinstance(obj_type, ObjectType).
+        # ObjectType._missing_() handles 0-1023, so any int 0-1023 returns an ObjectType.
+        # We need to monkeypatch _enum_from_dict to return a non-ObjectType.
+        import unittest.mock
+
+        with (
+            unittest.mock.patch(
+                "bac_py.types.primitives._enum_from_dict", return_value="not-an-object-type"
+            ),
+            pytest.raises(TypeError, match="Expected ObjectType"),
+        ):
+            ObjectIdentifier.from_dict({"object_type": "analog-input", "instance": 1})

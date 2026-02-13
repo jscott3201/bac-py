@@ -1844,6 +1844,31 @@ class TestEstablishDisconnectConnection:
         assert len(router.routing_table.get_all_entries()) == count_before
         assert router.routing_table.get_entry(99) is None
 
+
+# ---------------------------------------------------------------------------
+# Coverage: send() defensive guard when dnet is None (router.py line 1371)
+# ---------------------------------------------------------------------------
+
+
+class TestSendDnetNoneGuard:
+    """Line 1371: send() returns early when dnet is None (defensive guard)."""
+
+    def test_send_with_mock_destination_dnet_none(self) -> None:
+        """Use a mock destination that passes is_local/is_global_broadcast but has network=None."""
+        router, t1, t2 = _make_two_port_router()
+
+        mock_dest = MagicMock()
+        mock_dest.is_local = False
+        mock_dest.is_global_broadcast = False
+        mock_dest.network = None
+
+        # Should not raise, just return early
+        router.send(b"\x01", mock_dest)
+        t1.send_unicast.assert_not_called()
+        t1.send_broadcast.assert_not_called()
+        t2.send_unicast.assert_not_called()
+        t2.send_broadcast.assert_not_called()
+
     def test_disconnect_connection_no_routing_table_change(self) -> None:
         """Disconnect-Connection should NOT modify the routing table."""
         router, _t1, _t2 = _make_two_port_router()
@@ -2197,3 +2222,450 @@ class TestMixedDataLinkForwarding:
         assert delivered.source.network == 40
         assert delivered.source.mac_address == _TWO_BYTE_DEVICE
         assert len(delivered.source.mac_address) == 2
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage tests: RoutingTable edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestRoutingTableEdgeCases:
+    """Tests for RoutingTable methods not covered by existing tests."""
+
+    def test_get_port_for_network_port_missing(self):
+        """get_port_for_network returns None when port_id in entry is invalid."""
+        from bac_py.network.router import RoutingTable, RoutingTableEntry
+
+        rt = RoutingTable()
+        port = _make_port(port_id=1, network_number=10)
+        rt.add_port(port)
+        # Manually add an entry for a non-existent port
+        rt._entries[99] = RoutingTableEntry(
+            network_number=99,
+            port_id=42,  # no port with id 42
+        )
+        assert rt.get_port_for_network(99) is None
+
+    def test_update_port_network_number_no_old_entry(self):
+        """update_port_network_number when no old entry exists creates new entry."""
+        from bac_py.network.router import RoutingTable
+
+        rt = RoutingTable()
+        port = _make_port(port_id=1, network_number=10)
+        rt.add_port(port)
+        # Remove the old entry manually to test the else branch
+        del rt._entries[10]
+        rt.update_port_network_number(1, 42)
+        assert port.network_number == 42
+        entry = rt.get_entry(42)
+        assert entry is not None
+        assert entry.port_id == 1
+
+    def test_update_port_network_number_same_network(self):
+        """update_port_network_number with same network is a no-op."""
+        from bac_py.network.router import RoutingTable
+
+        rt = RoutingTable()
+        port = _make_port(port_id=1, network_number=10)
+        rt.add_port(port)
+        rt.update_port_network_number(1, 10)
+        assert port.network_number == 10
+
+    def test_update_port_network_number_conflict(self):
+        """update_port_network_number raises if new network already in table."""
+        from bac_py.network.router import RoutingTable
+
+        rt = RoutingTable()
+        p1 = _make_port(port_id=1, network_number=10)
+        t2 = _make_transport()
+        p2 = _make_port(port_id=2, network_number=20, transport=t2)
+        rt.add_port(p1)
+        rt.add_port(p2)
+        with pytest.raises(ValueError, match="Network 20 already in routing table"):
+            rt.update_port_network_number(1, 20)
+
+    def test_update_port_network_number_unknown_port(self):
+        """update_port_network_number with unknown port is a no-op."""
+        from bac_py.network.router import RoutingTable
+
+        rt = RoutingTable()
+        # Should not raise
+        rt.update_port_network_number(99, 42)
+
+
+class TestMarkBusyCongestion:
+    """Tests for RoutingTable.mark_busy() congestion timer behavior."""
+
+    async def test_mark_busy_with_callback(self):
+        """mark_busy with a timeout callback sets a timer handle."""
+        from bac_py.network.router import RoutingTable
+
+        rt = RoutingTable()
+        port = _make_port(port_id=1, network_number=10)
+        rt.add_port(port)
+        rt.update_route(30, port_id=1, next_router_mac=b"\x01")
+
+        called = []
+        rt.mark_busy(30, lambda: called.append(True), timeout_seconds=0.01)
+
+        entry = rt.get_entry(30)
+        assert entry is not None
+        assert entry.reachability == NetworkReachability.BUSY
+        assert entry.busy_timeout_handle is not None
+
+        # Wait for the timer to fire
+        import asyncio
+
+        await asyncio.sleep(0.05)
+        assert len(called) == 1
+
+    async def test_mark_busy_replaces_existing_timer(self):
+        """Calling mark_busy again cancels the old timer and sets a new one."""
+        from bac_py.network.router import RoutingTable
+
+        rt = RoutingTable()
+        port = _make_port(port_id=1, network_number=10)
+        rt.add_port(port)
+        rt.update_route(30, port_id=1, next_router_mac=b"\x01")
+
+        first_calls = []
+        rt.mark_busy(30, lambda: first_calls.append(True), timeout_seconds=10.0)
+        first_handle = rt.get_entry(30).busy_timeout_handle
+
+        second_calls = []
+        rt.mark_busy(30, lambda: second_calls.append(True), timeout_seconds=0.01)
+
+        # First timer should have been cancelled
+        assert first_handle.cancelled()
+
+        import asyncio
+
+        await asyncio.sleep(0.05)
+        assert len(first_calls) == 0
+        assert len(second_calls) == 1
+
+    def test_mark_busy_no_entry_noop(self):
+        """mark_busy on nonexistent entry does nothing."""
+        from bac_py.network.router import RoutingTable
+
+        rt = RoutingTable()
+        # Should not raise
+        rt.mark_busy(99)
+
+    def test_mark_available_no_entry_noop(self):
+        """mark_available on nonexistent entry does nothing."""
+        from bac_py.network.router import RoutingTable
+
+        rt = RoutingTable()
+        rt.mark_available(99)
+
+    def test_mark_unreachable_no_entry_noop(self):
+        """mark_unreachable on nonexistent entry does nothing."""
+        from bac_py.network.router import RoutingTable
+
+        rt = RoutingTable()
+        rt.mark_unreachable(99)
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: NetworkRouter _handle_network_message edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestHandleNetworkMessageNone:
+    """Test that network message with message_type=None is silently dropped."""
+
+    def test_message_type_none_dropped(self):
+        router, t1, t2 = _make_two_port_router()
+        # Call _handle_network_message directly with message_type=None
+        npdu = NPDU(is_network_message=True, message_type=None)
+        router._handle_network_message(1, npdu, _MAC_DEVICE_A)
+        t1.send_broadcast.assert_not_called()
+        t1.send_unicast.assert_not_called()
+        t2.send_broadcast.assert_not_called()
+        t2.send_unicast.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: _message_type_for with unknown type
+# ---------------------------------------------------------------------------
+
+
+class TestMessageTypeForUnknown:
+    """Test _message_type_for with an unmapped message type."""
+
+    def test_unmapped_type_raises(self):
+        from dataclasses import dataclass
+
+        from bac_py.network.router import _message_type_for
+
+        @dataclass(frozen=True)
+        class _FakeMessage:
+            pass
+
+        with pytest.raises(TypeError, match="No message type mapping"):
+            _message_type_for(_FakeMessage())
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: _send_network_message_on_port with missing port
+# ---------------------------------------------------------------------------
+
+
+class TestSendNetworkMessageOnMissingPort:
+    """Test that _send_network_message_on_port with invalid port is a no-op."""
+
+    def test_missing_port_noop(self):
+        router, t1, t2 = _make_two_port_router()
+        msg = IAmRouterToNetwork(networks=(10,))
+        # Port 99 doesn't exist
+        router._send_network_message_on_port(99, msg, broadcast=True)
+        t1.send_broadcast.assert_not_called()
+        t2.send_broadcast.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: _inject_source with missing port
+# ---------------------------------------------------------------------------
+
+
+class TestInjectSourceMissingPort:
+    """Test _inject_source when the arrival port is not found."""
+
+    def test_inject_source_unknown_port_returns_none(self):
+        router, _, _ = _make_two_port_router()
+        npdu = NPDU(apdu=b"\x01")
+        result = router._inject_source(99, npdu, _MAC_DEVICE_A)
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: Router stop cancels busy timers
+# ---------------------------------------------------------------------------
+
+
+class TestRouterStopCancelsBusyTimers:
+    """Test that router stop() cancels outstanding busy-timeout handles."""
+
+    async def test_stop_cancels_busy_timers(self):
+        router, _t1, _t2 = _make_two_port_router()
+        await router.start()
+
+        # Add a route and mark it busy (which sets a timer)
+        router.routing_table.update_route(30, port_id=1, next_router_mac=_MAC_DEVICE_A)
+        data = _build_router_busy_npdu(networks=(30,))
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        entry = router.routing_table.get_entry(30)
+        assert entry is not None
+        assert entry.busy_timeout_handle is not None
+        handle = entry.busy_timeout_handle
+
+        await router.stop()
+
+        # Timer should have been cancelled
+        assert handle.cancelled()
+        assert entry.busy_timeout_handle is None
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: Reject routed back with SNET via next-hop router
+# ---------------------------------------------------------------------------
+
+
+class TestRejectRoutedBackViaNexHop:
+    """Test that reject is routed back via next-hop router when available."""
+
+    def test_reject_via_next_hop(self):
+        """Reject sent via next-hop router when SNET route uses next_router_mac."""
+        router, _t1, t2 = _make_two_port_router()
+        # Add a remote route to net 30 via a next-hop router on port 2
+        next_hop = b"\x0a\x00\x00\x05\xba\xc0"
+        router.routing_table.update_route(30, port_id=2, next_router_mac=next_hop)
+
+        # NPDU from network 30 device targeting unknown net 99
+        source = BACnetAddress(network=30, mac_address=b"\xaa\xbb")
+        data = _build_routed_npdu(99, b"\x01", source=source)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        # Reject should be sent via the next-hop router on port 2
+        t2.send_unicast.assert_called_once()
+        _, sent_mac = t2.send_unicast.call_args[0]
+        assert sent_mac == next_hop
+
+    def test_reject_via_broadcast_when_empty_sadr(self):
+        """Reject broadcast on destination port when SADR is empty (broadcast source)."""
+        router, _t1, t2 = _make_two_port_router()
+
+        # Build the source manually, bypassing validation for empty MAC
+        fake_source = BACnetAddress.__new__(BACnetAddress)
+        object.__setattr__(fake_source, "network", 20)
+        object.__setattr__(fake_source, "mac_address", b"")
+
+        # Build the NPDU manually since encode would reject SLEN=0
+        # Instead, test the _send_reject_toward_source method directly
+        npdu = NPDU(
+            destination=BACnetAddress(network=99, mac_address=b"\x01"),
+            source=fake_source,
+            apdu=b"\x01",
+            hop_count=255,
+        )
+        router._send_reject_toward_source(
+            1,
+            npdu,
+            _MAC_DEVICE_A,
+            RejectMessageReason.NOT_DIRECTLY_CONNECTED,
+            99,
+        )
+
+        # Route to net 20 is directly connected on port 2, but SADR is empty
+        # so it broadcasts
+        t2.send_broadcast.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: Reject-Message relay with global broadcast destination
+# ---------------------------------------------------------------------------
+
+
+class TestRejectMessageRelay:
+    """Test that Reject-Message with global broadcast destination is forwarded."""
+
+    def test_reject_with_global_broadcast_destination(self):
+        """Reject-Message with DNET=0xFFFF relays as global broadcast."""
+        router, _t1, t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=2, next_router_mac=b"\x01")
+
+        dest = BACnetAddress(network=0xFFFF, mac_address=b"")
+        data = _build_reject_message_npdu(
+            RejectMessageReason.OTHER,
+            30,
+            destination=dest,
+        )
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        # The reject message should be forwarded as global broadcast to port 2
+        t2.send_broadcast.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: Router send() edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestRouterSendEdgeCases:
+    """Test router.send() edge cases."""
+
+    def test_send_application_port_missing_raises(self):
+        """send() raises RuntimeError when application_port_id points to missing port."""
+        p1, p2, _t1, _t2 = _make_router_ports()
+        router = NetworkRouter(
+            [p1, p2],
+            application_port_id=99,  # non-existent port
+            application_callback=MagicMock(),
+        )
+        with pytest.raises(RuntimeError, match="Application port 99 not found"):
+            router.send(b"\x01", BACnetAddress())
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: Router-Available-To-Network with empty list
+# ---------------------------------------------------------------------------
+
+
+class TestRouterAvailableEmptyList:
+    """Test Router-Available with empty network list clears all BUSY entries on port."""
+
+    def test_empty_list_restores_busy_on_port(self):
+        """Empty networks list restores all BUSY networks on the arrival port."""
+        router, _t1, _t2 = _make_two_port_router()
+        router.routing_table.update_route(30, port_id=1, next_router_mac=b"\x01")
+        router.routing_table.update_route(40, port_id=1, next_router_mac=b"\x02")
+        router.routing_table.update_route(50, port_id=2, next_router_mac=b"\x03")
+
+        # Mark some as BUSY
+        e30 = router.routing_table.get_entry(30)
+        e40 = router.routing_table.get_entry(40)
+        e50 = router.routing_table.get_entry(50)
+        e30.reachability = NetworkReachability.BUSY
+        e40.reachability = NetworkReachability.BUSY
+        e50.reachability = NetworkReachability.BUSY
+
+        data = _build_router_available_npdu(networks=())
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+
+        # Only entries on port 1 that were BUSY should be restored
+        assert e30.reachability == NetworkReachability.REACHABLE
+        assert e40.reachability == NetworkReachability.REACHABLE
+        # Entry on port 2 should still be BUSY
+        assert e50.reachability == NetworkReachability.BUSY
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: _send_network_message_on_port broadcast=False, dest_mac=None
+# ---------------------------------------------------------------------------
+
+
+class TestSendNetworkMessageNoBroadcastNoMac:
+    """Test _send_network_message_on_port with broadcast=False and dest_mac=None."""
+
+    def test_no_broadcast_no_mac_noop(self):
+        """broadcast=False and dest_mac=None means nothing is sent."""
+        router, t1, _t2 = _make_two_port_router()
+        msg = IAmRouterToNetwork(networks=(10,))
+        router._send_network_message_on_port(1, msg, broadcast=False, dest_mac=None)
+        t1.send_broadcast.assert_not_called()
+        t1.send_unicast.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: Who-Is-Router with hop count exhausted
+# ---------------------------------------------------------------------------
+
+
+class TestWhoIsRouterHopCountExhausted:
+    """Test Who-Is-Router for unknown DNET with hop_count=1 (exhausted on forward)."""
+
+    def test_who_is_unknown_dnet_hop_count_exhausted(self):
+        """Who-Is-Router for unknown DNET with hop_count=1 is not forwarded."""
+        router, _t1, t2 = _make_two_port_router()
+        # Build Who-Is-Router with hop_count=1 and a destination
+        msg = WhoIsRouterToNetwork(network=99)
+        dest = BACnetAddress(network=0xFFFF, mac_address=b"")
+        npdu = NPDU(
+            is_network_message=True,
+            message_type=NetworkMessageType.WHO_IS_ROUTER_TO_NETWORK,
+            network_message_data=encode_network_message(msg),
+            destination=dest,
+            hop_count=1,
+        )
+        router._on_port_receive(1, encode_npdu(npdu), _MAC_DEVICE_A)
+        # With hop_count=1, _prepare_forwarded_npdu returns None
+        # so nothing is forwarded to port 2
+        t2.send_broadcast.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: Who-Is-Router wildcard with no reachable networks
+# ---------------------------------------------------------------------------
+
+
+class TestWhoIsRouterWildcardNoNetworks:
+    """Test wildcard Who-Is-Router when no reachable networks exist for the arrival port."""
+
+    def test_wildcard_single_port_no_response(self):
+        """Single-port router: wildcard Who-Is produces no I-Am (nothing to exclude)."""
+        t1 = _make_transport(local_mac=_MAC_PORT1)
+        p1 = RouterPort(
+            port_id=1,
+            network_number=10,
+            transport=t1,
+            mac_address=_MAC_PORT1,
+            max_npdu_length=1497,
+        )
+        router = NetworkRouter([p1])
+        data = _build_who_is_router_npdu(network=None)
+        router._on_port_receive(1, data, _MAC_DEVICE_A)
+        # Only one port, so all reachable networks are on port 1 itself --
+        # exclude_port=1 leaves nothing.
+        t1.send_broadcast.assert_not_called()

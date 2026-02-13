@@ -1824,3 +1824,452 @@ class TestCOVSecondaryIndices:
 
         # Clean up timers
         cov.shutdown()
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests
+# ---------------------------------------------------------------------------
+
+
+class TestCOVIncrementThreshold:
+    """Test cov_increment threshold logic in _should_notify_property."""
+
+    def test_cov_increment_suppresses_small_change(self):
+        """Property change smaller than cov_increment does NOT trigger notification."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        # Subscribe with cov_increment=5.0
+        request = _make_prop_request(obj_id, cov_increment=5.0)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        app.unconfirmed_request.reset_mock()
+        app.send_confirmed_cov_notification.reset_mock()
+
+        # Set initial value
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 50.0
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+        app.unconfirmed_request.reset_mock()
+
+        # Small change (delta=2 < increment=5) should NOT trigger
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 52.0
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+        app.unconfirmed_request.assert_not_called()
+
+    def test_cov_increment_triggers_large_change(self):
+        """Property change >= cov_increment triggers notification."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        # Subscribe with cov_increment=5.0
+        request = _make_prop_request(obj_id, cov_increment=5.0)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        app.unconfirmed_request.reset_mock()
+        app.send_confirmed_cov_notification.reset_mock()
+
+        # Set initial value
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 50.0
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+        app.unconfirmed_request.reset_mock()
+
+        # Large change (delta=10 >= increment=5) should trigger
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 60.0
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+        app.unconfirmed_request.assert_called_once()
+
+    def test_cov_increment_zero_any_change_triggers(self):
+        """With cov_increment=0, any change triggers notification."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        # Subscribe with cov_increment=0.0
+        request = _make_prop_request(obj_id, cov_increment=0.0)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        app.unconfirmed_request.reset_mock()
+        app.send_confirmed_cov_notification.reset_mock()
+
+        # Set initial value
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 50.0
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+        app.unconfirmed_request.reset_mock()
+
+        # Tiny change should trigger when increment=0
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 50.001
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+        app.unconfirmed_request.assert_called_once()
+
+    def test_cov_increment_no_change_suppressed(self):
+        """Same value does not trigger even with cov_increment=0."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        request = _make_prop_request(obj_id, cov_increment=0.0)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        app.unconfirmed_request.reset_mock()
+        app.send_confirmed_cov_notification.reset_mock()
+
+        # Set initial value
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 50.0
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+        app.unconfirmed_request.reset_mock()
+
+        # Same value - no notification
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 50.0
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+        app.unconfirmed_request.assert_not_called()
+
+
+class TestPropertySubscriptionConfirmedNotification:
+    """Test property subscription sends confirmed notifications when configured."""
+
+    def test_confirmed_property_notification(self):
+        """Property subscription with confirmed=True sends via confirmed path."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        request = _make_prop_request(obj_id, confirmed=True)
+        cov.subscribe_property(SUBSCRIBER, request, db)
+        app.send_confirmed_cov_notification.reset_mock()
+        app.unconfirmed_request.reset_mock()
+
+        # Set and change value
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 50.0
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+        app.send_confirmed_cov_notification.reset_mock()
+
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 75.0
+        cov.check_and_notify_property(av, PropertyIdentifier.PRESENT_VALUE)
+        app.send_confirmed_cov_notification.assert_called_once()
+        app.unconfirmed_request.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage tests for COV
+# ---------------------------------------------------------------------------
+
+
+class TestCOVPropertySubscriptionReplacement:
+    """Test replacing an existing property subscription cancels old timer."""
+
+    async def test_subscribe_property_replaces_existing_subscription(self):
+        """Re-subscribing to the same property cancels the old expiry timer."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+        obj_id = av.object_identifier
+
+        # First subscription with a lifetime
+        req1 = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=1,
+            issue_confirmed_notifications=False,
+            lifetime=300,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=obj_id,
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                                property_array_index=None,
+                            ),
+                            cov_increment=None,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        cov.subscribe_property_multiple(SUBSCRIBER, req1, db)
+
+        # Grab the old subscription and check it has an expiry handle
+        key = (SUBSCRIBER, 1, obj_id, PropertyIdentifier.PRESENT_VALUE, None)
+        old_sub = cov._property_subscriptions.get(key)
+        assert old_sub is not None
+        # expiry_handle may be None in test mode (no running loop for call_later),
+        # so we set one manually to test the cancel path
+        mock_handle = MagicMock()
+        old_sub.expiry_handle = mock_handle
+
+        # Re-subscribe to the same property -- should cancel the old handle
+        cov.subscribe_property_multiple(SUBSCRIBER, req1, db)
+        mock_handle.cancel.assert_called_once()
+
+
+class TestCOVEncodeStatusFlagsBitString:
+    """Test _encode_status_flags with a raw BitString."""
+
+    def test_encode_status_flags_bitstring_fallback(self):
+        """_encode_status_flags returns a valid encoding for a BitString input."""
+        from bac_py.app.cov import COVManager
+        from bac_py.types.primitives import BitString
+
+        bs = BitString(bytes([0b10100000]), unused_bits=4)
+        result = COVManager._encode_status_flags(bs)
+        # Should be non-empty application-tagged bytes
+        assert isinstance(result, bytes)
+        assert len(result) > 0
+
+
+# ==================== Coverage gap tests: uncovered branches ====================
+
+
+class TestCOVRemoveSubscriptionCleanup:
+    """Test remove_subscription cleanup paths (branches 210->exit, 273->280)."""
+
+    def test_unsubscribe_no_match(self):
+        """Unsubscribe is a no-op when no matching subscription (branch 210->exit)."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        # Remove a subscription that doesn't exist -- should not raise
+        cov.unsubscribe(
+            SUBSCRIBER,
+            process_id=99,
+            monitored_object=av.object_identifier,
+        )
+
+    def test_unsubscribe_cleans_up_empty_bucket(self):
+        """Unsubscribe removes empty obj_bucket from secondary index."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        req = SubscribeCOVRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=av.object_identifier,
+            issue_confirmed_notifications=False,
+            lifetime=0,
+        )
+        cov.subscribe(SUBSCRIBER, req, db)
+
+        # Now remove the subscription
+        cov.unsubscribe(
+            SUBSCRIBER,
+            process_id=1,
+            monitored_object=av.object_identifier,
+        )
+        # The secondary index for this object should be cleaned up
+        assert av.object_identifier not in cov._subs_by_object
+
+    def test_remove_object_subscriptions_cleans_up(self):
+        """remove_object_subscriptions removes all subs for object (branch 273->280)."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        req = SubscribeCOVRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=av.object_identifier,
+            issue_confirmed_notifications=False,
+            lifetime=0,
+        )
+        cov.subscribe(SUBSCRIBER, req, db)
+
+        # Remove all subscriptions for this object
+        cov.remove_object_subscriptions(av.object_identifier)
+        assert (SUBSCRIBER, 1, av.object_identifier) not in cov._subscriptions
+        assert av.object_identifier not in cov._subs_by_object
+
+    def test_remove_object_subscriptions_no_subs(self):
+        """remove_object_subscriptions is a no-op when no subs exist for object."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        # No subscriptions exist -- should not raise
+        cov.remove_object_subscriptions(av.object_identifier)
+
+
+class TestCOVPropertyRemoveCleanup:
+    """Test property subscription removal cleanup (branches 452->exit, 454->exit)."""
+
+    def test_unsubscribe_property_no_match(self):
+        """unsubscribe_property is a no-op when no match (branch 452->exit)."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        # Remove a property subscription that doesn't exist
+        cov.unsubscribe_property(
+            subscriber=SUBSCRIBER,
+            process_id=99,
+            obj_id=av.object_identifier,
+            property_id=PropertyIdentifier.PRESENT_VALUE,
+            array_index=None,
+        )
+
+    def test_unsubscribe_property_cleans_empty_bucket(self):
+        """unsubscribe_property cleans up empty prop_bucket (branch 454->exit)."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        # Subscribe using property-level subscription
+        req = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=1,
+            issue_confirmed_notifications=False,
+            lifetime=0,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=av.object_identifier,
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                                property_array_index=None,
+                            ),
+                            cov_increment=None,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        cov.subscribe_property_multiple(SUBSCRIBER, req, db)
+
+        idx_key = (av.object_identifier, PropertyIdentifier.PRESENT_VALUE)
+        assert idx_key in cov._prop_subs_by_obj_prop
+
+        # Remove the property subscription
+        cov.unsubscribe_property(
+            subscriber=SUBSCRIBER,
+            process_id=1,
+            obj_id=av.object_identifier,
+            property_id=PropertyIdentifier.PRESENT_VALUE,
+            array_index=None,
+        )
+        # Empty bucket should be removed from secondary index
+        assert idx_key not in cov._prop_subs_by_obj_prop
+
+
+class TestCOVPropertyExpiryCleanup:
+    """Test property subscription expiry cleanup (branches 598->exit, 601->605, 603->605)."""
+
+    async def test_on_property_subscription_expired_cleans_up(self):
+        """_on_property_subscription_expired removes sub and cleans bucket."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        req = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=1,
+            issue_confirmed_notifications=False,
+            lifetime=300,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=av.object_identifier,
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                                property_array_index=None,
+                            ),
+                            cov_increment=None,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        cov.subscribe_property_multiple(SUBSCRIBER, req, db)
+
+        key = (SUBSCRIBER, 1, av.object_identifier, PropertyIdentifier.PRESENT_VALUE, None)
+        assert key in cov._property_subscriptions
+
+        # Simulate expiry
+        cov._on_property_subscription_expired(key)
+        assert key not in cov._property_subscriptions
+
+    def test_on_property_subscription_expired_no_match(self):
+        """_on_property_subscription_expired is a no-op for missing key (branch 598->exit)."""
+        _app, _db, cov = _make_cov_manager()
+        fake_key = (SUBSCRIBER, 99, ObjectIdentifier(ObjectType.ANALOG_VALUE, 99), 85, None)
+        # Should not raise
+        cov._on_property_subscription_expired(fake_key)
+
+
+class TestCOVSubscriptionExpiryCleanup:
+    """Test subscription expiry cleanup (branches 728->exit, 730->734, 732->734)."""
+
+    async def test_on_subscription_expired_cleans_up(self):
+        """_on_subscription_expired removes sub and cleans bucket."""
+        _app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        db.add(av)
+
+        req = SubscribeCOVRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=av.object_identifier,
+            issue_confirmed_notifications=False,
+            lifetime=300,
+        )
+        cov.subscribe(SUBSCRIBER, req, db)
+
+        key = (SUBSCRIBER, 1, av.object_identifier)
+        assert key in cov._subscriptions
+
+        # Simulate expiry
+        cov._on_subscription_expired(key)
+        assert key not in cov._subscriptions
+        # Bucket for this object should be cleaned up
+        assert av.object_identifier not in cov._subs_by_object
+
+    def test_on_subscription_expired_no_match(self):
+        """_on_subscription_expired is a no-op for missing key (branch 728->exit)."""
+        _app, _db, cov = _make_cov_manager()
+        fake_key = (SUBSCRIBER, 99, ObjectIdentifier(ObjectType.ANALOG_VALUE, 99))
+        # Should not raise
+        cov._on_subscription_expired(fake_key)
+
+
+class TestCOVIncrementThresholdBranches:
+    """Test cov_increment threshold checks (branches 515->520, 660->665)."""
+
+    def test_analog_cov_increment_below_threshold_no_notification(self):
+        """Analog value change below cov_increment does not trigger notification."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 50.0
+        av._properties[PropertyIdentifier.COV_INCREMENT] = 10.0
+        db.add(av)
+
+        req = SubscribeCOVRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=av.object_identifier,
+            issue_confirmed_notifications=False,
+            lifetime=0,
+        )
+        _subscribe_and_reset(app, cov, SUBSCRIBER, req, db)
+
+        # Change by less than increment
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 55.0
+        cov.check_and_notify(av, PropertyIdentifier.PRESENT_VALUE)
+        app.unconfirmed_request.assert_not_called()
+
+    def test_analog_cov_increment_at_threshold_triggers(self):
+        """Analog value change at cov_increment triggers notification."""
+        app, db, cov = _make_cov_manager()
+        av = AnalogValueObject(1)
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 50.0
+        av._properties[PropertyIdentifier.COV_INCREMENT] = 10.0
+        db.add(av)
+
+        req = SubscribeCOVRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=av.object_identifier,
+            issue_confirmed_notifications=False,
+            lifetime=0,
+        )
+        _subscribe_and_reset(app, cov, SUBSCRIBER, req, db)
+
+        # Change by exactly the increment
+        av._properties[PropertyIdentifier.PRESENT_VALUE] = 60.0
+        cov.check_and_notify(av, PropertyIdentifier.PRESENT_VALUE)
+        app.unconfirmed_request.assert_called_once()

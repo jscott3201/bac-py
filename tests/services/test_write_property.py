@@ -70,3 +70,59 @@ class TestWritePropertyRequest:
         )
         decoded = WritePropertyRequest.decode(req.encode())
         assert decoded.priority == 1
+
+
+# ---------------------------------------------------------------------------
+# Coverage: write_property.py line 115 — priority out of range
+# ---------------------------------------------------------------------------
+
+
+class TestWritePropertyPriorityOutOfRange:
+    """Line 114-115: priority out of 1-16 range raises BACnetRejectError."""
+
+    def test_priority_zero_raises(self):
+        import pytest
+
+        from bac_py.encoding.primitives import (
+            encode_context_object_id,
+            encode_context_tagged,
+            encode_unsigned,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+        from bac_py.services.errors import BACnetRejectError
+
+        buf = bytearray()
+        # [0] objectIdentifier
+        buf.extend(encode_context_object_id(0, ObjectIdentifier(ObjectType.ANALOG_OUTPUT, 1)))
+        # [1] propertyIdentifier = PRESENT_VALUE (85)
+        buf.extend(encode_context_tagged(1, encode_unsigned(85)))
+        # [3] propertyValue
+        buf.extend(encode_opening_tag(3))
+        buf.extend(b"\x44\x00\x00\x00\x00")  # REAL 0.0
+        buf.extend(encode_closing_tag(3))
+        # [4] priority = 0 (out of range)
+        buf.extend(encode_context_tagged(4, encode_unsigned(0)))
+        with pytest.raises(BACnetRejectError):
+            WritePropertyRequest.decode(bytes(buf))
+
+    def test_priority_17_raises(self):
+        import pytest
+
+        from bac_py.encoding.primitives import (
+            encode_context_object_id,
+            encode_context_tagged,
+            encode_unsigned,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+        from bac_py.services.errors import BACnetRejectError
+
+        buf = bytearray()
+        buf.extend(encode_context_object_id(0, ObjectIdentifier(ObjectType.ANALOG_OUTPUT, 1)))
+        buf.extend(encode_context_tagged(1, encode_unsigned(85)))
+        buf.extend(encode_opening_tag(3))
+        buf.extend(b"\x44\x00\x00\x00\x00")
+        buf.extend(encode_closing_tag(3))
+        # [4] priority = 17 (out of range)
+        buf.extend(encode_context_tagged(4, encode_unsigned(17)))
+        with pytest.raises(BACnetRejectError):
+            WritePropertyRequest.decode(bytes(buf))

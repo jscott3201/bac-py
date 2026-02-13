@@ -873,3 +873,420 @@ class TestRemoteSendVariableMac:
         assert len(npdu.destination.mac_address) == 0  # DLEN=0
         assert npdu.hop_count == 255
         assert npdu.apdu == apdu
+
+
+# --------------------------------------------------------------------------
+# Additional coverage tests for NetworkLayer edge cases
+# --------------------------------------------------------------------------
+
+
+class TestNetworkMessageHandlerRegistration:
+    """Tests for register/unregister network message handler."""
+
+    def test_register_handler(self):
+        """Register and invoke a network message listener."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        received_msgs = []
+
+        def handler(msg, source_mac):
+            received_msgs.append((msg, source_mac))
+
+        layer.register_network_message_handler(NetworkMessageType.I_AM_ROUTER_TO_NETWORK, handler)
+
+        # Inject I-Am-Router message
+        data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(data, _ROUTER_MAC)
+
+        assert len(received_msgs) == 1
+        assert received_msgs[0][1] == _ROUTER_MAC
+
+    def test_unregister_handler(self):
+        """After unregistering, handler should not be called."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        calls = []
+
+        def handler(msg, source_mac):
+            calls.append(1)
+
+        layer.register_network_message_handler(NetworkMessageType.I_AM_ROUTER_TO_NETWORK, handler)
+        layer.unregister_network_message_handler(
+            NetworkMessageType.I_AM_ROUTER_TO_NETWORK, handler
+        )
+
+        data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(data, _ROUTER_MAC)
+
+        assert len(calls) == 0
+
+    def test_unregister_nonexistent_handler(self):
+        """Unregistering a handler that was never registered does not raise."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+
+        def handler(msg, source_mac):
+            pass
+
+        # Should not raise
+        layer.unregister_network_message_handler(
+            NetworkMessageType.I_AM_ROUTER_TO_NETWORK, handler
+        )
+
+    def test_listener_exception_caught(self):
+        """Listener that raises should not crash the network layer."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        calls_after = []
+
+        def bad_handler(msg, source_mac):
+            raise RuntimeError("listener error")
+
+        def good_handler(msg, source_mac):
+            calls_after.append(1)
+
+        layer.register_network_message_handler(
+            NetworkMessageType.I_AM_ROUTER_TO_NETWORK, bad_handler
+        )
+        layer.register_network_message_handler(
+            NetworkMessageType.I_AM_ROUTER_TO_NETWORK, good_handler
+        )
+
+        data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(data, _ROUTER_MAC)
+
+        # The good handler should still have been called despite the exception
+        assert len(calls_after) == 1
+
+
+class TestSendNetworkMessage:
+    """Tests for NetworkLayer.send_network_message()."""
+
+    def test_send_network_message_broadcast(self):
+        """send_network_message with no destination broadcasts."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+
+        layer.send_network_message(
+            NetworkMessageType.WHO_IS_ROUTER_TO_NETWORK,
+            b"\x00\x05",
+        )
+
+        assert len(transport.sent_broadcast) == 1
+        npdu = decode_npdu(transport.sent_broadcast[0])
+        assert npdu.is_network_message is True
+        assert npdu.message_type == NetworkMessageType.WHO_IS_ROUTER_TO_NETWORK
+
+    def test_send_network_message_to_specific_dest(self):
+        """send_network_message with a specific unicast destination."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+
+        dest = BACnetAddress(
+            network=20,
+            mac_address=b"\xc0\xa8\x01\x01\xba\xc0",
+        )
+        layer.send_network_message(
+            NetworkMessageType.I_AM_ROUTER_TO_NETWORK,
+            b"\x00\x14",
+            destination=dest,
+        )
+
+        # Remote unicast destination goes through send_unicast if non-broadcast
+        assert len(transport.sent_unicast) == 1
+
+    def test_send_network_message_global_broadcast(self):
+        """send_network_message with global broadcast destination."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+
+        dest = BACnetAddress(network=0xFFFF)
+        layer.send_network_message(
+            NetworkMessageType.I_AM_ROUTER_TO_NETWORK,
+            b"\x00\x14",
+            destination=dest,
+        )
+
+        assert len(transport.sent_broadcast) == 1
+
+
+class TestCacheTTLEviction:
+    """Test that stale cache entries are evicted on lookup."""
+
+    def test_stale_entry_evicted(self):
+        """A cache entry past TTL should be evicted and return None."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport, cache_ttl=0.01)  # very short TTL
+
+        data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(data, _ROUTER_MAC)
+        assert layer.get_router_for_network(20) == _ROUTER_MAC
+
+        # Wait for TTL to expire
+        import time
+
+        time.sleep(0.02)
+        assert layer.get_router_for_network(20) is None
+        # Cache entry should be removed
+        assert 20 not in layer._router_cache
+
+
+# --------------------------------------------------------------------------
+# Coverage: Branch 258->265 -- source with network=0xFFFF skips router learning
+# --------------------------------------------------------------------------
+
+
+class TestSourceNetworkBroadcastNotLearned:
+    """Branch 258->265: routed APDU where source network skips router learning."""
+
+    def test_source_network_none_skips_learning(self):
+        """Source with network=None (defensive) skips _learn_router_from_source."""
+        from unittest.mock import patch as _patch
+
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        received = []
+        layer.on_receive(lambda data, src: received.append((data, src)))
+
+        # Create a fake NPDU with source that has network=None
+        fake_npdu = NPDU(
+            is_network_message=False,
+            expecting_reply=False,
+            source=BACnetAddress(mac_address=b"\x01\x02\x03\x04\x05\x06"),
+            apdu=b"\x00",
+        )
+        # Verify source.network is None
+        assert fake_npdu.source.network is None
+
+        # Patch decode_npdu to return our crafted NPDU
+        with _patch("bac_py.network.layer.decode_npdu", return_value=fake_npdu):
+            # Send any valid-looking raw bytes (content irrelevant since decode is mocked)
+            transport.inject_receive(b"\x01\x00\x00", _ROUTER_MAC)
+
+        # APDU should be delivered (source is not None, so src_addr = npdu.source)
+        assert len(received) == 1
+        # But router cache should be empty (network is None, so learning skipped)
+        assert layer._router_cache == {}
+
+    def test_source_network_0xffff_skips_learning(self):
+        """Source with network=0xFFFF (broadcast) skips _learn_router_from_source."""
+        from unittest.mock import patch as _patch
+
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        received = []
+        layer.on_receive(lambda data, src: received.append((data, src)))
+
+        # Create a fake NPDU with source network = 0xFFFF
+        # This can't happen via normal encode/decode but tests the defensive guard
+        fake_npdu = NPDU(
+            is_network_message=False,
+            expecting_reply=False,
+            source=BACnetAddress(network=0xFFFF, mac_address=b"\x01"),
+            apdu=b"\x00",
+        )
+
+        with _patch("bac_py.network.layer.decode_npdu", return_value=fake_npdu):
+            transport.inject_receive(b"\x01\x00\x00", _ROUTER_MAC)
+
+        assert len(received) == 1
+        # Router cache should NOT have an entry for 0xFFFF
+        assert 0xFFFF not in layer._router_cache
+
+
+class TestNetworkMessageNoType:
+    """Test handling of network message with message_type=None."""
+
+    def test_network_message_no_type_dropped(self):
+        """Network message NPDU with message_type=None should be dropped."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        received = []
+        layer.on_receive(lambda data, source: received.append((data, source)))
+
+        # Create an NPDU that looks like a network message but has no type.
+        # This is a weird case; build raw bytes with network-message bit set.
+        # Since we can't build it via encode_npdu (it would raise), inject
+        # the message via internal method directly.
+        npdu = NPDU(
+            is_network_message=True,
+            message_type=None,
+        )
+        # Call _handle_network_message directly since encode_npdu would reject this
+        source = BIPAddress(host="192.168.1.50", port=0xBAC0)
+        layer._handle_network_message(npdu, source.encode())
+
+        # Should not crash, should not deliver to app
+        assert len(received) == 0
+
+
+class TestUnrecognizedNetworkMessage:
+    """Test handling of an unrecognized but decodable network message type."""
+
+    def test_who_is_router_ignored_by_non_router(self):
+        """Who-Is-Router messages are logged and ignored by non-router devices."""
+        from bac_py.network.messages import WhoIsRouterToNetwork, encode_network_message
+
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        received = []
+        layer.on_receive(lambda data, source: received.append((data, source)))
+
+        msg = WhoIsRouterToNetwork(network=42)
+        npdu = NPDU(
+            is_network_message=True,
+            message_type=NetworkMessageType.WHO_IS_ROUTER_TO_NETWORK,
+            network_message_data=encode_network_message(msg),
+        )
+        source = BIPAddress(host="192.168.1.50", port=0xBAC0)
+        transport.inject_receive(encode_npdu(npdu), source.encode())
+
+        # Non-router does not respond to Who-Is-Router
+        assert len(received) == 0
+        assert len(transport.sent_broadcast) == 0
+
+    def test_other_network_message_ignored(self):
+        """Unrecognized network messages (e.g., Router-Busy) are logged and ignored."""
+        from bac_py.network.messages import RouterBusyToNetwork, encode_network_message
+
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        received = []
+        layer.on_receive(lambda data, source: received.append((data, source)))
+
+        msg = RouterBusyToNetwork(networks=(10,))
+        npdu = NPDU(
+            is_network_message=True,
+            message_type=NetworkMessageType.ROUTER_BUSY_TO_NETWORK,
+            network_message_data=encode_network_message(msg),
+        )
+        source = BIPAddress(host="192.168.1.50", port=0xBAC0)
+        transport.inject_receive(encode_npdu(npdu), source.encode())
+
+        # Non-router logs and ignores
+        assert len(received) == 0
+
+
+class TestNoReceiveCallback:
+    """Test that APDU receipt without a registered callback doesn't crash."""
+
+    def test_receive_without_callback(self):
+        """Receiving APDU without any on_receive callback does not crash."""
+        transport = FakeTransport()
+        NetworkLayer(transport)
+        # Do NOT register any callback
+
+        npdu = b"\x01\x00\x10\x08"  # version 1, control 0, then APDU bytes
+        source = BIPAddress(host="192.168.1.50", port=0xBAC0)
+        transport.inject_receive(npdu, source.encode())
+
+        # Should not raise
+
+
+class TestRouterLearningEdgeCases:
+    """Additional edge cases for router path learning from routed APDUs."""
+
+    def _build_routed_apdu(self, snet: int, sadr: bytes, apdu: bytes = b"\x00") -> bytes:
+        npdu = NPDU(
+            is_network_message=False,
+            expecting_reply=False,
+            source=BACnetAddress(network=snet, mac_address=sadr),
+            apdu=apdu,
+        )
+        return encode_npdu(npdu)
+
+    def test_fresh_entry_refreshes_timestamp(self):
+        """Receiving a routed APDU when a fresh entry exists refreshes the timestamp."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        layer.on_receive(lambda data, src: None)
+
+        # Populate cache via I-Am-Router
+        router_a = BIPAddress(host="10.0.0.1", port=0xBAC0).encode()
+        i_am_data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(i_am_data, router_a)
+
+        first_seen = layer._router_cache[20].last_seen
+
+        import time
+
+        time.sleep(0.01)
+
+        # Receive routed APDU from a different router for network 20
+        router_b = BIPAddress(host="10.0.0.2", port=0xBAC0).encode()
+        data = self._build_routed_apdu(snet=20, sadr=b"\x05")
+        transport.inject_receive(data, router_b)
+
+        # Fresh entry should keep router_a (from I-Am-Router) but refresh timestamp
+        assert layer.get_router_for_network(20) == router_a
+        assert layer._router_cache[20].last_seen > first_seen
+
+    def test_stale_entry_replaced_by_different_router(self):
+        """When cache entry is stale, learning from routed APDU replaces it with new router."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport, cache_ttl=0.01)
+        layer.on_receive(lambda data, src: None)
+
+        # Populate cache
+        router_a = BIPAddress(host="10.0.0.1", port=0xBAC0).encode()
+        i_am_data = _build_i_am_router_npdu(networks=(20,))
+        transport.inject_receive(i_am_data, router_a)
+
+        import time
+
+        time.sleep(0.02)  # let it expire
+
+        # Learn from different router
+        router_b = BIPAddress(host="10.0.0.2", port=0xBAC0).encode()
+        data = self._build_routed_apdu(snet=20, sadr=b"\x05")
+        transport.inject_receive(data, router_b)
+
+        assert layer.get_router_for_network(20) == router_b
+
+
+# --------------------------------------------------------------------------
+# Additional coverage: _send_network_number_is and _send_remote
+# --------------------------------------------------------------------------
+
+
+class TestSendNetworkNumberIsNone:
+    """Test _send_network_number_is when network_number is None."""
+
+    def test_send_network_number_is_none_noop(self):
+        """Calling _send_network_number_is when network_number is None is a no-op."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+        assert layer._network_number is None
+
+        layer._send_network_number_is()
+
+        assert len(transport.sent_broadcast) == 0
+
+    def test_send_network_number_is_with_number(self):
+        """Calling _send_network_number_is when network_number is set broadcasts."""
+        transport = FakeTransport()
+        layer = NetworkLayer(transport, network_number=42, network_number_configured=True)
+
+        layer._send_network_number_is()
+
+        assert len(transport.sent_broadcast) == 1
+        npdu = decode_npdu(transport.sent_broadcast[0])
+        assert npdu.is_network_message is True
+        assert npdu.message_type == NetworkMessageType.NETWORK_NUMBER_IS
+
+
+class TestSendRemoteDefensiveCheck:
+    """Test _send_remote defensive check when destination.network is None."""
+
+    def test_send_remote_network_none_raises(self):
+        """_send_remote raises ValueError when destination has no network."""
+        import pytest
+
+        transport = FakeTransport()
+        layer = NetworkLayer(transport)
+
+        dest = BACnetAddress(mac_address=b"\xaa\xbb\xcc\xdd\xee\xff")
+        assert dest.network is None
+
+        with pytest.raises(ValueError, match="Cannot send to remote destination"):
+            layer._send_remote(b"\x01\x00\x10\x08", dest)

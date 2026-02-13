@@ -174,3 +174,77 @@ class TestAtomicWriteFileACK:
         encoded = ack.encode()
         decoded = AtomicWriteFileACK.decode(encoded)
         assert decoded.file_start == -1
+
+
+# ---------------------------------------------------------------------------
+# Coverage: file_access.py lines 137-138, 255-256, 379-380
+# ---------------------------------------------------------------------------
+
+
+class TestAtomicReadFileRequestUnexpectedTag:
+    """Lines 137-138: unexpected CHOICE tag raises ValueError."""
+
+    def test_unexpected_choice_tag_raises(self):
+        import pytest
+
+        from bac_py.encoding.primitives import (
+            encode_application_object_id,
+            encode_application_signed,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = bytearray()
+        # fileIdentifier
+        buf.extend(encode_application_object_id(ObjectType.FILE, 1))
+        # Tag 5 instead of 0 or 1 — unrecognized
+        buf.extend(encode_opening_tag(5))
+        buf.extend(encode_application_signed(0))
+        buf.extend(encode_closing_tag(5))
+        with pytest.raises(ValueError, match="Unexpected tag"):
+            AtomicReadFileRequest.decode(bytes(buf))
+
+
+class TestAtomicReadFileACKUnexpectedTag:
+    """Lines 255-256: unexpected CHOICE tag in AtomicReadFileACK raises ValueError."""
+
+    def test_unexpected_choice_tag_raises(self):
+        import pytest
+
+        from bac_py.encoding.primitives import (
+            encode_application_boolean,
+            encode_application_signed,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = bytearray()
+        # endOfFile boolean
+        buf.extend(encode_application_boolean(True))
+        # Tag 5 instead of 0 or 1
+        buf.extend(encode_opening_tag(5))
+        buf.extend(encode_application_signed(0))
+        buf.extend(encode_closing_tag(5))
+        with pytest.raises(ValueError, match="Unexpected tag"):
+            AtomicReadFileACK.decode(bytes(buf))
+
+
+class TestAtomicWriteFileRequestUnexpectedTag:
+    """Lines 379-380: unexpected CHOICE tag in AtomicWriteFileRequest raises ValueError."""
+
+    def test_unexpected_choice_tag_raises(self):
+        import pytest
+
+        from bac_py.encoding.primitives import (
+            encode_application_object_id,
+            encode_application_signed,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = bytearray()
+        # fileIdentifier
+        buf.extend(encode_application_object_id(ObjectType.FILE, 1))
+        # Tag 3 instead of 0 or 1
+        buf.extend(encode_opening_tag(3))
+        buf.extend(encode_application_signed(0))
+        buf.extend(encode_closing_tag(3))
+        with pytest.raises(ValueError, match="Unexpected tag"):
+            AtomicWriteFileRequest.decode(bytes(buf))

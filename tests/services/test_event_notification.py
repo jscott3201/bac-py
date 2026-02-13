@@ -461,3 +461,71 @@ class TestLifeSafetyOperationRequest:
         encoded = req.encode()
         decoded = LifeSafetyOperationRequest.decode(encoded)
         assert decoded.requesting_process_identifier == 0xFFFFFFFF
+
+
+# ---------------------------------------------------------------------------
+# Coverage: event_notification.py branch partials 200->206, 390->396
+# ---------------------------------------------------------------------------
+
+
+class TestEventNotificationRequestNoEventValues:
+    """Branch 200->206: optional eventValues tag check in EventNotification.decode.
+
+    When offset < len(data) is True but the tag is NOT opening tag 12,
+    the code falls through to the return without decoding eventValues.
+    """
+
+    def test_event_values_present_but_not_tag_12(self):
+        """Data has extra bytes after toState but not opening tag 12.
+
+        We encode a notification without event_values and append trailing bytes
+        that have a non-matching tag to exercise the tag.is_opening check failing.
+        """
+        from bac_py.encoding.primitives import encode_context_tagged, encode_unsigned
+
+        req = EventNotificationRequest(
+            process_identifier=1,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            event_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            time_stamp=BACnetTimeStamp(choice=1, value=0),
+            notification_class=1,
+            priority=100,
+            event_type=EventType.OUT_OF_RANGE,
+            notify_type=NotifyType.ALARM,
+            to_state=EventState.HIGH_LIMIT,
+            ack_required=True,
+            from_state=EventState.NORMAL,
+        )
+        encoded = bytearray(req.encode())
+        # Append a context tag with number 99 (not 12)
+        encoded.extend(encode_context_tagged(99, encode_unsigned(0)))
+
+        decoded = EventNotificationRequest.decode(bytes(encoded))
+        assert decoded.event_values is None
+        assert decoded.to_state == EventState.HIGH_LIMIT
+        assert decoded.from_state == EventState.NORMAL
+
+
+class TestLifeSafetyOperationRequestNoObjectId:
+    """Branch 390->396: optional objectIdentifier tag check in LifeSafetyOperation.decode.
+
+    When offset < len(data) is True but the tag number is NOT 3, the code
+    falls through to the return without setting object_identifier.
+    """
+
+    def test_trailing_data_not_tag_3(self):
+        """Extra bytes after 'request' field with non-matching tag number."""
+        from bac_py.encoding.primitives import encode_context_tagged, encode_unsigned
+
+        req = LifeSafetyOperationRequest(
+            requesting_process_identifier=1,
+            requesting_source="Panel",
+            request=LifeSafetyOperation.RESET,
+        )
+        encoded = bytearray(req.encode())
+        # Append context tag 99 (not 3)
+        encoded.extend(encode_context_tagged(99, encode_unsigned(0)))
+
+        decoded = LifeSafetyOperationRequest.decode(bytes(encoded))
+        assert decoded.object_identifier is None
+        assert decoded.request == LifeSafetyOperation.RESET

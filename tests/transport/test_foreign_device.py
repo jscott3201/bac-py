@@ -272,3 +272,53 @@ class TestDeregistrationOnStop:
         fd_mgr.handle_bvlc_result(ok)
         await fd_mgr.stop()
         assert fd_mgr.is_registered is False
+
+
+# --- Coverage gap tests: lines 140->147, 208-209 ---
+
+
+class TestRegistrationLoopEdgeCases:
+    @pytest.mark.asyncio
+    async def test_registration_transport_error(self, collector: SentCollector):
+        """Lines 207-209: Transport error during registration loop is caught and logged."""
+        call_count = 0
+
+        def failing_send(data: bytes, dest: BIPAddress) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 1:
+                raise OSError("Network unreachable")
+            # Subsequent calls succeed
+            collector.send(data, dest)
+
+        fd_mgr = ForeignDeviceManager(
+            bbmd_address=BBMD_ADDR,
+            ttl=2,  # Short TTL so re-registration happens quickly
+            send_callback=failing_send,
+            local_address=LOCAL_ADDR,
+        )
+        await fd_mgr.start()
+        try:
+            # Give the loop time to execute and hit the exception, then retry
+            await asyncio.sleep(1.5)
+            # Should have recovered: subsequent send calls go through
+            assert call_count >= 2
+        finally:
+            await fd_mgr.stop()
+
+    def test_registration_nak_response(self, fd_mgr: ForeignDeviceManager):
+        """Lines 148-155 / 140->147: NAK response clears registration state."""
+        # First, register successfully
+        ok = BvlcResultCode.SUCCESSFUL_COMPLETION.to_bytes(2, "big")
+        fd_mgr.handle_bvlc_result(ok)
+        assert fd_mgr.is_registered is True
+
+        # Second successful result -- should take the 140->147 branch (already registered)
+        fd_mgr.handle_bvlc_result(ok)
+        assert fd_mgr.is_registered is True
+
+        # Now receive a NAK
+        nak = BvlcResultCode.REGISTER_FOREIGN_DEVICE_NAK.to_bytes(2, "big")
+        fd_mgr.handle_bvlc_result(nak)
+        assert fd_mgr.is_registered is False
+        assert fd_mgr.last_result == BvlcResultCode.REGISTER_FOREIGN_DEVICE_NAK

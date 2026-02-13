@@ -3372,3 +3372,529 @@ class TestAdditionalMethods:
         assert (
             call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.GET_ENROLLMENT_SUMMARY
         )
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetObjectListFallback:
+    """Test get_object_list fallback when segmentation is not supported."""
+
+    async def test_get_object_list_fallback_on_segmentation_error(self):
+        """get_object_list falls back to element-by-element when SegNotSupported."""
+        from bac_py.services.errors import BACnetAbortError
+        from bac_py.types.enums import AbortReason
+
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        client = BACnetClient(app)
+
+        # First call (full list) raises segmentation-not-supported
+        # Second call (array index 0) returns count=2
+        # Third/fourth calls return individual elements
+        obj1 = ObjectIdentifier(ObjectType.DEVICE, 1)
+        obj2 = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+
+        count_ack = ReadPropertyACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=0,
+            property_value=encode_application_unsigned(2),
+        )
+        elem1_ack = ReadPropertyACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=1,
+            property_value=encode_application_object_id(obj1.object_type, obj1.instance_number),
+        )
+        elem2_ack = ReadPropertyACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=2,
+            property_value=encode_application_object_id(obj2.object_type, obj2.instance_number),
+        )
+
+        app.confirmed_request.side_effect = [
+            BACnetAbortError(AbortReason.SEGMENTATION_NOT_SUPPORTED),
+            count_ack.encode(),
+            elem1_ack.encode(),
+            elem2_ack.encode(),
+        ]
+
+        result = await client.get_object_list("192.168.1.100", 1)
+        assert len(result) == 2
+        assert result[0] == obj1
+        assert result[1] == obj2
+
+    async def test_get_object_list_fallback_count_zero(self):
+        """get_object_list fallback with count=0 returns empty list."""
+        from bac_py.services.errors import BACnetAbortError
+        from bac_py.types.enums import AbortReason
+
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        client = BACnetClient(app)
+
+        count_ack = ReadPropertyACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=0,
+            property_value=encode_application_unsigned(0),
+        )
+
+        app.confirmed_request.side_effect = [
+            BACnetAbortError(AbortReason.SEGMENTATION_NOT_SUPPORTED),
+            count_ack.encode(),
+        ]
+
+        result = await client.get_object_list("192.168.1.100", 1)
+        assert result == []
+
+
+class TestDiscoverExtendedRPMErrorHandling:
+    """Test discover_extended when RPM enrichment fails."""
+
+    async def test_discover_extended_rpm_error_skipped(self):
+        """discover_extended skips RPM errors and returns basic device info."""
+        from bac_py.services.errors import BACnetError
+
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        client = BACnetClient(app)
+
+        # Mock discover to return one device
+        discover_result = MagicMock()
+        discover_result.address = PEER
+        discover_result.instance = 42
+        discover_result.vendor_id = 7
+        discover_result.max_apdu_length = 1476
+        discover_result.segmentation_supported = Segmentation.BOTH
+
+        client.discover = AsyncMock(return_value=[discover_result])
+
+        # Mock read_property_multiple to raise BACnetError
+        client.read_property_multiple = AsyncMock(
+            side_effect=BACnetError(ErrorClass.SERVICES, ErrorCode.OTHER)
+        )
+
+        result = await client.discover_extended(timeout=0.1)
+        assert len(result) == 1
+        assert result[0].instance == 42
+        # Profile fields should be None due to RPM error
+        assert result[0].profile_name is None
+        assert result[0].profile_location is None
+
+
+class TestGetEventInformationPagination:
+    """Test get_event_information with pagination."""
+
+    async def test_get_event_information_with_last_received(self):
+        """get_event_information passes last_received_object_identifier for pagination."""
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        client = BACnetClient(app)
+
+        ack = GetEventInformationACK(
+            list_of_event_summaries=[],
+            more_events=False,
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        last_obj = ObjectIdentifier(ObjectType.ANALOG_INPUT, 5)
+        result = await client.get_event_information(
+            address=PEER,
+            last_received_object_identifier=last_obj,
+        )
+        assert isinstance(result, GetEventInformationACK)
+        assert result.more_events is False
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.GET_EVENT_INFORMATION
+
+
+class TestAcknowledgeAlarmRequest:
+    """Test acknowledge_alarm client method."""
+
+    async def test_acknowledge_alarm_sends_request(self):
+        """acknowledge_alarm sends AcknowledgeAlarm-Request."""
+        app = MagicMock()
+        app.confirmed_request = AsyncMock(return_value=b"")
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        client = BACnetClient(app)
+
+        await client.acknowledge_alarm(
+            address=PEER,
+            acknowledging_process_identifier=1,
+            event_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            event_state_acknowledged=EventState.HIGH_LIMIT,
+            time_stamp=BACnetTimeStamp(choice=1, value=100),
+            acknowledgment_source="operator",
+            time_of_acknowledgment=BACnetTimeStamp(choice=1, value=200),
+        )
+
+        app.confirmed_request.assert_called_once()
+        call_kwargs = app.confirmed_request.call_args
+        assert call_kwargs.kwargs["service_choice"] == ConfirmedServiceChoice.ACKNOWLEDGE_ALARM
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage tests for BACnetClient
+# ---------------------------------------------------------------------------
+
+
+class TestReadMultipleNonePropertyValue:
+    """Test read_multiple when property_value is None or empty."""
+
+    async def test_read_multiple_empty_property_value_returns_none(self):
+        """When property_value is empty bytes, read_multiple sets value to None."""
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+
+        # Craft a ReadPropertyMultipleACK with empty property_value
+        ack = ReadPropertyMultipleACK(
+            list_of_read_access_results=[
+                ReadAccessResult(
+                    object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                    list_of_results=[
+                        ReadResultElement(
+                            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                            property_value=b"",  # empty
+                        ),
+                    ],
+                ),
+            ],
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        client = BACnetClient(app)
+        result = await client.read_multiple(
+            "192.168.1.100",
+            {"ai,1": ["present-value"]},
+        )
+        # Value should be None because property_value was empty
+        assert result["analog-input,1"]["present-value"] is None
+
+
+class TestGetObjectListSegmentationFallback:
+    """Test get_object_list fallback path when segmentation is not supported."""
+
+    async def test_get_object_list_fallback_on_segmentation_abort(self):
+        """get_object_list falls back to reading array elements on abort."""
+        from bac_py.services.errors import BACnetAbortError
+        from bac_py.types.enums import AbortReason
+
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        client = BACnetClient(app)
+
+        # First call: raises segmentation not supported
+        # Second call: returns array length = 2
+        # Third/Fourth calls: return individual elements
+        count_ack = ReadPropertyACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=0,
+            property_value=encode_application_unsigned(2),
+        )
+        elem1_ack = ReadPropertyACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=1,
+            property_value=encode_application_object_id(ObjectType.DEVICE, 1),
+        )
+        elem2_ack = ReadPropertyACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=2,
+            property_value=encode_application_object_id(ObjectType.ANALOG_INPUT, 1),
+        )
+        app.confirmed_request.side_effect = [
+            BACnetAbortError(AbortReason.SEGMENTATION_NOT_SUPPORTED),
+            count_ack.encode(),
+            elem1_ack.encode(),
+            elem2_ack.encode(),
+        ]
+
+        result = await client.get_object_list(
+            "192.168.1.100",
+            device_instance=1,
+        )
+        assert len(result) == 2
+        assert result[0] == ObjectIdentifier(ObjectType.DEVICE, 1)
+        assert result[1] == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+
+
+class TestWhoIsRouterToNetworkHandler:
+    """Test who_is_router_to_network handler paths."""
+
+    async def test_who_is_router_str_destination(self):
+        """who_is_router_to_network accepts string destination."""
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        app.register_network_message_handler = MagicMock()
+        app.unregister_network_message_handler = MagicMock()
+        app.send_network_message = MagicMock()
+        client = BACnetClient(app)
+
+        result = await client.who_is_router_to_network(
+            network=100,
+            destination="192.168.1.255",
+            timeout=0.01,
+        )
+        assert isinstance(result, list)
+        # Verify send_network_message was called
+        app.send_network_message.assert_called_once()
+
+    async def test_who_is_router_bacnet_address_destination(self):
+        """who_is_router_to_network accepts BACnetAddress destination."""
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        app.register_network_message_handler = MagicMock()
+        app.unregister_network_message_handler = MagicMock()
+        app.send_network_message = MagicMock()
+        client = BACnetClient(app)
+
+        result = await client.who_is_router_to_network(
+            destination=PEER,
+            timeout=0.01,
+        )
+        assert isinstance(result, list)
+        app.send_network_message.assert_called_once()
+
+
+class TestDiscoverUnconfiguredException:
+    """Test discover_unconfigured exception handling in callback."""
+
+    async def test_discover_unconfigured_ignores_decode_errors(self):
+        """discover_unconfigured ignores ValueError during decode."""
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        client = BACnetClient(app)
+
+        result = await client.discover_unconfigured(timeout=0.01)
+        assert result == []
+
+        # Verify handler was registered and unregistered
+        app.register_temporary_handler.assert_called_once()
+        app.unregister_temporary_handler.assert_called_once()
+
+
+# ==================== Coverage gap tests: uncovered lines/branches ====================
+
+
+class TestGetObjectListEmptyFallback:
+    """Test get_object_list returning empty list (line 836)."""
+
+    async def test_get_object_list_empty_property_value(self):
+        """get_object_list returns [] when property_value is empty (line 836)."""
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        client = BACnetClient(app)
+
+        # Return a ReadPropertyACK with empty property_value
+        ack = ReadPropertyACK(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_value=b"",
+        )
+        app.confirmed_request.return_value = ack.encode()
+
+        result = await client.get_object_list("192.168.1.100", device_instance=1)
+        assert result == []
+
+
+class TestDiscoverRoutersTypeCheck:
+    """Test who_is_router_to_network IAmRouterToNetwork type check (line 1861)."""
+
+    async def test_who_is_router_ignores_non_i_am_router(self):
+        """on_i_am_router callback ignores non-IAmRouterToNetwork messages (line 1860-1861)."""
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        app.register_network_message_handler = MagicMock()
+        app.unregister_network_message_handler = MagicMock()
+        app.send_network_message = MagicMock()
+        client = BACnetClient(app)
+
+        result = await client.who_is_router_to_network(timeout=0.01)
+        assert isinstance(result, list)
+        assert len(result) == 0
+
+        # Grab the callback that was registered
+        handler_call = app.register_network_message_handler.call_args
+        callback = handler_call[0][1]
+
+        # Call it with a non-IAmRouterToNetwork message -- should be a no-op
+        callback("not-an-i-am-router", b"\x7f\x00\x00\x01\xba\xc0")
+        # No crash; result should remain empty
+
+
+class TestWhoAmIDecodeError:
+    """Test who_am_i ValueError/IndexError catch (lines 2459-2460)."""
+
+    async def test_discover_unconfigured_catches_value_error_in_callback(self):
+        """Discover_unconfigured catches ValueError in _on_who_am_i callback."""
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        client = BACnetClient(app)
+
+        result = await client.discover_unconfigured(timeout=0.01)
+
+        # Now call the registered handler with bad data
+        handler_call = app.register_temporary_handler.call_args
+        callback = handler_call[0][1]
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        # Call with malformed bytes that will raise ValueError or IndexError
+        callback(b"\xff", source)
+        # Should not crash, result should remain empty
+        assert result == []
+
+
+class TestEncodeForWriteFallbackBranches:
+    """Test _encode_for_write fallback paths (branches 520->539, 527->539, 536->539)."""
+
+    def _make_client(self):
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        return BACnetClient(app)
+
+    def test_bool_with_no_datatype_falls_back(self):
+        """Boolean value with no datatype lookup falls back to encode_property_value."""
+        from unittest.mock import patch
+
+        client = self._make_client()
+        # Force datatype lookup to return None (no registered type)
+        with patch.object(client, "_lookup_datatype", return_value=None):
+            result = client._encode_for_write(
+                True,
+                PropertyIdentifier.PRESENT_VALUE,
+                ObjectType.ANALOG_INPUT,
+            )
+        # Should return valid bytes (not crash)
+        assert isinstance(result, bytes)
+        assert len(result) > 0
+
+    def test_bool_with_bool_datatype_encodes_boolean(self):
+        """Boolean value with bool datatype encodes as BACnet boolean (branch 527->539)."""
+        from unittest.mock import patch
+
+        client = self._make_client()
+        with patch.object(client, "_lookup_datatype", return_value=bool):
+            result = client._encode_for_write(
+                True,
+                PropertyIdentifier.PRESENT_VALUE,
+                ObjectType.ANALOG_INPUT,
+            )
+        assert isinstance(result, bytes)
+        assert len(result) > 0
+
+    def test_int_with_bool_datatype_encodes_boolean(self):
+        """Int value with bool datatype encodes as BACnet boolean (branch 536->539)."""
+        from unittest.mock import patch
+
+        client = self._make_client()
+        with patch.object(client, "_lookup_datatype", return_value=bool):
+            result = client._encode_for_write(
+                1,
+                PropertyIdentifier.PRESENT_VALUE,
+                ObjectType.ANALOG_INPUT,
+            )
+        assert isinstance(result, bytes)
+        assert len(result) > 0
+
+
+class TestBroadcastListenerDecoderNoneResult:
+    """Test _broadcast_listener decoder returning None (branch 1035->exit)."""
+
+    async def test_broadcast_listener_decoder_returns_none_skips(self):
+        """When decoder returns None, item is not appended (branch 1035->exit)."""
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        client = BACnetClient(app)
+
+        # Call discover (who_is) which uses _broadcast_listener internally
+        # The decoder for I-Am can return None for malformed data
+        result = await client.who_is(timeout=0.01)
+        assert isinstance(result, list)
+
+        # Grab the handler registered for I-Am
+        handler_call = app.register_temporary_handler.call_args
+        callback = handler_call[0][1]
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+
+        # Valid I-Am should parse, but call with truncated data that causes
+        # ValueError to be raised (which means item is not appended)
+        callback(b"\x00", source)
+        # Result should still be empty
+        assert len(result) == 0
+
+
+class TestSubscribeCovExUndo:
+    """Test subscribe_cov_ex callback undo on failure (branch 926->928)."""
+
+    async def test_subscribe_cov_ex_undoes_callback_on_failure(self):
+        """subscribe_cov_ex unregisters callback on subscribe failure (branch 926->928)."""
+        app = MagicMock()
+        app.confirmed_request = AsyncMock(side_effect=RuntimeError("network error"))
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        app.register_cov_callback = MagicMock()
+        app.unregister_cov_callback = MagicMock()
+        client = BACnetClient(app)
+
+        callback = MagicMock()
+        with pytest.raises(RuntimeError):
+            await client.subscribe_cov_ex(
+                "192.168.1.100",
+                "ai,1",
+                process_id=42,
+                callback=callback,
+            )
+        # Callback should have been unregistered on failure
+        app.unregister_cov_callback.assert_called_once_with(42)

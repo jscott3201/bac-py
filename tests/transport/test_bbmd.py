@@ -671,3 +671,241 @@ class TestBBMDGracePeriod:
         expected_min = before + ttl + FDT_GRACE_PERIOD_SECONDS
         expected_max = after + ttl + FDT_GRACE_PERIOD_SECONDS
         assert expected_min <= entry.expiry <= expected_max
+
+
+# --- Coverage gap tests: lines 496-498, 610-613, 646-647 ---
+
+
+class TestBBMDCoverageGaps:
+    def test_register_foreign_device_ttl_zero(self, bbmd: BBMDManager, collector: SentCollector):
+        """Lines 495-498: TTL=0 should be rejected with a NAK."""
+        ttl_bytes = (0).to_bytes(2, "big")
+        handled = bbmd.handle_bvlc(
+            BvlcFunction.REGISTER_FOREIGN_DEVICE,
+            ttl_bytes,
+            FD_ADDR,
+        )
+        assert handled is True
+        assert FD_ADDR not in bbmd.fdt
+        results = collector.find_bvlc_results(FD_ADDR)
+        assert BvlcResultCode.REGISTER_FOREIGN_DEVICE_NAK in results
+
+    def test_fdt_full_rejection(self, collector: SentCollector):
+        """Lines 502-511: FDT at max capacity rejects new registrations."""
+        bbmd = BBMDManager(
+            local_address=BBMD_ADDR,
+            send_callback=collector.send,
+            local_broadcast_callback=collector.local_broadcast,
+            max_fdt_entries=2,
+        )
+        # Fill up the FDT with 2 entries
+        bbmd.handle_bvlc(
+            BvlcFunction.REGISTER_FOREIGN_DEVICE,
+            (60).to_bytes(2, "big"),
+            FD_ADDR,
+        )
+        bbmd.handle_bvlc(
+            BvlcFunction.REGISTER_FOREIGN_DEVICE,
+            (60).to_bytes(2, "big"),
+            FD_ADDR2,
+        )
+        assert len(bbmd.fdt) == 2
+
+        # Now try to register a third foreign device
+        collector.clear()
+        new_fd = BIPAddress(host="10.0.0.99", port=47808)
+        bbmd.handle_bvlc(
+            BvlcFunction.REGISTER_FOREIGN_DEVICE,
+            (60).to_bytes(2, "big"),
+            new_fd,
+        )
+        assert new_fd not in bbmd.fdt
+        results = collector.find_bvlc_results(new_fd)
+        assert BvlcResultCode.REGISTER_FOREIGN_DEVICE_NAK in results
+
+    def test_fdt_full_allows_re_registration(self, collector: SentCollector):
+        """Re-registration of existing entry is always accepted even when FDT is full."""
+        bbmd = BBMDManager(
+            local_address=BBMD_ADDR,
+            send_callback=collector.send,
+            local_broadcast_callback=collector.local_broadcast,
+            max_fdt_entries=1,
+        )
+        # Register one entry
+        bbmd.handle_bvlc(
+            BvlcFunction.REGISTER_FOREIGN_DEVICE,
+            (60).to_bytes(2, "big"),
+            FD_ADDR,
+        )
+        assert FD_ADDR in bbmd.fdt
+
+        # Re-register the same entry -- should succeed despite being at max
+        collector.clear()
+        bbmd.handle_bvlc(
+            BvlcFunction.REGISTER_FOREIGN_DEVICE,
+            (120).to_bytes(2, "big"),
+            FD_ADDR,
+        )
+        assert bbmd.fdt[FD_ADDR].ttl == 120
+        results = collector.find_bvlc_results(FD_ADDR)
+        assert BvlcResultCode.SUCCESSFUL_COMPLETION in results
+
+    def test_fdt_cleanup_expired_entries(self, bbmd: BBMDManager):
+        """Lines 615-621 / 646-647: Expired entries get cleaned up by _purge_expired_fdt_entries."""
+        fd3 = BIPAddress(host="10.0.0.52", port=47808)
+        # All three expired
+        bbmd._fdt[FD_ADDR] = FDTEntry(address=FD_ADDR, ttl=10, expiry=time.monotonic() - 100)
+        bbmd._fdt[FD_ADDR2] = FDTEntry(address=FD_ADDR2, ttl=10, expiry=time.monotonic() - 50)
+        bbmd._fdt[fd3] = FDTEntry(
+            address=fd3,
+            ttl=10,
+            expiry=time.monotonic() + 100,  # Not expired
+        )
+        assert len(bbmd._fdt) == 3
+
+        bbmd._purge_expired_fdt_entries()
+
+        assert FD_ADDR not in bbmd._fdt
+        assert FD_ADDR2 not in bbmd._fdt
+        assert fd3 in bbmd._fdt
+
+    @pytest.mark.asyncio
+    async def test_fdt_cleanup_loop_catches_exception(self, collector: SentCollector):
+        """Lines 610-613: Exception in cleanup loop is caught and logged, loop continues."""
+        bbmd = BBMDManager(
+            local_address=BBMD_ADDR,
+            send_callback=collector.send,
+            local_broadcast_callback=collector.local_broadcast,
+            fdt_cleanup_interval=0.01,
+        )
+        # Add an expired entry that will be purged
+        bbmd._fdt[FD_ADDR] = FDTEntry(address=FD_ADDR, ttl=1, expiry=time.monotonic() - 10)
+
+        await bbmd.start()
+        try:
+            # Wait for the cleanup loop to run at least once
+            await asyncio.sleep(0.05)
+            # The entry should have been purged
+            assert FD_ADDR not in bbmd._fdt
+        finally:
+            await bbmd.stop()
+
+    @pytest.mark.asyncio
+    async def test_fdt_cleanup_loop_exception_in_purge(self, collector: SentCollector):
+        """Lines 612-613: Exception inside _purge_expired_fdt_entries is caught and logged."""
+        bbmd = BBMDManager(
+            local_address=BBMD_ADDR,
+            send_callback=collector.send,
+            local_broadcast_callback=collector.local_broadcast,
+            fdt_cleanup_interval=0.01,
+        )
+
+        call_count = 0
+        original_purge = bbmd._purge_expired_fdt_entries
+
+        def failing_purge():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("Simulated cleanup error")
+            original_purge()
+
+        bbmd._purge_expired_fdt_entries = failing_purge  # type: ignore[assignment]
+
+        await bbmd.start()
+        try:
+            # Wait long enough for the loop to call purge at least twice
+            await asyncio.sleep(0.05)
+            # The loop should have continued after the exception
+            assert call_count >= 2
+        finally:
+            await bbmd.stop()
+
+    @pytest.mark.asyncio
+    async def test_stop_when_not_started(self, collector: SentCollector):
+        """Branch 245->exit: stop() when cleanup_task is None should be a no-op."""
+        bbmd = BBMDManager(
+            local_address=BBMD_ADDR,
+            send_callback=collector.send,
+        )
+        assert bbmd._cleanup_task is None
+        # Should not raise
+        await bbmd.stop()
+        assert bbmd._cleanup_task is None
+
+    def test_forwarded_npdu_no_local_broadcast_callback(self, collector: SentCollector):
+        """Branch 400->exit: Forwarded-NPDU when _local_broadcast is None."""
+        bbmd = BBMDManager(
+            local_address=BBMD_ADDR,
+            send_callback=collector.send,
+            local_broadcast_callback=None,  # No local broadcast callback
+        )
+        bbmd.set_bdt(
+            [
+                BDTEntry(address=BBMD_ADDR, broadcast_mask=ALL_ONES_MASK),
+                BDTEntry(address=PEER_ADDR, broadcast_mask=ALL_ONES_MASK),
+            ]
+        )
+
+        npdu = b"\x01\x00\x10"
+        handled = bbmd.handle_bvlc(
+            BvlcFunction.FORWARDED_NPDU,
+            npdu,
+            CLIENT_ADDR,
+        )
+        assert handled is False
+        # No local_broadcast was called (callback is None)
+        assert len(collector.local_broadcasts) == 0
+
+    def test_distribute_broadcast_no_local_broadcast_callback(self, collector: SentCollector):
+        """Branch 421->exit: Distribute-Broadcast when _local_broadcast is None."""
+        bbmd = BBMDManager(
+            local_address=BBMD_ADDR,
+            send_callback=collector.send,
+            local_broadcast_callback=None,  # No local broadcast callback
+        )
+        bbmd.set_bdt(
+            [
+                BDTEntry(address=BBMD_ADDR, broadcast_mask=ALL_ONES_MASK),
+                BDTEntry(address=PEER_ADDR, broadcast_mask=ALL_ONES_MASK),
+            ]
+        )
+        # Register a foreign device
+        bbmd.handle_bvlc(
+            BvlcFunction.REGISTER_FOREIGN_DEVICE,
+            (60).to_bytes(2, "big"),
+            FD_ADDR,
+        )
+        collector.clear()
+
+        npdu = b"\x01\x00\x10"
+        handled = bbmd.handle_bvlc(
+            BvlcFunction.DISTRIBUTE_BROADCAST_TO_NETWORK,
+            npdu,
+            FD_ADDR,
+        )
+        assert handled is True
+        # Should still forward to BDT peers
+        peer_sent = collector.find_sent_to(PEER_ADDR)
+        assert len(peer_sent) == 1
+        # No local broadcast callback was invoked
+        assert len(collector.local_broadcasts) == 0
+
+    def test_save_bdt_backup_exception(self, collector: SentCollector, tmp_path):
+        """Lines 646-647: Exception during BDT backup save is caught and logged."""
+        # Use a path that will cause a write failure
+        backup_path = tmp_path / "readonly_dir" / "bdt.json"
+        bbmd = BBMDManager(
+            local_address=BBMD_ADDR,
+            send_callback=collector.send,
+            bdt_backup_path=backup_path,
+        )
+        # The parent directory doesn't exist, so writing will fail
+        # set_bdt triggers _save_bdt_backup
+        bbmd.set_bdt(
+            [
+                BDTEntry(address=BBMD_ADDR, broadcast_mask=ALL_ONES_MASK),
+            ]
+        )
+        # Should not raise -- the error is caught and logged
+        assert len(bbmd.bdt) == 1

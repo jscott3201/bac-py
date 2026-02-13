@@ -190,3 +190,32 @@ class TestWritePropertyMultipleRequest:
         assert pv.property_array_index == 3
         assert pv.priority == 16
         assert pv.value == b"\xc4\x00\x00\x00\x05"
+
+
+# ---------------------------------------------------------------------------
+# Coverage: write_property_multiple.py branch partial 68->76
+# ---------------------------------------------------------------------------
+
+
+class TestWriteAccessSpecificationEmptyProperties:
+    """Branch 68->76: while loop exit in WriteAccessSpecification.decode.
+
+    Empty property values list causes immediate break at closing tag [1].
+    """
+
+    def test_empty_properties_list(self):
+        """Empty list of properties: while enters and immediately breaks."""
+        from bac_py.encoding.primitives import encode_context_object_id
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = bytearray()
+        # [0] object-identifier
+        buf.extend(encode_context_object_id(0, ObjectIdentifier(ObjectType.ANALOG_OUTPUT, 1)))
+        # [1] empty list of properties
+        buf.extend(encode_opening_tag(1))
+        buf.extend(encode_closing_tag(1))
+
+        decoded, offset = WriteAccessSpecification.decode(bytes(buf), 0)
+        assert decoded.object_identifier == ObjectIdentifier(ObjectType.ANALOG_OUTPUT, 1)
+        assert decoded.list_of_properties == []
+        assert offset == len(buf)

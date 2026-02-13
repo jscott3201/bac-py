@@ -884,3 +884,292 @@ class TestCOVNotificationMultipleRequest:
         assert notif_bv.monitored_object_identifier.object_type == ObjectType.BINARY_VALUE
         assert len(notif_bv.list_of_values) == 1
         assert notif_bv.list_of_values[0].value == pv_bytes_bv
+
+
+# ---------------------------------------------------------------------------
+# Coverage: cov.py lines 710-711, 718, 722, 219->229, 521->530, 615->624
+# ---------------------------------------------------------------------------
+
+
+class TestCOVPropertyValueNestedOpeningClosing:
+    """Lines 710-711, 718, 722: nested opening/closing tags in value field."""
+
+    def test_nested_opening_closing_in_value(self):
+        """Lines 709-711: opening tag inside value increments depth."""
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        # Create a value with nested opening/closing tags (e.g., a constructed type)
+        inner_value = bytearray()
+        inner_value.extend(encode_opening_tag(0))
+        inner_value.extend(encode_application_real(42.0))
+        inner_value.extend(encode_closing_tag(0))
+        value_bytes = bytes(inner_value)
+
+        pv = COVPropertyValue(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            value=value_bytes,
+        )
+        encoded = pv.encode()
+        decoded, _offset = COVPropertyValue.decode(encoded)
+
+        assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
+        assert decoded.value == value_bytes
+
+    def test_value_with_no_closing_tag(self):
+        """Line 722: value_bytes collected when depth never reaches 0 (edge case)."""
+        # This tests the else branch of the while loop (line 722)
+        # Build a COVPropertyValue with empty value
+        pv = COVPropertyValue(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            value=b"",
+        )
+        encoded = pv.encode()
+        decoded, _offset = COVPropertyValue.decode(encoded)
+        assert decoded.value == b""
+
+    def test_value_with_primitive_tag_inside(self):
+        """Line 720: primitive tag inside value advances offset correctly."""
+        pv = COVPropertyValue(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            value=encode_application_unsigned(100),
+        )
+        encoded = pv.encode()
+        decoded, _offset = COVPropertyValue.decode(encoded)
+        assert decoded.value == encode_application_unsigned(100)
+
+    def test_value_truncated_before_closing_tag(self):
+        """Line 722: while-else branch when data ends before closing tag [2]."""
+        from bac_py.encoding.primitives import encode_context_tagged, encode_unsigned
+        from bac_py.encoding.tags import encode_opening_tag
+
+        buf = bytearray()
+        # [0] propertyIdentifier
+        buf.extend(encode_context_tagged(0, encode_unsigned(85)))
+        # [2] value opening tag -- but no closing tag
+        buf.extend(encode_opening_tag(2))
+        buf.extend(encode_application_real(42.0))
+        # Deliberately omit closing tag 2 -- data ends here
+
+        decoded, _offset = COVPropertyValue.decode(bytes(buf))
+        assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
+        # value_bytes captured from value_start to end of data
+        assert decoded.value == encode_application_real(42.0)
+
+
+class TestCOVPropertyValueWithAllFields:
+    """Lines 691-700: COVPropertyValue with array_index + time_of_change."""
+
+    def test_round_trip_all_optional_fields(self):
+        """All optional fields: array_index and time_of_change."""
+        ts = BACnetTimeStamp(choice=1, value=99)
+        value_bytes = encode_application_real(3.14)
+        pv = COVPropertyValue(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            value=value_bytes,
+            array_index=5,
+            time_of_change=ts,
+        )
+        encoded = pv.encode()
+        decoded, _offset = COVPropertyValue.decode(encoded)
+
+        assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
+        assert decoded.value == value_bytes
+        assert decoded.array_index == 5
+        assert decoded.time_of_change is not None
+        assert decoded.time_of_change.choice == 1
+        assert decoded.time_of_change.value == 99
+
+
+class TestSubscribeCOVRequestBranches:
+    """Lines 219->229: decode path when listOfValues opening tag is missing."""
+
+    def test_subscribe_cov_cancellation_minimal(self):
+        """Verify cancellation encode/decode with minimal fields."""
+        req = SubscribeCOVRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 0),
+        )
+        encoded = req.encode()
+        decoded = SubscribeCOVRequest.decode(encoded)
+        assert decoded.issue_confirmed_notifications is None
+        assert decoded.lifetime is None
+        assert decoded.is_cancellation is True
+
+
+# ---------------------------------------------------------------------------
+# Coverage: common.py line 109 — BACnetPropertyValue priority out of range
+# ---------------------------------------------------------------------------
+
+
+class TestBACnetPropertyValuePriorityOutOfRange:
+    """Line 109: priority outside 1-16 raises BACnetRejectError."""
+
+    def test_priority_zero_raises(self):
+        import pytest
+
+        from bac_py.encoding.primitives import encode_context_tagged, encode_unsigned
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+        from bac_py.services.errors import BACnetRejectError
+
+        buf = bytearray()
+        # [0] propertyIdentifier = 85
+        buf.extend(encode_context_tagged(0, encode_unsigned(85)))
+        # [2] value (empty)
+        buf.extend(encode_opening_tag(2))
+        buf.extend(encode_closing_tag(2))
+        # [3] priority = 0 (out of range)
+        buf.extend(encode_context_tagged(3, encode_unsigned(0)))
+        with pytest.raises(BACnetRejectError):
+            BACnetPropertyValue.decode_from(bytes(buf))
+
+    def test_priority_17_raises(self):
+        import pytest
+
+        from bac_py.encoding.primitives import encode_context_tagged, encode_unsigned
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+        from bac_py.services.errors import BACnetRejectError
+
+        buf = bytearray()
+        # [0] propertyIdentifier = 85
+        buf.extend(encode_context_tagged(0, encode_unsigned(85)))
+        # [2] value (empty)
+        buf.extend(encode_opening_tag(2))
+        buf.extend(encode_closing_tag(2))
+        # [3] priority = 17 (out of range)
+        buf.extend(encode_context_tagged(3, encode_unsigned(17)))
+        with pytest.raises(BACnetRejectError):
+            BACnetPropertyValue.decode_from(bytes(buf))
+
+
+# ---------------------------------------------------------------------------
+# Coverage: cov.py branch partials for while-loop exits in decode methods
+# 219->229, 521->530, 615->624, 691->703, 794->803, 892->901
+# These are all "while offset < len(data)" loops that normally exit via break
+# when a closing tag is found. The untaken branch is the while condition
+# becoming false (data ends before closing tag). For most of these, a
+# round-trip with an empty list exercises the immediate-break path.
+# ---------------------------------------------------------------------------
+
+
+class TestCOVNotificationRequestEmptyValues:
+    """Branch 219->229: while loop exit in COVNotificationRequest.decode.
+
+    Empty listOfValues causes an immediate break at the closing tag [4].
+    """
+
+    def test_empty_list_of_values(self):
+        """Empty listOfValues: while enters and immediately breaks."""
+        notification = COVNotificationRequest(
+            subscriber_process_identifier=1,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            time_remaining=0,
+            list_of_values=[],
+        )
+        encoded = notification.encode()
+        decoded = COVNotificationRequest.decode(encoded)
+        assert decoded.list_of_values == []
+        assert decoded.time_remaining == 0
+
+
+class TestCOVSubscriptionSpecificationEmptyRefs:
+    """Branch 521->530: while loop exit in COVSubscriptionSpecification.decode.
+
+    Empty listOfCOVReferences exercises immediate break.
+    """
+
+    def test_empty_list_of_cov_references(self):
+        """Empty listOfCOVReferences: while enters and immediately breaks."""
+        spec = COVSubscriptionSpecification(
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            list_of_cov_references=[],
+        )
+        encoded = spec.encode()
+        decoded, _offset = COVSubscriptionSpecification.decode(encoded)
+        assert decoded.monitored_object_identifier.object_type == ObjectType.ANALOG_INPUT
+        assert decoded.list_of_cov_references == []
+
+
+class TestSubscribeCOVPropertyMultipleEmptySpecs:
+    """Branch 615->624: while loop exit in SubscribeCOVPropertyMultiple.decode.
+
+    Empty listOfCOVSubscriptionSpecifications exercises immediate break.
+    """
+
+    def test_empty_list_of_specs(self):
+        """Empty specifications list: while enters and immediately breaks."""
+        req = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=1,
+            list_of_cov_subscription_specifications=[],
+            issue_confirmed_notifications=True,
+            lifetime=100,
+        )
+        encoded = req.encode()
+        decoded = SubscribeCOVPropertyMultipleRequest.decode(encoded)
+        assert decoded.subscriber_process_identifier == 1
+        assert decoded.list_of_cov_subscription_specifications == []
+        assert decoded.issue_confirmed_notifications is True
+        assert decoded.lifetime == 100
+
+
+class TestCOVPropertyValueNoArrayIndex:
+    """Branch 691->703: optional arrayIndex check in COVPropertyValue.decode.
+
+    When the next tag is NOT array index [1], the code skips directly to
+    the value tag [2].
+    """
+
+    def test_property_value_without_array_index(self):
+        """COVPropertyValue without array_index -- tag check falls through."""
+        value_bytes = encode_application_real(42.0)
+        pv = COVPropertyValue(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            value=value_bytes,
+            array_index=None,
+        )
+        encoded = pv.encode()
+        decoded, _offset = COVPropertyValue.decode(encoded)
+        assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
+        assert decoded.array_index is None
+        assert decoded.value == value_bytes
+
+
+class TestCOVObjectNotificationEmptyValues:
+    """Branch 794->803: while loop exit in COVObjectNotification.decode.
+
+    Empty listOfValues exercises immediate break.
+    """
+
+    def test_empty_list_of_values(self):
+        """Empty listOfValues in COVObjectNotification."""
+        notification = COVObjectNotification(
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            list_of_values=[],
+        )
+        encoded = notification.encode()
+        decoded, _offset = COVObjectNotification.decode(encoded)
+        assert decoded.monitored_object_identifier.object_type == ObjectType.ANALOG_INPUT
+        assert decoded.list_of_values == []
+
+
+class TestCOVNotificationMultipleEmptyNotifications:
+    """Branch 892->901: while loop exit in COVNotificationMultipleRequest.decode.
+
+    Empty listOfCOVNotifications exercises immediate break.
+    """
+
+    def test_empty_list_of_notifications(self):
+        """Empty listOfCOVNotifications in COVNotificationMultipleRequest."""
+        timestamp = BACnetTimeStamp(choice=1, value=50)
+        req = COVNotificationMultipleRequest(
+            subscriber_process_identifier=1,
+            initiating_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            time_remaining=60,
+            timestamp=timestamp,
+            list_of_cov_notifications=[],
+        )
+        encoded = req.encode()
+        decoded = COVNotificationMultipleRequest.decode(encoded)
+        assert decoded.subscriber_process_identifier == 1
+        assert decoded.list_of_cov_notifications == []
+        assert decoded.time_remaining == 60

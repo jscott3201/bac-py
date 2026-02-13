@@ -1118,3 +1118,58 @@ class TestIntEnumHandling:
         assert PropertyIdentifier(d["property"]) == PropertyIdentifier.PRESENT_VALUE
         assert BinaryPV(d["value"]) == BinaryPV.ACTIVE
         assert EventType(d["event_type"]) == EventType.CHANGE_OF_STATE
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests for JsonSerializer internals
+# ---------------------------------------------------------------------------
+
+
+class TestJsonSerializerCoverageGaps:
+    def test_decode_non_dict_raises_type_error(self):
+        """decode() with a JSON array (non-dict) raises TypeError."""
+        s = JsonSerializer()
+        with pytest.raises(TypeError, match="Expected JSON object"):
+            s.decode(b"[1, 2, 3]")
+
+    def test_encode_memoryview(self):
+        """Encoding a dict containing a memoryview value produces hex string."""
+        s = JsonSerializer()
+        data = {"mv": memoryview(b"\xde\xad\xbe\xef")}
+        encoded = s.encode(data)
+        decoded = s.decode(encoded)
+        assert decoded == {"mv": "deadbeef"}
+
+    def test_encode_int_enum(self):
+        """Encoding a dict containing an IntEnum value produces an integer."""
+        s = JsonSerializer()
+        data = {"type": ObjectType.ANALOG_INPUT}
+        encoded = s.encode(data)
+        decoded = s.decode(encoded)
+        assert decoded["type"] == 0
+        assert isinstance(decoded["type"], int)
+
+    def test_encode_unsupported_type_raises(self):
+        """Encoding a dict with an unsupported type (set) raises TypeError."""
+        s = JsonSerializer()
+        with pytest.raises(TypeError):
+            s.encode({"bad": {1, 2, 3}})
+
+    def test_decode_valid_object(self):
+        """decode() works correctly with a valid JSON object."""
+        s = JsonSerializer()
+        result = s.decode(b'{"key": "value", "num": 42}')
+        assert result == {"key": "value", "num": 42}
+
+    def test_default_int_enum_returns_int(self):
+        """Line 61: _default returns int for IntEnum values."""
+        from enum import IntEnum
+
+        class MyEnum(IntEnum):
+            FOO = 42
+            BAR = 99
+
+        s = JsonSerializer()
+        assert s._default(MyEnum.FOO) == 42
+        assert s._default(MyEnum.BAR) == 99
+        assert isinstance(s._default(MyEnum.FOO), int)

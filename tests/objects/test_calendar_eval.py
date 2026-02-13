@@ -249,3 +249,61 @@ class TestCalendarEvaluate:
         # Should not raise (uses datetime.date.today())
         result = cal.evaluate()
         assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Coverage: calendar.py line 48 (wildcard year match) and line 171
+# ---------------------------------------------------------------------------
+
+
+class TestCalendarWildcardYear:
+    """Line 48: year field == 0xFF => wildcard year always matches."""
+
+    def test_wildcard_year_matches_any_year(self):
+        """Line 47-48: entry.year == 0xFF matches any year."""
+        entry = BACnetCalendarEntry(choice=0, value=BACnetDate(0xFF, 6, 15, 0xFF))
+        assert matches_calendar_entry(entry, 2024, 6, 15, 6)
+        assert matches_calendar_entry(entry, 1999, 6, 15, 2)
+        assert matches_calendar_entry(entry, 2100, 6, 15, 3)
+
+    def test_specific_year_no_match(self):
+        """Line 47: entry.year != 0xFF and entry.year != year => False."""
+        entry = BACnetCalendarEntry(choice=0, value=BACnetDate(2024, 6, 15, 0xFF))
+        assert not matches_calendar_entry(entry, 2025, 6, 15, 7)
+
+
+class TestCalendarDateRangeBoundary:
+    """Line 171: date range boundary inclusive check (matches_calendar_entry choice=1)."""
+
+    def test_date_range_inclusive_start(self):
+        """Line 167: choice==1, range start is inclusive."""
+        entry = BACnetCalendarEntry(
+            choice=1,
+            value=BACnetDateRange(
+                start_date=BACnetDate(2024, 3, 1, 0xFF),
+                end_date=BACnetDate(2024, 3, 31, 0xFF),
+            ),
+        )
+        assert matches_calendar_entry(
+            entry,
+            2024,
+            3,
+            1,
+            5,
+        )
+
+    def test_date_range_inclusive_end(self):
+        """Line 167: choice==1, range end is inclusive."""
+        entry = BACnetCalendarEntry(
+            choice=1,
+            value=BACnetDateRange(
+                start_date=BACnetDate(2024, 3, 1, 0xFF),
+                end_date=BACnetDate(2024, 3, 31, 0xFF),
+            ),
+        )
+        assert matches_calendar_entry(entry, 2024, 3, 31, 7)
+
+    def test_unknown_choice_returns_false(self):
+        """Line 171: matches_calendar_entry with unrecognized choice returns False."""
+        entry = BACnetCalendarEntry(choice=99, value=None)
+        assert not matches_calendar_entry(entry, 2024, 6, 15, 6)

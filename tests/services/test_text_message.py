@@ -88,3 +88,50 @@ class TestUnconfirmedTextMessageRequest:
 
     def test_inherits_from_confirmed(self):
         assert issubclass(UnconfirmedTextMessageRequest, ConfirmedTextMessageRequest)
+
+
+# ---------------------------------------------------------------------------
+# Coverage: text_message.py branch partial 98->102
+# ---------------------------------------------------------------------------
+
+
+class TestConfirmedTextMessageRequestMessageClassChoice:
+    """Branch 98->102: messageClass CHOICE fallthrough in TextMessage.decode.
+
+    When the inner messageClass tag number is neither 0 nor 1, both
+    conditionals fail and the code falls through with neither field set.
+    """
+
+    def test_message_class_unknown_choice(self):
+        """MessageClass with unknown CHOICE tag number (not 0 or 1).
+
+        Manually construct data with messageClass containing tag number 5.
+        """
+        from bac_py.encoding.primitives import (
+            encode_character_string,
+            encode_context_object_id,
+            encode_context_tagged,
+            encode_enumerated,
+            encode_unsigned,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+        from bac_py.types.enums import ObjectType
+        from bac_py.types.primitives import ObjectIdentifier
+
+        buf = bytearray()
+        # [0] textMessageSourceDevice
+        buf.extend(encode_context_object_id(0, ObjectIdentifier(ObjectType.DEVICE, 1)))
+        # [1] messageClass (constructed) with unknown inner tag number 5
+        buf.extend(encode_opening_tag(1))
+        buf.extend(encode_context_tagged(5, encode_unsigned(42)))
+        buf.extend(encode_closing_tag(1))
+        # [2] messagePriority = NORMAL (0)
+        buf.extend(encode_context_tagged(2, encode_enumerated(0)))
+        # [3] message
+        buf.extend(encode_context_tagged(3, encode_character_string("Hello")))
+
+        decoded = ConfirmedTextMessageRequest.decode(bytes(buf))
+        assert decoded.message_class_numeric is None
+        assert decoded.message_class_character is None
+        assert decoded.message == "Hello"
+        assert decoded.message_priority == MessagePriority.NORMAL

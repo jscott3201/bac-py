@@ -307,3 +307,65 @@ class TestTimeSeriesImporterCSV:
         restored = TimeSeriesImporter.from_csv(csv_str)
         assert restored[0].timestamp.date.year == 0xFF
         assert restored[0].timestamp.time.hour == 0xFF
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests for CSV import error handling
+# ---------------------------------------------------------------------------
+
+
+class TestCSVImportMissingTimestampColumn:
+    """Line 186: CSV without 'timestamp' column raises ValueError."""
+
+    def test_missing_timestamp_column(self):
+        csv_data = "value,status_flags\n72.5,0000\n"
+        with pytest.raises(ValueError, match="must have 'timestamp' and 'value'"):
+            TimeSeriesImporter.from_csv(csv_data)
+
+    def test_missing_value_column(self):
+        csv_data = "timestamp,status_flags\n2024-01-15T10:30:00.00,0000\n"
+        with pytest.raises(ValueError, match="must have 'timestamp' and 'value'"):
+            TimeSeriesImporter.from_csv(csv_data)
+
+
+class TestCSVImportEmptyTimestamp:
+    """Line 194: Row with empty timestamp raises ValueError."""
+
+    def test_empty_timestamp_in_row(self):
+        csv_data = "timestamp,value\n,72.5\n"
+        with pytest.raises(ValueError, match="Row 2: missing timestamp"):
+            TimeSeriesImporter.from_csv(csv_data)
+
+
+class TestCSVImportInvalidTimestamp:
+    """Lines 198-199: Row with invalid ISO timestamp raises ValueError."""
+
+    def test_invalid_iso_format(self):
+        csv_data = "timestamp,value\nnot-a-timestamp,72.5\n"
+        with pytest.raises(ValueError, match="Row 2: invalid timestamp"):
+            TimeSeriesImporter.from_csv(csv_data)
+
+    def test_incomplete_timestamp(self):
+        csv_data = "timestamp,value\n2024-01,72.5\n"
+        with pytest.raises(ValueError, match="Row 2: invalid timestamp"):
+            TimeSeriesImporter.from_csv(csv_data)
+
+
+class TestCSVImportInvalidStatusFlags:
+    """Lines 221-222: Row with invalid status_flags raises ValueError."""
+
+    def test_invalid_status_flags(self):
+        csv_data = "timestamp,value,status_flags\n2024-01-15T10:30:00.00,72.5,abcd\n"
+        with pytest.raises(ValueError, match="Row 2: invalid status_flags"):
+            TimeSeriesImporter.from_csv(csv_data)
+
+
+class TestJSONImportRecordsNotArray:
+    """Line 167: JSON with non-array 'records' raises ValueError."""
+
+    def test_records_not_array(self):
+        import json
+
+        data = json.dumps({"format": "bacnet-time-series-v1", "records": "not-a-list"})
+        with pytest.raises(ValueError, match="Expected 'records' to be an array"):
+            TimeSeriesImporter.from_json(data)

@@ -179,3 +179,56 @@ class TestReadRangeACK:
         decoded = ReadRangeACK.decode(encoded)
         assert decoded.item_count == 0
         assert decoded.item_data == b""
+
+
+# ---------------------------------------------------------------------------
+# Coverage: read_range.py branch partials 222->267, 248->267
+# ---------------------------------------------------------------------------
+
+
+class TestReadRangeRequestNoRangeWithArrayIndex:
+    """Branches 222->267 and 248->267: range qualifier absent in ReadRange.decode.
+
+    Branch 222->267 covers offset < len(data) being False after array index.
+    Branch 248->267 covers opening tag number not matching 3, 6, or 7.
+    """
+
+    def test_no_range_qualifier_with_array_index(self):
+        """Array index present but no range qualifier -- branch 222->267."""
+        request = ReadRangeRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=5,
+            range=None,
+        )
+        encoded = request.encode()
+        decoded = ReadRangeRequest.decode(encoded)
+        assert decoded.property_array_index == 5
+        assert decoded.range is None
+
+    def test_range_qualifier_non_matching_opening_tag(self):
+        """Opening tag present but not 3, 6, or 7 -- branch 248->267."""
+        from bac_py.encoding.primitives import (
+            encode_application_signed,
+            encode_application_unsigned,
+            encode_context_object_id,
+            encode_context_tagged,
+            encode_unsigned,
+        )
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = bytearray()
+        # [0] object-identifier
+        buf.extend(encode_context_object_id(0, ObjectIdentifier(ObjectType.DEVICE, 1)))
+        # [1] property-identifier
+        buf.extend(encode_context_tagged(1, encode_unsigned(PropertyIdentifier.OBJECT_LIST)))
+        # Opening tag 9 (not 3, 6, or 7) -- should be treated as no range
+        buf.extend(encode_opening_tag(9))
+        buf.extend(encode_application_unsigned(1))
+        buf.extend(encode_application_signed(10))
+        buf.extend(encode_closing_tag(9))
+
+        decoded = ReadRangeRequest.decode(bytes(buf))
+        assert decoded.object_identifier == ObjectIdentifier(ObjectType.DEVICE, 1)
+        assert decoded.property_identifier == PropertyIdentifier.OBJECT_LIST
+        assert decoded.range is None

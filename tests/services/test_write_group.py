@@ -95,3 +95,28 @@ class TestWriteGroupRequest:
         assert decoded.group_number == 0xFFFFFFFF
         assert decoded.write_priority == 16
         assert decoded.change_list[0].channel == 65535
+
+
+# ---------------------------------------------------------------------------
+# Coverage: write_group.py branch partial 133->140
+# ---------------------------------------------------------------------------
+
+
+class TestWriteGroupRequestEmptyChangeList:
+    """Branch 133->140: while loop exit in WriteGroupRequest.decode.
+
+    Empty changeList causes immediate break at closing tag [2].
+    """
+
+    def test_empty_change_list(self):
+        """Empty changeList: while enters and immediately breaks at closing tag."""
+        request = WriteGroupRequest(
+            group_number=1,
+            write_priority=8,
+            change_list=[],
+        )
+        encoded = request.encode()
+        decoded = WriteGroupRequest.decode(encoded)
+        assert decoded.group_number == 1
+        assert decoded.write_priority == 8
+        assert decoded.change_list == []

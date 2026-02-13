@@ -292,3 +292,97 @@ class TestReadPropertyMultipleACK:
         decoded = ReadPropertyMultipleACK.decode(encoded)
         assert len(decoded.list_of_read_access_results) == 1
         assert len(decoded.list_of_read_access_results[0].list_of_results) == 0
+
+
+# ---------------------------------------------------------------------------
+# Coverage: read_property_multiple.py branch partials
+# 143->151, 237->245, 285->300, 359->367
+# ---------------------------------------------------------------------------
+
+
+class TestReadAccessSpecificationEmptyRefs:
+    """Branch 143->151: while loop exit in ReadAccessSpecification.decode.
+
+    Empty property references list causes immediate break at closing tag [1].
+    """
+
+    def test_empty_property_references(self):
+        """Empty list of property references: while exits via break."""
+        spec = ReadAccessSpecification(
+            object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            list_of_property_references=[],
+        )
+        encoded = spec.encode()
+        decoded, offset = ReadAccessSpecification.decode(encoded, 0)
+        assert decoded.object_identifier == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        assert decoded.list_of_property_references == []
+        assert offset == len(encoded)
+
+
+class TestReadResultElementAccessError:
+    """Branch 285->300: neither value nor error tag in ReadResultElement.decode.
+
+    When the tag is neither opening [4] nor opening [5], both checks fail
+    and the code falls through to the return with both fields as None.
+    """
+
+    def test_neither_value_nor_error(self):
+        """ReadResultElement with neither property-value nor property-access-error.
+
+        Manually construct a result element that has property-identifier but
+        then a tag that is neither opening [4] nor opening [5].
+        """
+        from bac_py.encoding.primitives import encode_context_tagged, encode_unsigned
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = bytearray()
+        # [2] property-identifier = PRESENT_VALUE (85)
+        buf.extend(encode_context_tagged(2, encode_unsigned(85)))
+        # Instead of [4] or [5], provide opening tag 6 (unexpected)
+        buf.extend(encode_opening_tag(6))
+        buf.extend(encode_closing_tag(6))
+
+        decoded, _offset = ReadResultElement.decode(bytes(buf), 0)
+        assert decoded.property_identifier == PropertyIdentifier.PRESENT_VALUE
+        assert decoded.property_value is None
+        assert decoded.property_access_error is None
+
+
+class TestReadResultElementEncodeNoValueNoError:
+    """Branch 237->245: encode with neither value nor error in ReadResultElement.
+
+    When property_value is None and property_access_error is also None,
+    neither [4] nor [5] block is encoded.
+    """
+
+    def test_encode_no_value_no_error(self):
+        """ReadResultElement with neither property_value nor property_access_error."""
+        elem = ReadResultElement(
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            property_value=None,
+            property_access_error=None,
+        )
+        encoded = elem.encode()
+        # Should only contain [2] property-identifier, no [4] or [5]
+        assert len(encoded) > 0
+        # Decode should give back the same structure
+        # (but the decode is handled by a separate test)
+
+
+class TestReadAccessResultEmptyResults:
+    """Branch 359->367: while loop exit in ReadAccessResult.decode.
+
+    Empty list of result elements exercises immediate break at closing tag.
+    """
+
+    def test_empty_result_elements(self):
+        """Empty list of results in ReadAccessResult: while exits via break."""
+        result = ReadAccessResult(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            list_of_results=[],
+        )
+        encoded = result.encode()
+        decoded, offset = ReadAccessResult.decode(encoded, 0)
+        assert decoded.object_identifier == ObjectIdentifier(ObjectType.DEVICE, 1)
+        assert decoded.list_of_results == []
+        assert offset == len(encoded)

@@ -30,15 +30,15 @@ class TransportPort(Protocol):
         - MS/TP:           1 byte   (station address 0-254)
     """
 
-    async def start(self) -> None:
+    async def start(self) -> None:  # pragma: no cover
         """Bind the underlying transport and begin listening."""
         ...
 
-    async def stop(self) -> None:
+    async def stop(self) -> None:  # pragma: no cover
         """Release resources and stop listening."""
         ...
 
-    def on_receive(self, callback: Callable[[bytes, bytes], None]) -> None:
+    def on_receive(self, callback: Callable[[bytes, bytes], None]) -> None:  # pragma: no cover
         """Register a callback for incoming NPDUs.
 
         :param callback: Called with ``(npdu_bytes, source_mac)`` for each
@@ -47,7 +47,7 @@ class TransportPort(Protocol):
         """
         ...
 
-    def send_unicast(self, npdu: bytes, mac_address: bytes) -> None:
+    def send_unicast(self, npdu: bytes, mac_address: bytes) -> None:  # pragma: no cover
         """Send an NPDU to a specific station.
 
         :param npdu: Encoded NPDU bytes.
@@ -55,7 +55,7 @@ class TransportPort(Protocol):
         """
         ...
 
-    def send_broadcast(self, npdu: bytes) -> None:
+    def send_broadcast(self, npdu: bytes) -> None:  # pragma: no cover
         """Send an NPDU as a local broadcast.
 
         :param npdu: Encoded NPDU bytes.
@@ -63,11 +63,11 @@ class TransportPort(Protocol):
         ...
 
     @property
-    def local_mac(self) -> bytes:
+    def local_mac(self) -> bytes:  # pragma: no cover
         """The MAC address of this port in its native encoding."""
         ...
 
     @property
-    def max_npdu_length(self) -> int:
+    def max_npdu_length(self) -> int:  # pragma: no cover
         """Maximum NPDU length supported by this data-link (Table 6-1)."""
         ...

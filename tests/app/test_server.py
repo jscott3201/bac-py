@@ -4154,3 +4154,1674 @@ class TestValidatePasswordUnexpected:
             await handlers.handle_device_communication_control(17, request.encode(), SOURCE)
         assert exc_info.value.error_class == ErrorClass.SECURITY
         assert exc_info.value.error_code == ErrorCode.PASSWORD_FAILURE
+
+
+# ---------------------------------------------------------------------------
+# Section 4: Coverage gap tests
+# ---------------------------------------------------------------------------
+
+
+class TestCOVManagerNullCheck:
+    """Test handlers when COV manager is None."""
+
+    async def test_subscribe_cov_cov_manager_none(self):
+        """SubscribeCOV when cov_manager is None raises SERVICE_REQUEST_DENIED."""
+        from bac_py.services.cov import SubscribeCOVRequest
+
+        app, db, _device, handlers = _make_app_and_handlers()
+        app.cov_manager = None
+
+        ai = AnalogInputObject(1)
+        db.add(ai)
+
+        request = SubscribeCOVRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=ai.object_identifier,
+            issue_confirmed_notifications=True,
+            lifetime=300,
+        )
+
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_subscribe_cov(
+                ConfirmedServiceChoice.SUBSCRIBE_COV,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.SERVICE_REQUEST_DENIED
+
+    async def test_subscribe_cov_property_cov_manager_none(self):
+        """SubscribeCOVProperty when cov_manager is None raises SERVICE_REQUEST_DENIED."""
+        from bac_py.services.cov import BACnetPropertyReference, SubscribeCOVPropertyRequest
+
+        app, db, _device, handlers = _make_app_and_handlers()
+        app.cov_manager = None
+
+        ai = AnalogInputObject(1)
+        db.add(ai)
+
+        request = SubscribeCOVPropertyRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=ai.object_identifier,
+            monitored_property_identifier=BACnetPropertyReference(
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+            issue_confirmed_notifications=True,
+            lifetime=300,
+        )
+
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_subscribe_cov_property(
+                ConfirmedServiceChoice.SUBSCRIBE_COV_PROPERTY,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.SERVICE_REQUEST_DENIED
+
+    async def test_subscribe_cov_property_multiple_cov_manager_none(self):
+        """SubscribeCOVPropertyMultiple when cov_manager is None raises error."""
+        from bac_py.services.cov import (
+            BACnetPropertyReference,
+            COVReference,
+            COVSubscriptionSpecification,
+            SubscribeCOVPropertyMultipleRequest,
+        )
+
+        app, _db, _device, handlers = _make_app_and_handlers()
+        app.cov_manager = None
+
+        request = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=1,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=int(PropertyIdentifier.PRESENT_VALUE),
+                            ),
+                        ),
+                    ],
+                ),
+            ],
+            issue_confirmed_notifications=True,
+            lifetime=300,
+        )
+
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_subscribe_cov_property_multiple(
+                ConfirmedServiceChoice.SUBSCRIBE_COV_PROPERTY_MULTIPLE,
+                request.encode(),
+                SOURCE,
+            )
+        assert exc_info.value.error_code == ErrorCode.SERVICE_REQUEST_DENIED
+
+
+class TestVTHandlers:
+    """Test virtual terminal open/close/data handlers."""
+
+    async def test_vt_open_success(self):
+        """VT-Open creates a session and returns a remote session ID."""
+        from bac_py.services.virtual_terminal import VTOpenACK, VTOpenRequest
+        from bac_py.types.enums import VTClass
+
+        app, _db, device, handlers = _make_app_and_handlers()
+        # Set VT_CLASSES_SUPPORTED so the request is accepted
+        device._properties[PropertyIdentifier.VT_CLASSES_SUPPORTED] = [VTClass.DEFAULT_TERMINAL]
+        # Reset VT session state on the mock app (getattr on MagicMock returns MagicMock)
+        app._vt_session_counter = 0
+        app._vt_sessions = {}
+
+        request = VTOpenRequest(vt_class=VTClass.DEFAULT_TERMINAL, local_vt_session_identifier=10)
+        result = await handlers.handle_vt_open(
+            ConfirmedServiceChoice.VT_OPEN, request.encode(), SOURCE
+        )
+        ack = VTOpenACK.decode(result)
+        assert ack.remote_vt_session_identifier == 1
+
+    async def test_vt_open_unknown_class(self):
+        """VT-Open with unsupported class raises UNKNOWN_VT_CLASS."""
+        from bac_py.services.virtual_terminal import VTOpenRequest
+        from bac_py.types.enums import VTClass
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+        # Only DEFAULT_TERMINAL is supported
+        device._properties[PropertyIdentifier.VT_CLASSES_SUPPORTED] = [VTClass.DEFAULT_TERMINAL]
+
+        request = VTOpenRequest(vt_class=VTClass.ANSI_X3_64, local_vt_session_identifier=10)
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_vt_open(ConfirmedServiceChoice.VT_OPEN, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_VT_CLASS
+
+    async def test_vt_close_success(self):
+        """VT-Close removes existing sessions."""
+        from bac_py.services.virtual_terminal import VTCloseRequest, VTOpenRequest
+        from bac_py.types.enums import VTClass
+
+        app, _db, device, handlers = _make_app_and_handlers()
+        device._properties[PropertyIdentifier.VT_CLASSES_SUPPORTED] = []
+        app._vt_session_counter = 0
+        app._vt_sessions = {}
+
+        # Open a session first
+        open_req = VTOpenRequest(vt_class=VTClass.DEFAULT_TERMINAL, local_vt_session_identifier=10)
+        await handlers.handle_vt_open(ConfirmedServiceChoice.VT_OPEN, open_req.encode(), SOURCE)
+
+        # Close it
+        close_req = VTCloseRequest(list_of_remote_vt_session_identifiers=[1])
+        result = await handlers.handle_vt_close(
+            ConfirmedServiceChoice.VT_CLOSE, close_req.encode(), SOURCE
+        )
+        assert result is None  # SimpleACK
+
+    async def test_vt_close_unknown_session(self):
+        """VT-Close with unknown session ID raises UNKNOWN_VT_SESSION."""
+        from bac_py.services.virtual_terminal import VTCloseRequest
+
+        _app, _db, _device, handlers = _make_app_and_handlers()
+
+        request = VTCloseRequest(list_of_remote_vt_session_identifiers=[999])
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_vt_close(
+                ConfirmedServiceChoice.VT_CLOSE, request.encode(), SOURCE
+            )
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_VT_SESSION
+
+    async def test_vt_data_success(self):
+        """VT-Data on an active session returns VT-Data-ACK."""
+        from bac_py.services.virtual_terminal import VTDataACK, VTDataRequest, VTOpenRequest
+        from bac_py.types.enums import VTClass
+
+        app, _db, device, handlers = _make_app_and_handlers()
+        device._properties[PropertyIdentifier.VT_CLASSES_SUPPORTED] = []
+        app._vt_session_counter = 0
+        app._vt_sessions = {}
+
+        # Open session
+        open_req = VTOpenRequest(vt_class=VTClass.DEFAULT_TERMINAL, local_vt_session_identifier=10)
+        await handlers.handle_vt_open(ConfirmedServiceChoice.VT_OPEN, open_req.encode(), SOURCE)
+
+        # Send data
+        data_req = VTDataRequest(vt_session_identifier=1, vt_new_data=b"hello", vt_data_flag=False)
+        result = await handlers.handle_vt_data(
+            ConfirmedServiceChoice.VT_DATA, data_req.encode(), SOURCE
+        )
+        ack = VTDataACK.decode(result)
+        assert ack.all_new_data_accepted is True
+
+    async def test_vt_data_unknown_session(self):
+        """VT-Data on an unknown session raises UNKNOWN_VT_SESSION."""
+        from bac_py.services.virtual_terminal import VTDataRequest
+
+        _app, _db, _device, handlers = _make_app_and_handlers()
+
+        request = VTDataRequest(vt_session_identifier=999, vt_new_data=b"test", vt_data_flag=False)
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_vt_data(ConfirmedServiceChoice.VT_DATA, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_VT_SESSION
+
+
+class TestFileAccessHandlers:
+    """Test AtomicReadFile/AtomicWriteFile handlers for stream and record access."""
+
+    async def test_atomic_read_file_stream(self):
+        """AtomicReadFile with stream access returns file data."""
+        from bac_py.objects.file import FileObject
+        from bac_py.services.file_access import (
+            AtomicReadFileACK,
+            AtomicReadFileRequest,
+            StreamReadAccess,
+            StreamReadACK,
+        )
+        from bac_py.types.enums import FileAccessMethod
+
+        _app, db, _device, handlers = _make_app_and_handlers()
+        f = FileObject(1, file_access_method=FileAccessMethod.STREAM_ACCESS)
+        f._file_data = b"Hello BACnet!"
+        f._update_file_size()
+        db.add(f)
+
+        request = AtomicReadFileRequest(
+            file_identifier=f.object_identifier,
+            access_method=StreamReadAccess(file_start_position=0, requested_octet_count=5),
+        )
+        result = await handlers.handle_atomic_read_file(
+            ConfirmedServiceChoice.ATOMIC_READ_FILE, request.encode(), SOURCE
+        )
+        ack = AtomicReadFileACK.decode(result)
+        assert isinstance(ack.access_method, StreamReadACK)
+        assert ack.access_method.file_data == b"Hello"
+        assert ack.end_of_file is False
+
+    async def test_atomic_read_file_record(self):
+        """AtomicReadFile with record access returns records."""
+        from bac_py.objects.file import FileObject
+        from bac_py.services.file_access import (
+            AtomicReadFileACK,
+            AtomicReadFileRequest,
+            RecordReadAccess,
+            RecordReadACK,
+        )
+        from bac_py.types.enums import FileAccessMethod
+
+        _app, db, _device, handlers = _make_app_and_handlers()
+        f = FileObject(1, file_access_method=FileAccessMethod.RECORD_ACCESS)
+        f._record_data = [b"rec0", b"rec1", b"rec2"]
+        f._update_file_size()
+        db.add(f)
+
+        request = AtomicReadFileRequest(
+            file_identifier=f.object_identifier,
+            access_method=RecordReadAccess(file_start_record=0, requested_record_count=2),
+        )
+        result = await handlers.handle_atomic_read_file(
+            ConfirmedServiceChoice.ATOMIC_READ_FILE, request.encode(), SOURCE
+        )
+        ack = AtomicReadFileACK.decode(result)
+        assert isinstance(ack.access_method, RecordReadACK)
+        assert ack.access_method.returned_record_count == 2
+        assert ack.access_method.file_record_data == [b"rec0", b"rec1"]
+
+    async def test_atomic_read_file_unknown_object(self):
+        """AtomicReadFile for unknown object raises UNKNOWN_OBJECT."""
+        from bac_py.services.file_access import (
+            AtomicReadFileRequest,
+            StreamReadAccess,
+        )
+
+        _app, _db, _device, handlers = _make_app_and_handlers()
+
+        request = AtomicReadFileRequest(
+            file_identifier=ObjectIdentifier(ObjectType.FILE, 999),
+            access_method=StreamReadAccess(file_start_position=0, requested_octet_count=10),
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_atomic_read_file(
+                ConfirmedServiceChoice.ATOMIC_READ_FILE, request.encode(), SOURCE
+            )
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+    async def test_atomic_read_file_not_file_object(self):
+        """AtomicReadFile on a non-File object raises INCONSISTENT_OBJECT_TYPE."""
+        from bac_py.services.file_access import (
+            AtomicReadFileRequest,
+            StreamReadAccess,
+        )
+
+        _app, db, _device, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        db.add(ai)
+
+        request = AtomicReadFileRequest(
+            file_identifier=ai.object_identifier,
+            access_method=StreamReadAccess(file_start_position=0, requested_octet_count=10),
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_atomic_read_file(
+                ConfirmedServiceChoice.ATOMIC_READ_FILE, request.encode(), SOURCE
+            )
+        assert exc_info.value.error_code == ErrorCode.INCONSISTENT_OBJECT_TYPE
+
+    async def test_atomic_write_file_stream(self):
+        """AtomicWriteFile with stream access writes data."""
+        from bac_py.objects.file import FileObject
+        from bac_py.services.file_access import (
+            AtomicWriteFileACK,
+            AtomicWriteFileRequest,
+            StreamWriteAccess,
+        )
+        from bac_py.types.enums import FileAccessMethod
+
+        _app, db, _device, handlers = _make_app_and_handlers()
+        f = FileObject(1, file_access_method=FileAccessMethod.STREAM_ACCESS)
+        db.add(f)
+
+        request = AtomicWriteFileRequest(
+            file_identifier=f.object_identifier,
+            access_method=StreamWriteAccess(file_start_position=0, file_data=b"BACnet"),
+        )
+        result = await handlers.handle_atomic_write_file(
+            ConfirmedServiceChoice.ATOMIC_WRITE_FILE, request.encode(), SOURCE
+        )
+        ack = AtomicWriteFileACK.decode(result)
+        assert ack.is_stream is True
+        assert ack.file_start == 0
+        assert f._file_data == b"BACnet"
+
+    async def test_atomic_write_file_record(self):
+        """AtomicWriteFile with record access writes records."""
+        from bac_py.objects.file import FileObject
+        from bac_py.services.file_access import (
+            AtomicWriteFileACK,
+            AtomicWriteFileRequest,
+            RecordWriteAccess,
+        )
+        from bac_py.types.enums import FileAccessMethod
+
+        _app, db, _device, handlers = _make_app_and_handlers()
+        f = FileObject(1, file_access_method=FileAccessMethod.RECORD_ACCESS)
+        db.add(f)
+
+        request = AtomicWriteFileRequest(
+            file_identifier=f.object_identifier,
+            access_method=RecordWriteAccess(
+                file_start_record=0, record_count=2, file_record_data=[b"A", b"B"]
+            ),
+        )
+        result = await handlers.handle_atomic_write_file(
+            ConfirmedServiceChoice.ATOMIC_WRITE_FILE, request.encode(), SOURCE
+        )
+        ack = AtomicWriteFileACK.decode(result)
+        assert ack.is_stream is False
+        assert ack.file_start == 0
+        assert f._record_data == [b"A", b"B"]
+
+
+class TestBackupRestoreStateMachine:
+    """Test ReinitializeDevice backup/restore state transitions."""
+
+    async def test_start_backup(self):
+        """START_BACKUP sets system_status to BACKUP_IN_PROGRESS."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            BackupAndRestoreState,
+            DeviceStatus,
+            ReinitializedState,
+        )
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.START_BACKUP,
+        )
+        result = await handlers.handle_reinitialize_device(
+            ConfirmedServiceChoice.REINITIALIZE_DEVICE, request.encode(), SOURCE
+        )
+        assert result is None
+        assert (
+            device._properties[PropertyIdentifier.SYSTEM_STATUS] == DeviceStatus.BACKUP_IN_PROGRESS
+        )
+        assert (
+            device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE]
+            == BackupAndRestoreState.PREPARING_FOR_BACKUP
+        )
+
+    async def test_end_backup(self):
+        """END_BACKUP after START_BACKUP sets system_status to OPERATIONAL."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            BackupAndRestoreState,
+            DeviceStatus,
+            ReinitializedState,
+        )
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+        # First start backup
+        device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.BACKUP_IN_PROGRESS
+        device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+            BackupAndRestoreState.PREPARING_FOR_BACKUP
+        )
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.END_BACKUP,
+        )
+        result = await handlers.handle_reinitialize_device(
+            ConfirmedServiceChoice.REINITIALIZE_DEVICE, request.encode(), SOURCE
+        )
+        assert result is None
+        assert device._properties[PropertyIdentifier.SYSTEM_STATUS] == DeviceStatus.OPERATIONAL
+
+    async def test_start_restore(self):
+        """START_RESTORE sets system_status to DOWNLOAD_IN_PROGRESS."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            DeviceStatus,
+            ReinitializedState,
+        )
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.START_RESTORE,
+        )
+        result = await handlers.handle_reinitialize_device(
+            ConfirmedServiceChoice.REINITIALIZE_DEVICE, request.encode(), SOURCE
+        )
+        assert result is None
+        assert (
+            device._properties[PropertyIdentifier.SYSTEM_STATUS]
+            == DeviceStatus.DOWNLOAD_IN_PROGRESS
+        )
+
+    async def test_end_restore(self):
+        """END_RESTORE after START_RESTORE resets to OPERATIONAL and sets LAST_RESTORE_TIME."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            BackupAndRestoreState,
+            DeviceStatus,
+            ReinitializedState,
+        )
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+        device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.DOWNLOAD_IN_PROGRESS
+        device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+            BackupAndRestoreState.PREPARING_FOR_RESTORE
+        )
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.END_RESTORE,
+        )
+        result = await handlers.handle_reinitialize_device(
+            ConfirmedServiceChoice.REINITIALIZE_DEVICE, request.encode(), SOURCE
+        )
+        assert result is None
+        assert device._properties[PropertyIdentifier.SYSTEM_STATUS] == DeviceStatus.OPERATIONAL
+        assert PropertyIdentifier.LAST_RESTORE_TIME in device._properties
+
+    async def test_abort_restore(self):
+        """ABORT_RESTORE during restore resets to OPERATIONAL."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            BackupAndRestoreState,
+            DeviceStatus,
+            ReinitializedState,
+        )
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+        device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.DOWNLOAD_IN_PROGRESS
+        device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+            BackupAndRestoreState.PREPARING_FOR_RESTORE
+        )
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.ABORT_RESTORE,
+        )
+        result = await handlers.handle_reinitialize_device(
+            ConfirmedServiceChoice.REINITIALIZE_DEVICE, request.encode(), SOURCE
+        )
+        assert result is None
+        assert device._properties[PropertyIdentifier.SYSTEM_STATUS] == DeviceStatus.OPERATIONAL
+
+    async def test_start_backup_not_idle_raises(self):
+        """START_BACKUP when not IDLE raises error."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import BackupAndRestoreState, ReinitializedState
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+        device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+            BackupAndRestoreState.PREPARING_FOR_BACKUP
+        )
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.START_BACKUP,
+        )
+        with pytest.raises(BACnetError):
+            await handlers.handle_reinitialize_device(
+                ConfirmedServiceChoice.REINITIALIZE_DEVICE, request.encode(), SOURCE
+            )
+
+    async def test_end_backup_wrong_state_raises(self):
+        """END_BACKUP when not in backup state raises error."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import ReinitializedState
+
+        _app, _db, _device, handlers = _make_app_and_handlers()
+        # IDLE state -- END_BACKUP should fail
+
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.END_BACKUP,
+        )
+        with pytest.raises(BACnetError):
+            await handlers.handle_reinitialize_device(
+                ConfirmedServiceChoice.REINITIALIZE_DEVICE, request.encode(), SOURCE
+            )
+
+
+class TestRPMPropertyExpansion:
+    """Test ReadPropertyMultiple ALL/REQUIRED/OPTIONAL expansion."""
+
+    async def test_rpm_all_expansion(self):
+        """ReadPropertyMultiple with ALL returns all defined properties."""
+        from bac_py.services.read_property_multiple import (
+            PropertyReference,
+            ReadAccessSpecification,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
+        )
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=[
+                ReadAccessSpecification(
+                    object_identifier=device.object_identifier,
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.ALL),
+                    ],
+                ),
+            ]
+        )
+        result = await handlers.handle_read_property_multiple(
+            ConfirmedServiceChoice.READ_PROPERTY_MULTIPLE, request.encode(), SOURCE
+        )
+        ack = ReadPropertyMultipleACK.decode(result)
+        assert len(ack.list_of_read_access_results) == 1
+        # ALL should expand to many properties (at least the required ones)
+        assert len(ack.list_of_read_access_results[0].list_of_results) > 5
+
+    async def test_rpm_required_expansion(self):
+        """ReadPropertyMultiple with REQUIRED returns only required properties."""
+        from bac_py.services.read_property_multiple import (
+            PropertyReference,
+            ReadAccessSpecification,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
+        )
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=[
+                ReadAccessSpecification(
+                    object_identifier=device.object_identifier,
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.REQUIRED),
+                    ],
+                ),
+            ]
+        )
+        result = await handlers.handle_read_property_multiple(
+            ConfirmedServiceChoice.READ_PROPERTY_MULTIPLE, request.encode(), SOURCE
+        )
+        ack = ReadPropertyMultipleACK.decode(result)
+        assert len(ack.list_of_read_access_results) == 1
+        assert len(ack.list_of_read_access_results[0].list_of_results) > 3
+
+    async def test_rpm_optional_expansion(self):
+        """ReadPropertyMultiple with OPTIONAL returns only optional properties present."""
+        from bac_py.services.read_property_multiple import (
+            PropertyReference,
+            ReadAccessSpecification,
+            ReadPropertyMultipleACK,
+            ReadPropertyMultipleRequest,
+        )
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+
+        request = ReadPropertyMultipleRequest(
+            list_of_read_access_specs=[
+                ReadAccessSpecification(
+                    object_identifier=device.object_identifier,
+                    list_of_property_references=[
+                        PropertyReference(PropertyIdentifier.OPTIONAL),
+                    ],
+                ),
+            ]
+        )
+        result = await handlers.handle_read_property_multiple(
+            ConfirmedServiceChoice.READ_PROPERTY_MULTIPLE, request.encode(), SOURCE
+        )
+        ack = ReadPropertyMultipleACK.decode(result)
+        assert len(ack.list_of_read_access_results) == 1
+
+
+class TestReadRangeEmpty:
+    """Test ReadRange on an empty list property."""
+
+    async def test_read_range_empty_object_list(self):
+        """ReadRange on an empty list returns 0 items with first+last flags."""
+        import bac_py.objects  # noqa: F401
+        from bac_py.services.read_range import (
+            RangeByPosition,
+            ReadRangeACK,
+            ReadRangeRequest,
+        )
+
+        app, db, device = _make_app()
+        # Only the device object in the db; object list has 1 item
+        handlers = DefaultServerHandlers(app, db, device)
+
+        # Request a range starting beyond the list
+        request = ReadRangeRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            range=RangeByPosition(reference_index=100, count=10),
+        )
+        result = await handlers.handle_read_range(26, request.encode(), SOURCE)
+        ack = ReadRangeACK.decode(result)
+        # Should return 0 items since index 100 is beyond the list
+        assert ack.item_count == 0
+
+    async def test_read_range_no_range_returns_all(self):
+        """ReadRange without range qualifier returns all items."""
+        import bac_py.objects  # noqa: F401
+        from bac_py.services.read_range import ReadRangeACK, ReadRangeRequest
+
+        app, db, device = _make_app()
+        for i in range(1, 4):
+            db.add(AnalogInputObject(i, object_name=f"AI-{i}"))
+        handlers = DefaultServerHandlers(app, db, device)
+
+        # No range qualifier
+        request = ReadRangeRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 1),
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+        )
+        result = await handlers.handle_read_range(26, request.encode(), SOURCE)
+        ack = ReadRangeACK.decode(result)
+        # 1 device + 3 AIs = 4 items
+        assert ack.item_count == 4
+        assert ack.result_flags.first_item is True
+        assert ack.result_flags.last_item is True
+
+
+class TestActiveCOVSubscriptionsRead:
+    """Test reading ACTIVE_COV_SUBSCRIPTIONS when cov_manager is None."""
+
+    async def test_active_cov_subscriptions_no_cov_manager(self):
+        """Reading ACTIVE_COV_SUBSCRIPTIONS when cov_manager is None returns empty list."""
+        app, db, device = _make_app()
+        app.cov_manager = None
+        handlers = DefaultServerHandlers(app, db, device)
+
+        request = ReadPropertyRequest(
+            object_identifier=device.object_identifier,
+            property_identifier=PropertyIdentifier.ACTIVE_COV_SUBSCRIPTIONS,
+        )
+        result = await handlers.handle_read_property(12, request.encode(), SOURCE)
+        ack = ReadPropertyACK.decode(result)
+        # Empty list encodes to empty bytes
+        assert ack.property_value == b""
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage tests for server handlers
+# ---------------------------------------------------------------------------
+
+
+class TestCOVNotificationAfterWrite:
+    """Test COV notification after WriteProperty (lines 455-458)."""
+
+    async def test_write_triggers_cov_check(self):
+        """WriteProperty calls cov_manager.check_and_notify after write."""
+        app, db, _device, handlers = _make_app_and_handlers()
+        mock_cov = MagicMock()
+        app.cov_manager = mock_cov
+
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.OUT_OF_SERVICE] = True
+        db.add(ai)
+
+        request = WritePropertyRequest(
+            object_identifier=ai.object_identifier,
+            property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            property_value=encode_application_unsigned(42),
+        )
+        await handlers.handle_write_property(15, request.encode(), SOURCE)
+        mock_cov.check_and_notify.assert_called_once()
+
+
+class TestSubscribeCOVPropertyUnknownObject:
+    """Test SubscribeCOVProperty with unknown object (line 516)."""
+
+    async def test_subscribe_cov_property_unknown_object(self):
+        """SubscribeCOVProperty raises error for unknown object."""
+        from bac_py.services.cov import BACnetPropertyReference, SubscribeCOVPropertyRequest
+
+        _, _, _, handlers = _make_app_and_handlers()
+
+        request = SubscribeCOVPropertyRequest(
+            subscriber_process_identifier=1,
+            monitored_object_identifier=ObjectIdentifier(ObjectType.ANALOG_INPUT, 999),
+            issue_confirmed_notifications=True,
+            lifetime=300,
+            monitored_property_identifier=BACnetPropertyReference(
+                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+            ),
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_subscribe_cov_property(0, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+
+class TestSubscribeCOVPropertyMultipleNoCOV:
+    """Test SubscribeCOVPropertyMultiple with no COV manager (lines 534-535)."""
+
+    async def test_subscribe_cov_property_multiple_no_cov_manager(self):
+        """SubscribeCOVPropertyMultiple raises error when cov_manager is None."""
+        from bac_py.services.cov import (
+            BACnetPropertyReference,
+            COVReference,
+            COVSubscriptionSpecification,
+            SubscribeCOVPropertyMultipleRequest,
+        )
+
+        app, db, _device, handlers = _make_app_and_handlers()
+        app.cov_manager = None
+
+        ai = AnalogInputObject(1)
+        db.add(ai)
+
+        request = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=1,
+            issue_confirmed_notifications=True,
+            lifetime=300,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=ai.object_identifier,
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                            ),
+                            cov_increment=None,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_subscribe_cov_property_multiple(0, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.SERVICE_REQUEST_DENIED
+
+
+class TestObjectListArrayIndexOutOfRange:
+    """Test Object_List array index out of range (lines 626-630)."""
+
+    async def test_object_list_array_index_out_of_range(self):
+        """Reading Object_List with index beyond range raises error."""
+        _app, _db, device, handlers = _make_app_and_handlers()
+
+        request = ReadPropertyRequest(
+            object_identifier=device.object_identifier,
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=999,
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_read_property(12, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.INVALID_ARRAY_INDEX
+
+    async def test_object_list_array_index_zero_returns_count(self):
+        """Reading Object_List[0] returns the count."""
+        _app, _db, device, handlers = _make_app_and_handlers()
+
+        request = ReadPropertyRequest(
+            object_identifier=device.object_identifier,
+            property_identifier=PropertyIdentifier.OBJECT_LIST,
+            property_array_index=0,
+        )
+        result = await handlers.handle_read_property(12, request.encode(), SOURCE)
+        ack = ReadPropertyACK.decode(result)
+        assert ack.property_value != b""
+
+
+class TestPasswordValidation:
+    """Test password validation (line 907)."""
+
+    async def test_validate_password_unexpected_password(self):
+        """Password provided when device has no password raises error."""
+        app, _db, _device, handlers = _make_app_and_handlers()
+        app.config.password = None
+
+        from bac_py.services.device_mgmt import DeviceCommunicationControlRequest
+        from bac_py.types.enums import EnableDisable
+
+        request = DeviceCommunicationControlRequest(
+            enable_disable=EnableDisable.ENABLE,
+            password="secret",
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_device_communication_control(0, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.PASSWORD_FAILURE
+
+
+class TestReinitializeDeviceRestorePaths:
+    """Test backup/restore state transitions (lines 1002-1035)."""
+
+    async def test_start_restore_when_not_idle_raises_error(self):
+        """START_RESTORE when not IDLE raises error (line 1002)."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            BackupAndRestoreState,
+            ReinitializedState,
+        )
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+        device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+            BackupAndRestoreState.PREPARING_FOR_BACKUP
+        )
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.START_RESTORE,
+        )
+        with pytest.raises(BACnetError):
+            await handlers.handle_reinitialize_device(0, request.encode(), SOURCE)
+
+    async def test_end_restore_sets_operational(self):
+        """END_RESTORE sets system status to OPERATIONAL (lines 1015-1022)."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            BackupAndRestoreState,
+            DeviceStatus,
+            ReinitializedState,
+        )
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+        device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+            BackupAndRestoreState.PREPARING_FOR_RESTORE
+        )
+        device._properties[PropertyIdentifier.SYSTEM_STATUS] = DeviceStatus.DOWNLOAD_IN_PROGRESS
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.END_RESTORE,
+        )
+        await handlers.handle_reinitialize_device(0, request.encode(), SOURCE)
+        assert device._properties[PropertyIdentifier.SYSTEM_STATUS] == DeviceStatus.OPERATIONAL
+        assert (
+            device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE]
+            == BackupAndRestoreState.IDLE
+        )
+
+    async def test_end_restore_wrong_state_raises(self):
+        """END_RESTORE from wrong state raises error (line 1015)."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import BackupAndRestoreState, ReinitializedState
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+        device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+            BackupAndRestoreState.IDLE
+        )
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.END_RESTORE,
+        )
+        with pytest.raises(BACnetError):
+            await handlers.handle_reinitialize_device(0, request.encode(), SOURCE)
+
+    async def test_abort_restore_sets_operational(self):
+        """ABORT_RESTORE sets system status to OPERATIONAL (lines 1024-1033)."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import (
+            BackupAndRestoreState,
+            DeviceStatus,
+            ReinitializedState,
+        )
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+        device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+            BackupAndRestoreState.PERFORMING_A_RESTORE
+        )
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.ABORT_RESTORE,
+        )
+        await handlers.handle_reinitialize_device(0, request.encode(), SOURCE)
+        assert device._properties[PropertyIdentifier.SYSTEM_STATUS] == DeviceStatus.OPERATIONAL
+
+    async def test_abort_restore_wrong_state_raises(self):
+        """ABORT_RESTORE from wrong state raises error (line 1029)."""
+        from bac_py.services.device_mgmt import ReinitializeDeviceRequest
+        from bac_py.types.enums import BackupAndRestoreState, ReinitializedState
+
+        _app, _db, device, handlers = _make_app_and_handlers()
+        device._properties[PropertyIdentifier.BACKUP_AND_RESTORE_STATE] = (
+            BackupAndRestoreState.IDLE
+        )
+        request = ReinitializeDeviceRequest(
+            reinitialized_state=ReinitializedState.ABORT_RESTORE,
+        )
+        with pytest.raises(BACnetError):
+            await handlers.handle_reinitialize_device(0, request.encode(), SOURCE)
+
+
+class TestAtomicWriteFileErrors:
+    """Test AtomicWriteFile error paths (lines 1145, 1147)."""
+
+    async def test_atomic_write_file_unknown_object(self):
+        """AtomicWriteFile for unknown object raises error."""
+        from bac_py.services.file_access import AtomicWriteFileRequest, StreamWriteAccess
+
+        _, _, _, handlers = _make_app_and_handlers()
+        request = AtomicWriteFileRequest(
+            file_identifier=ObjectIdentifier(ObjectType.FILE, 999),
+            access_method=StreamWriteAccess(file_start_position=0, file_data=b"test"),
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_atomic_write_file(0, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_OBJECT
+
+    async def test_atomic_write_file_not_file_object(self):
+        """AtomicWriteFile for non-file object raises error."""
+        from bac_py.services.file_access import AtomicWriteFileRequest, StreamWriteAccess
+
+        _, db, _, handlers = _make_app_and_handlers()
+        # Add a non-file object
+        ai = AnalogInputObject(1)
+        db.add(ai)
+        request = AtomicWriteFileRequest(
+            file_identifier=ai.object_identifier,
+            access_method=StreamWriteAccess(file_start_position=0, file_data=b"test"),
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_atomic_write_file(0, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.INCONSISTENT_OBJECT_TYPE
+
+
+class TestCreateObjectMissingParameter:
+    """Test CreateObject with missing required parameter (line 1194)."""
+
+    async def test_create_object_no_identifier_or_type(self):
+        """CreateObject with neither object_identifier nor object_type raises error."""
+        _, _, _, handlers = _make_app_and_handlers()
+        # Craft minimal raw bytes: opening [0] + closing [0] with no inner content.
+        # This decodes to a CreateObjectRequest where both fields are None.
+        raw = bytes([0x0E, 0x0F])  # opening tag 0, closing tag 0
+        with pytest.raises((BACnetError, ValueError)):
+            await handlers.handle_create_object(0, raw, SOURCE)
+
+
+class TestDeleteObjectCOVCleanup:
+    """Test DeleteObject COV cleanup (lines 1230-1233)."""
+
+    async def test_delete_object_cleans_cov_subscriptions(self):
+        """DeleteObject calls cov_manager.remove_object_subscriptions."""
+        from bac_py.services.object_mgmt import DeleteObjectRequest
+
+        app, db, _device, handlers = _make_app_and_handlers()
+        mock_cov = MagicMock()
+        app.cov_manager = mock_cov
+
+        ai = AnalogInputObject(1)
+        db.add(ai)
+
+        request = DeleteObjectRequest(
+            object_identifier=ai.object_identifier,
+        )
+        await handlers.handle_delete_object(0, request.encode(), SOURCE)
+        mock_cov.remove_object_subscriptions.assert_called_once_with(ai.object_identifier)
+
+
+class TestRemoveListElementUnknownProperty:
+    """Test RemoveListElement with unknown property (line 1310)."""
+
+    async def test_remove_list_element_unknown_property(self):
+        """RemoveListElement raises error for unknown property."""
+        _app, db, _device, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        db.add(ai)
+
+        request = RemoveListElementRequest(
+            object_identifier=ai.object_identifier,
+            property_identifier=PropertyIdentifier(9999),
+            list_of_elements=b"\x21\x01",
+        )
+        with pytest.raises(BACnetError) as exc_info:
+            await handlers.handle_remove_list_element(0, request.encode(), SOURCE)
+        assert exc_info.value.error_code == ErrorCode.UNKNOWN_PROPERTY
+
+
+class TestAcknowledgeAlarmNoAckedTransitions:
+    """Test AcknowledgeAlarm when no acked_transitions (lines 1348-1357)."""
+
+    async def test_acknowledge_alarm_no_acked_transitions(self):
+        """AcknowledgeAlarm with no acked_transitions is a no-op."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.EVENT_STATE] = EventState.OFFNORMAL
+        # No ACKED_TRANSITIONS property
+        db.add(ai)
+
+        ts = BACnetTimeStamp(choice=1, value=0)
+        from bac_py.services.event_notification import AcknowledgeAlarmRequest
+
+        request = AcknowledgeAlarmRequest(
+            acknowledging_process_identifier=1,
+            event_object_identifier=ai.object_identifier,
+            event_state_acknowledged=EventState.OFFNORMAL,
+            time_stamp=ts,
+            acknowledgment_source="operator",
+            time_of_acknowledgment=ts,
+        )
+        result = await handlers.handle_acknowledge_alarm(0, request.encode(), SOURCE)
+        assert result is None  # SimpleACK, no crash
+
+
+class TestGetAlarmSummaryInvalidEventState:
+    """Test GetAlarmSummary with invalid event state values (lines 1421-1422)."""
+
+    async def test_get_alarm_summary_invalid_event_state_skipped(self):
+        """Objects with invalid event_state values are skipped."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.EVENT_STATE] = "not-a-valid-enum"
+        db.add(ai)
+
+        from bac_py.services.alarm_summary import GetAlarmSummaryRequest
+
+        request = GetAlarmSummaryRequest()
+        result = await handlers.handle_get_alarm_summary(0, request.encode(), SOURCE)
+        ack = GetAlarmSummaryACK.decode(result)
+        # Should have no summaries since the value is invalid
+        assert len(ack.list_of_alarm_summaries) == 0
+
+    async def test_get_alarm_summary_bitstring_acked_transitions(self):
+        """GetAlarmSummary handles BitString acked_transitions (line 1438)."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.EVENT_STATE] = EventState.OFFNORMAL
+        ai._properties[PropertyIdentifier.ACKED_TRANSITIONS] = BitString(b"\xe0", 5)
+        db.add(ai)
+
+        from bac_py.services.alarm_summary import GetAlarmSummaryRequest
+
+        request = GetAlarmSummaryRequest()
+        result = await handlers.handle_get_alarm_summary(0, request.encode(), SOURCE)
+        ack = GetAlarmSummaryACK.decode(result)
+        assert len(ack.list_of_alarm_summaries) == 1
+
+
+class TestGetEnrollmentSummaryInvalidValues:
+    """Test GetEnrollmentSummary with invalid event type/state (lines 1471-1481)."""
+
+    async def test_invalid_event_type_skipped(self):
+        """EventEnrollment with invalid event_type is skipped."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ee = EventEnrollmentObject(1)
+        ee._properties[PropertyIdentifier.EVENT_TYPE] = "not-valid"
+        db.add(ee)
+
+        request = GetEnrollmentSummaryRequest(
+            acknowledgment_filter=AcknowledgmentFilter.ALL,
+        )
+        result = await handlers.handle_get_enrollment_summary(0, request.encode(), SOURCE)
+        ack = GetEnrollmentSummaryACK.decode(result)
+        assert len(ack.list_of_enrollment_summaries) == 0
+
+    async def test_invalid_event_state_skipped(self):
+        """EventEnrollment with invalid event_state is skipped."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ee = EventEnrollmentObject(1)
+        ee._properties[PropertyIdentifier.EVENT_TYPE] = EventType.CHANGE_OF_VALUE
+        ee._properties[PropertyIdentifier.EVENT_STATE] = "not-valid"
+        db.add(ee)
+
+        request = GetEnrollmentSummaryRequest(
+            acknowledgment_filter=AcknowledgmentFilter.ALL,
+        )
+        result = await handlers.handle_get_enrollment_summary(0, request.encode(), SOURCE)
+        ack = GetEnrollmentSummaryACK.decode(result)
+        assert len(ack.list_of_enrollment_summaries) == 0
+
+
+class TestGetEnrollmentSummaryAcknowledgmentFilters:
+    """Test GetEnrollmentSummary acknowledgment filters (lines 1507-1514)."""
+
+    async def test_acked_filter_excludes_unacked(self):
+        """ACKED filter excludes enrollments with unacked transitions."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ee = EventEnrollmentObject(1)
+        ee._properties[PropertyIdentifier.EVENT_TYPE] = EventType.CHANGE_OF_VALUE
+        ee._properties[PropertyIdentifier.EVENT_STATE] = EventState.OFFNORMAL
+        ee._properties[PropertyIdentifier.ACKED_TRANSITIONS] = [True, False, True]
+        db.add(ee)
+
+        request = GetEnrollmentSummaryRequest(
+            acknowledgment_filter=AcknowledgmentFilter.ACKED,
+        )
+        result = await handlers.handle_get_enrollment_summary(0, request.encode(), SOURCE)
+        ack = GetEnrollmentSummaryACK.decode(result)
+        assert len(ack.list_of_enrollment_summaries) == 0  # Excluded because not all acked
+
+    async def test_not_acked_filter_excludes_all_acked(self):
+        """NOT_ACKED filter excludes enrollments with all transitions acked."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ee = EventEnrollmentObject(1)
+        ee._properties[PropertyIdentifier.EVENT_TYPE] = EventType.CHANGE_OF_VALUE
+        ee._properties[PropertyIdentifier.EVENT_STATE] = EventState.OFFNORMAL
+        ee._properties[PropertyIdentifier.ACKED_TRANSITIONS] = [True, True, True]
+        db.add(ee)
+
+        request = GetEnrollmentSummaryRequest(
+            acknowledgment_filter=AcknowledgmentFilter.NOT_ACKED,
+        )
+        result = await handlers.handle_get_enrollment_summary(0, request.encode(), SOURCE)
+        ack = GetEnrollmentSummaryACK.decode(result)
+        assert len(ack.list_of_enrollment_summaries) == 0  # Excluded because all acked
+
+
+class TestGetEventInformationBitString:
+    """Test GetEventInformation with BitString acked_transitions (line 1601)."""
+
+    async def test_bitstring_acked_transitions(self):
+        """GetEventInformation handles BitString acked_transitions."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.EVENT_STATE] = EventState.OFFNORMAL
+        ai._properties[PropertyIdentifier.ACKED_TRANSITIONS] = BitString(b"\xe0", 5)
+        db.add(ai)
+
+        request = GetEventInformationRequest()
+        result = await handlers.handle_get_event_information(0, request.encode(), SOURCE)
+        ack = GetEventInformationACK.decode(result)
+        assert len(ack.list_of_event_summaries) == 1
+
+    async def test_invalid_event_state_skipped(self):
+        """GetEventInformation skips objects with invalid event state (lines 1568-1569)."""
+        _, db, _, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.EVENT_STATE] = "not-valid"
+        db.add(ai)
+
+        request = GetEventInformationRequest()
+        result = await handlers.handle_get_event_information(0, request.encode(), SOURCE)
+        ack = GetEventInformationACK.decode(result)
+        assert len(ack.list_of_event_summaries) == 0
+
+
+class TestWhoHasNameSearch:
+    """Test WhoHas name-based search (lines 1660-1672)."""
+
+    async def test_who_has_by_name_found(self):
+        """WhoHas by name sends I-Have when object found."""
+        from bac_py.services.who_has import WhoHasRequest
+
+        app, db, _device, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1, object_name="test-sensor")
+        db.add(ai)
+
+        request = WhoHasRequest(
+            object_name="test-sensor",
+        )
+        await handlers.handle_who_has(0, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_called_once()
+
+    async def test_who_has_by_name_not_found(self):
+        """WhoHas by name does not send I-Have when object not found."""
+        from bac_py.services.who_has import WhoHasRequest
+
+        app, _db, _device, handlers = _make_app_and_handlers()
+
+        request = WhoHasRequest(
+            object_name="nonexistent-sensor",
+        )
+        await handlers.handle_who_has(0, request.encode(), SOURCE)
+        app.unconfirmed_request.assert_not_called()
+
+
+class TestTextMessageCallbacks:
+    """Test text message callbacks (lines 1711-1713, 1734-1735)."""
+
+    async def test_confirmed_text_message_callback(self):
+        """ConfirmedTextMessage invokes callback when set."""
+        from bac_py.services.text_message import ConfirmedTextMessageRequest
+        from bac_py.types.enums import MessagePriority
+
+        app, _db, _device, handlers = _make_app_and_handlers()
+        callback = MagicMock()
+        app._text_message_callback = callback
+
+        request = ConfirmedTextMessageRequest(
+            text_message_source_device=ObjectIdentifier(ObjectType.DEVICE, 1),
+            message_priority=MessagePriority.NORMAL,
+            message="hello",
+        )
+        await handlers.handle_confirmed_text_message(0, request.encode(), SOURCE)
+        callback.assert_called_once()
+
+    async def test_unconfirmed_text_message_callback(self):
+        """UnconfirmedTextMessage invokes callback when set."""
+        from bac_py.services.text_message import UnconfirmedTextMessageRequest
+        from bac_py.types.enums import MessagePriority
+
+        app, _db, _device, handlers = _make_app_and_handlers()
+        callback = MagicMock()
+        app._text_message_callback = callback
+
+        request = UnconfirmedTextMessageRequest(
+            text_message_source_device=ObjectIdentifier(ObjectType.DEVICE, 1),
+            message_priority=MessagePriority.NORMAL,
+            message="hello",
+        )
+        await handlers.handle_unconfirmed_text_message(0, request.encode(), SOURCE)
+        callback.assert_called_once()
+
+
+class TestWriteGroupHandler:
+    """Test WriteGroup handler (lines 1764-1776)."""
+
+    async def test_write_group_skips_channel_without_number(self):
+        """WriteGroup skips Channel objects with no channel_number (line 1764)."""
+        from bac_py.objects.channel import ChannelObject
+        from bac_py.services.write_group import GroupChannelValue, WriteGroupRequest
+
+        _app, db, _device, handlers = _make_app_and_handlers()
+        ch = ChannelObject(1)
+        ch._properties[PropertyIdentifier.CONTROL_GROUPS] = [5]
+        ch._properties[PropertyIdentifier.CHANNEL_NUMBER] = None
+        db.add(ch)
+
+        request = WriteGroupRequest(
+            group_number=5,
+            write_priority=8,
+            change_list=[
+                GroupChannelValue(
+                    channel=1, overriding_priority=None, value=encode_application_unsigned(42)
+                ),
+            ],
+        )
+        await handlers.handle_write_group(0, request.encode(), SOURCE)
+        # Should not crash; channel is skipped
+
+    async def test_write_group_handles_write_error(self):
+        """WriteGroup handles write errors gracefully (lines 1775-1776)."""
+        from bac_py.objects.channel import ChannelObject
+        from bac_py.services.write_group import GroupChannelValue, WriteGroupRequest
+
+        _app, db, _device, handlers = _make_app_and_handlers()
+        ch = ChannelObject(1)
+        ch._properties[PropertyIdentifier.CONTROL_GROUPS] = [5]
+        ch._properties[PropertyIdentifier.CHANNEL_NUMBER] = 1
+        ch.async_write_property = AsyncMock(
+            side_effect=BACnetError(ErrorClass.PROPERTY, ErrorCode.WRITE_ACCESS_DENIED)
+        )
+        db.add(ch)
+
+        request = WriteGroupRequest(
+            group_number=5,
+            write_priority=8,
+            change_list=[
+                GroupChannelValue(
+                    channel=1, overriding_priority=None, value=encode_application_unsigned(42)
+                ),
+            ],
+        )
+        await handlers.handle_write_group(0, request.encode(), SOURCE)
+        # Should not raise, just log
+
+    async def test_write_property_multiple_cov_notification(self):
+        """WritePropertyMultiple triggers COV check after writes (lines 812-815)."""
+        app, db, _device, handlers = _make_app_and_handlers()
+        mock_cov = MagicMock()
+        app.cov_manager = mock_cov
+
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.OUT_OF_SERVICE] = True
+        db.add(ai)
+
+        from bac_py.encoding.primitives import encode_application_real
+        from bac_py.services.common import BACnetPropertyValue
+        from bac_py.services.write_property_multiple import (
+            WriteAccessSpecification,
+            WritePropertyMultipleRequest,
+        )
+
+        spec = WriteAccessSpecification(
+            object_identifier=ai.object_identifier,
+            list_of_properties=[
+                BACnetPropertyValue(
+                    property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                    value=encode_application_real(42.0),
+                ),
+            ],
+        )
+        request = WritePropertyMultipleRequest(
+            list_of_write_access_specs=[spec],
+        )
+        await handlers.handle_write_property_multiple(0, request.encode(), SOURCE)
+        mock_cov.check_and_notify.assert_called()
+
+
+# ==================== Coverage gap tests: uncovered lines/branches ====================
+
+
+class TestProtocolServicesSupported:
+    """Test Protocol_Services_Supported computation (lines 361, 363)."""
+
+    def test_protocol_services_supported_set(self):
+        """DefaultServerHandlers.register() sets Protocol_Services_Supported (lines 361, 363)."""
+        from bac_py.services.base import ServiceRegistry
+
+        app = MagicMock()
+        app.config = MagicMock()
+        app.config.max_apdu_length = 1476
+        app.config.vendor_id = 42
+        app.config.password = None
+        registry = ServiceRegistry()
+        app.service_registry = registry
+        app.unconfirmed_request = MagicMock()
+
+        db = ObjectDatabase()
+        device = DeviceObject(
+            1,
+            object_name="test-device",
+            vendor_name="test-vendor",
+            vendor_identifier=42,
+            model_name="test-model",
+            firmware_revision="1.0",
+            application_software_version="1.0",
+        )
+        db.add(device)
+
+        handlers = DefaultServerHandlers(app, db, device)
+        handlers.register()
+        pss = device._properties.get(PropertyIdentifier.PROTOCOL_SERVICES_SUPPORTED)
+        assert pss is not None
+        assert isinstance(pss, BitString)
+        # Should have at least some bits set (confirmed + unconfirmed handlers)
+        assert pss.data != b"\x00" * len(pss.data)
+
+
+class TestSubscribeCOVPropertyMultipleHandler:
+    """Test SubscribeCOVPropertyMultiple handling (lines 534-535)."""
+
+    async def test_subscribe_cov_property_multiple_handler(self):
+        """handle_subscribe_cov_property_multiple delegates to cov_manager (lines 534-535)."""
+        from bac_py.services.cov import (
+            BACnetPropertyReference,
+            COVReference,
+            COVSubscriptionSpecification,
+            SubscribeCOVPropertyMultipleRequest,
+        )
+
+        app, db, _device, handlers = _make_app_and_handlers()
+        mock_cov = MagicMock()
+        app.cov_manager = mock_cov
+
+        ai = AnalogInputObject(1)
+        db.add(ai)
+
+        req = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=1,
+            issue_confirmed_notifications=False,
+            lifetime=0,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=ai.object_identifier,
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                                property_array_index=None,
+                            ),
+                            cov_increment=None,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        result = await handlers.handle_subscribe_cov_property_multiple(0, req.encode(), SOURCE)
+        assert result is None
+        mock_cov.subscribe_property_multiple.assert_called_once()
+
+    async def test_subscribe_cov_property_multiple_no_cov_manager(self):
+        """handle_subscribe_cov_property_multiple raises when no cov_manager."""
+        from bac_py.services.cov import (
+            BACnetPropertyReference,
+            COVReference,
+            COVSubscriptionSpecification,
+            SubscribeCOVPropertyMultipleRequest,
+        )
+
+        app, db, _device, handlers = _make_app_and_handlers()
+        app.cov_manager = None
+
+        ai = AnalogInputObject(1)
+        db.add(ai)
+
+        req = SubscribeCOVPropertyMultipleRequest(
+            subscriber_process_identifier=1,
+            issue_confirmed_notifications=False,
+            lifetime=0,
+            list_of_cov_subscription_specifications=[
+                COVSubscriptionSpecification(
+                    monitored_object_identifier=ai.object_identifier,
+                    list_of_cov_references=[
+                        COVReference(
+                            monitored_property=BACnetPropertyReference(
+                                property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                                property_array_index=None,
+                            ),
+                            cov_increment=None,
+                        ),
+                    ],
+                ),
+            ],
+        )
+        with pytest.raises(BACnetError):
+            await handlers.handle_subscribe_cov_property_multiple(0, req.encode(), SOURCE)
+
+
+class TestActiveCOVSubscriptionsReturn:
+    """Test ACTIVE_COV_SUBSCRIPTIONS return (line 629)."""
+
+    def test_object_list_element_by_index(self):
+        """Reading OBJECT_LIST by array_index returns the element (line 629)."""
+        _app, db, device, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        db.add(ai)
+
+        obj_list = db.object_list
+        assert len(obj_list) >= 2  # device + ai
+
+        # Read element at index 1 (1-based)
+        val = handlers._read_object_property(device, PropertyIdentifier.OBJECT_LIST, 1)
+        assert val == obj_list[0]
+
+
+class TestPasswordValidationDirect:
+    """Test password validation direct method (line 907)."""
+
+    async def test_password_mismatch_raises(self):
+        """Wrong password raises BACnetError (line 906-907)."""
+        app, _db, _device, handlers = _make_app_and_handlers()
+        app.config.password = "secret123"
+
+        with pytest.raises(BACnetError):
+            handlers._validate_password("wrong_password")
+
+    async def test_unexpected_password_raises(self):
+        """Password provided when none configured raises BACnetError (lines 908-910)."""
+        app, _db, _device, handlers = _make_app_and_handlers()
+        app.config.password = None
+
+        with pytest.raises(BACnetError):
+            handlers._validate_password("some_password")
+
+
+class TestCreateObjectNoIdentifier:
+    """Test create_object raises on missing identifiers (line 1194)."""
+
+    async def test_create_object_no_identifier_or_type_raises(self):
+        """CreateObject with neither object_identifier nor object_type raises (line 1194)."""
+        from unittest.mock import patch
+
+        from bac_py.services.object_mgmt import CreateObjectRequest
+
+        _app, _db, _device, handlers = _make_app_and_handlers()
+
+        # The wire format always has one of the two set; mock decode to simulate
+        # a request with neither field (defensive branch).
+        fake_req = CreateObjectRequest.__new__(CreateObjectRequest)
+        object.__setattr__(fake_req, "object_identifier", None)
+        object.__setattr__(fake_req, "object_type", None)
+        object.__setattr__(fake_req, "list_of_initial_values", None)
+
+        with patch("bac_py.app.server.CreateObjectRequest") as mock_cls:
+            mock_cls.decode.return_value = fake_req
+            with pytest.raises(BACnetError):
+                await handlers.handle_create_object(0, b"\x00", SOURCE)
+
+
+class TestGetAlarmSummaryBitString:
+    """Test GetAlarmSummary acked_transitions BitString handling (line 1438)."""
+
+    async def test_get_alarm_summary_bitstring_acked(self):
+        """GetAlarmSummary handles BitString acked_transitions (line 1435-1438)."""
+        _app, db, _device, handlers = _make_app_and_handlers()
+
+        ee = EventEnrollmentObject(1)
+        ee._properties[PropertyIdentifier.EVENT_STATE] = EventState.OFFNORMAL
+        ee._properties[PropertyIdentifier.ACKED_TRANSITIONS] = BitString(b"\xe0", 5)
+        db.add(ee)
+
+        from bac_py.services.alarm_summary import GetAlarmSummaryRequest
+
+        result = await handlers.handle_get_alarm_summary(
+            0, GetAlarmSummaryRequest().encode(), SOURCE
+        )
+        assert result is not None
+        ack = GetAlarmSummaryACK.decode(result)
+        assert len(ack.list_of_alarm_summaries) >= 1
+
+
+class TestWhoHasObjectNameSearch:
+    """Test WhoHas object name search path (lines 1660-1670)."""
+
+    async def test_who_has_by_name(self):
+        """WhoHas by object_name finds matching object (lines 1660-1670)."""
+        from bac_py.services.who_has import WhoHasRequest
+
+        _app, db, _device, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1, object_name="Zone-Temp-1")
+        db.add(ai)
+
+        req = WhoHasRequest(
+            object_identifier=None,
+            object_name="Zone-Temp-1",
+        )
+        await handlers.handle_who_has(0, req.encode(), SOURCE)
+        _app.unconfirmed_request.assert_called_once()
+
+    async def test_who_has_by_name_not_found(self):
+        """WhoHas by object_name returns early when not found (branch 1672)."""
+        from bac_py.services.who_has import WhoHasRequest
+
+        _app, _db, _device, handlers = _make_app_and_handlers()
+
+        req = WhoHasRequest(
+            object_identifier=None,
+            object_name="nonexistent",
+        )
+        await handlers.handle_who_has(0, req.encode(), SOURCE)
+        _app.unconfirmed_request.assert_not_called()
+
+    async def test_who_has_by_name_skips_read_error(self):
+        """WhoHas by name continues past objects that raise on OBJECT_NAME (line 1669-1670)."""
+        from bac_py.services.who_has import WhoHasRequest
+
+        _app, db, _device, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1, object_name="target")
+        db.add(ai)
+
+        # Add an object that raises when reading OBJECT_NAME
+        bad_obj = AnalogInputObject(2)
+        bad_obj.read_property = MagicMock(
+            side_effect=BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
+        )
+        db.add(bad_obj)
+
+        req = WhoHasRequest(
+            object_identifier=None,
+            object_name="target",
+        )
+        await handlers.handle_who_has(0, req.encode(), SOURCE)
+        _app.unconfirmed_request.assert_called_once()
+
+
+class TestConfirmedTextMessageCallback:
+    """Test confirmed text message callback path (line 1711-1713)."""
+
+    async def test_confirmed_text_message_callback(self):
+        """ConfirmedTextMessage invokes callback when set (line 1711-1712)."""
+        from bac_py.services.text_message import ConfirmedTextMessageRequest
+        from bac_py.types.enums import MessagePriority
+
+        _app, _db, _device, handlers = _make_app_and_handlers()
+        callback = MagicMock()
+        _app._text_message_callback = callback
+
+        req = ConfirmedTextMessageRequest(
+            text_message_source_device=ObjectIdentifier(ObjectType.DEVICE, 1),
+            message_priority=MessagePriority.NORMAL,
+            message="Hello",
+        )
+        result = await handlers.handle_confirmed_text_message(0, req.encode(), SOURCE)
+        assert result is None
+        callback.assert_called_once()
+
+    async def test_confirmed_text_message_no_callback(self):
+        """ConfirmedTextMessage is no-op when no callback (line 1734->exit)."""
+        from bac_py.services.text_message import ConfirmedTextMessageRequest
+        from bac_py.types.enums import MessagePriority
+
+        _app, _db, _device, handlers = _make_app_and_handlers()
+        _app._text_message_callback = None
+
+        req = ConfirmedTextMessageRequest(
+            text_message_source_device=ObjectIdentifier(ObjectType.DEVICE, 1),
+            message_priority=MessagePriority.NORMAL,
+            message="Hello",
+        )
+        result = await handlers.handle_confirmed_text_message(0, req.encode(), SOURCE)
+        assert result is None
+
+
+class TestWritePropertyMultipleCOVBranch:
+    """Test WritePropertyMultiple COV notification branch (812->815)."""
+
+    async def test_write_property_multiple_no_cov_manager(self):
+        """WritePropertyMultiple skips COV check when cov_manager is None (branch 812->815)."""
+        from bac_py.encoding.primitives import encode_application_real
+        from bac_py.services.common import BACnetPropertyValue
+        from bac_py.services.write_property_multiple import (
+            WriteAccessSpecification,
+            WritePropertyMultipleRequest,
+        )
+
+        app, db, _device, handlers = _make_app_and_handlers()
+        app.cov_manager = None
+
+        ai = AnalogInputObject(1)
+        ai._properties[PropertyIdentifier.OUT_OF_SERVICE] = True
+        db.add(ai)
+
+        spec = WriteAccessSpecification(
+            object_identifier=ai.object_identifier,
+            list_of_properties=[
+                BACnetPropertyValue(
+                    property_identifier=PropertyIdentifier.PRESENT_VALUE,
+                    value=encode_application_real(42.0),
+                ),
+            ],
+        )
+        request = WritePropertyMultipleRequest(
+            list_of_write_access_specs=[spec],
+        )
+        # Should not crash even without COV manager
+        await handlers.handle_write_property_multiple(0, request.encode(), SOURCE)
+
+
+class TestWritePropertyUnknownRaises:
+    """Test WritePropertyMultiple raises on unknown property (line 793)."""
+
+    async def test_write_property_multiple_unknown_property(self):
+        """WritePropertyMultiple raises on unknown property (line 793)."""
+        from bac_py.services.common import BACnetPropertyValue
+        from bac_py.services.write_property_multiple import (
+            WriteAccessSpecification,
+            WritePropertyMultipleRequest,
+        )
+
+        _app, db, _device, handlers = _make_app_and_handlers()
+        ai = AnalogInputObject(1)
+        db.add(ai)
+
+        spec = WriteAccessSpecification(
+            object_identifier=ai.object_identifier,
+            list_of_properties=[
+                BACnetPropertyValue(
+                    property_identifier=PropertyIdentifier(9999),
+                    value=encode_application_unsigned(42),
+                ),
+            ],
+        )
+        request = WritePropertyMultipleRequest(
+            list_of_write_access_specs=[spec],
+        )
+        with pytest.raises(BACnetError):
+            await handlers.handle_write_property_multiple(0, request.encode(), SOURCE)

@@ -149,3 +149,39 @@ class TestRecordAccess:
         f = FileObject(1, file_access_method=FileAccessMethod.RECORD_ACCESS, read_only=True)
         with pytest.raises(BACnetError):
             f.write_records(0, [b"data"])
+
+
+# ---------------------------------------------------------------------------
+# Coverage: Record data padding when start index beyond current length (line 200)
+# ---------------------------------------------------------------------------
+
+
+class TestRecordAccessPadding:
+    """Line 200: write_records pads with empty bytes when start > current length."""
+
+    def test_write_records_beyond_current_length_pads(self):
+        """Writing at start=5 on an empty file should pad records 0-4 with b''."""
+        f = FileObject(1, file_access_method=FileAccessMethod.RECORD_ACCESS)
+        start = f.write_records(5, [b"data_at_5"])
+        assert start == 5
+        records, _eof = f.read_records(0, 10)
+        # Should have 6 records: 5 empty pads + the written one
+        assert len(records) == 6
+        assert records[0] == b""
+        assert records[4] == b""
+        assert records[5] == b"data_at_5"
+
+    def test_write_records_gap_after_existing(self):
+        """Writing beyond existing records pads the gap."""
+        f = FileObject(1, file_access_method=FileAccessMethod.RECORD_ACCESS)
+        f.write_records(0, [b"rec0", b"rec1"])
+        start = f.write_records(5, [b"rec5"])
+        assert start == 5
+        records, _eof = f.read_records(0, 10)
+        assert len(records) == 6
+        assert records[0] == b"rec0"
+        assert records[1] == b"rec1"
+        assert records[2] == b""
+        assert records[3] == b""
+        assert records[4] == b""
+        assert records[5] == b"rec5"

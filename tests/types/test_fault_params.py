@@ -10,7 +10,7 @@ import pytest
 
 from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
 from bac_py.types.constructed import BACnetDeviceObjectPropertyReference
-from bac_py.types.enums import LifeSafetyMode, LifeSafetyState, ObjectType
+from bac_py.types.enums import LifeSafetyMode, LifeSafetyState, ObjectType, PropertyIdentifier
 from bac_py.types.fault_params import (
     FaultCharacterString,
     FaultExtended,
@@ -595,3 +595,164 @@ class TestErrorHandling:
     def test_from_dict_unknown_type_raises_valueerror(self):
         with pytest.raises(ValueError, match="Unknown"):
             fault_parameter_from_dict({"type": "not-a-real-fault"})
+
+
+# ---------------------------------------------------------------------------
+# Coverage gap tests for internal helpers and edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestInternalHelpers:
+    def test_decode_ctx_real(self):
+        """_decode_ctx_real correctly decodes a context-tagged Real value."""
+        from bac_py.encoding.primitives import encode_context_tagged, encode_real
+        from bac_py.types.fault_params import _decode_ctx_real
+
+        data = encode_context_tagged(0, encode_real(42.5))
+        mv = memoryview(data)
+        val, offset = _decode_ctx_real(mv, 0)
+        assert val == pytest.approx(42.5)
+        assert offset == len(data)
+
+    def test_decode_ctx_double(self):
+        """_decode_ctx_double correctly decodes a context-tagged Double value."""
+        from bac_py.encoding.primitives import encode_context_tagged, encode_double
+        from bac_py.types.fault_params import _decode_ctx_double
+
+        data = encode_context_tagged(0, encode_double(1.23e100))
+        mv = memoryview(data)
+        val, offset = _decode_ctx_double(mv, 0)
+        assert val == pytest.approx(1.23e100)
+        assert offset == len(data)
+
+    def test_decode_ctx_signed(self):
+        """_decode_ctx_signed correctly decodes a context-tagged signed integer."""
+        from bac_py.encoding.primitives import encode_context_tagged, encode_signed
+        from bac_py.types.fault_params import _decode_ctx_signed
+
+        data = encode_context_tagged(0, encode_signed(-42))
+        mv = memoryview(data)
+        val, offset = _decode_ctx_signed(mv, 0)
+        assert val == -42
+        assert offset == len(data)
+
+
+class TestFaultLifeSafetyFromDictCoverage:
+    def test_from_dict_with_empty_lists(self):
+        """FaultLifeSafety from_dict with empty fault and mode lists."""
+        d = {"type": "fault-life-safety", "fault_values": [], "mode_values": []}
+        result = FaultLifeSafety.from_dict(d)
+        assert result.fault_values == ()
+        assert result.mode_values == ()
+
+
+class TestFaultStateFromDictCoverage:
+    def test_from_dict_empty_hex(self):
+        """FaultState from_dict with empty hex string."""
+        d = {"type": "fault-state", "fault_values": ""}
+        result = FaultState.from_dict(d)
+        assert result.fault_values == b""
+
+
+class TestFaultStatusFlagsFromDictCoverage:
+    def test_from_dict_round_trip(self):
+        """FaultStatusFlags from_dict correctly reconstructs status_flags_ref."""
+        ref = _make_ref(
+            obj_type=ObjectType.ANALOG_VALUE,
+            instance=10,
+            prop_id=PropertyIdentifier.STATUS_FLAGS,
+        )
+        variant = FaultStatusFlags(status_flags_ref=ref)
+        d = variant.to_dict()
+        restored = FaultStatusFlags.from_dict(d)
+        assert restored.status_flags_ref.object_identifier == ref.object_identifier
+        assert restored.status_flags_ref.property_identifier == ref.property_identifier
+
+
+# ---------------------------------------------------------------------------
+# Coverage: fault_params.py lines 679-683 (mismatched closing tag)
+# ---------------------------------------------------------------------------
+
+
+class TestFaultParameterMismatchedClosingTag:
+    """Lines 679-683: decode_fault_parameter raises on mismatched closing tag."""
+
+    def test_mismatched_closing_tag_raises(self):
+        # Encode a FaultNone variant (tag 0) but replace closing tag with tag 1
+        variant = FaultNone()
+        encoded = bytearray(variant.encode())
+        # FaultNone encodes as: opening_tag(0) + closing_tag(0)
+        # Replace the closing tag 0 with closing tag 1
+        # Closing tag 0 is 0x0F, closing tag 1 is 0x1F
+        assert encoded[-1] == 0x0F  # closing tag 0
+        encoded[-1] = 0x1F  # closing tag 1
+        with pytest.raises(ValueError, match="Expected closing tag"):
+            decode_fault_parameter(memoryview(bytes(encoded)))
+
+
+# ---------------------------------------------------------------------------
+# Coverage: while-loop condition False branches in decode_inner
+# ---------------------------------------------------------------------------
+
+
+class TestFaultCharacterStringDecodeInnerEmptyLoop:
+    """Branch 156->164: while loop condition evaluates to False.
+
+    Calling decode_inner with data that has opening tag [0] and
+    immediately the closing tag [0] (no items) but truncated so
+    offset == len(data) after opening tag. Since the closing tag
+    line would fail, we test via round-trip with empty values.
+    """
+
+    def test_decode_inner_with_only_opening_closing(self):
+        """Directly call decode_inner with opening+closing tag 0 only."""
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = encode_opening_tag(0) + encode_closing_tag(0)
+        result, offset = FaultCharacterString.decode_inner(memoryview(buf), 0)
+        assert result.fault_values == ()
+        assert offset == len(buf)
+
+
+class TestFaultLifeSafetyDecodeInnerEmptyLists:
+    """Branches 278->286, 290->298: while loop conditions.
+
+    FaultLifeSafety with empty fault_values AND empty mode_values
+    exercises both while loops processing only the opening+closing tags.
+    """
+
+    def test_decode_inner_empty_both_lists(self):
+        """Both fault_values and mode_values are empty sequences."""
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = bytearray()
+        # [0] opening + closing for fault_values (empty)
+        buf.extend(encode_opening_tag(0))
+        buf.extend(encode_closing_tag(0))
+        # [1] opening + closing for mode_values (empty)
+        buf.extend(encode_opening_tag(1))
+        buf.extend(encode_closing_tag(1))
+
+        result, offset = FaultLifeSafety.decode_inner(memoryview(bytes(buf)), 0)
+        assert result.fault_values == ()
+        assert result.mode_values == ()
+        assert offset == len(buf)
+
+    def test_decode_inner_single_fault_value_empty_mode(self):
+        """One fault value, empty mode_values list."""
+        from bac_py.encoding.primitives import encode_application_enumerated
+        from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
+
+        buf = bytearray()
+        # [0] opening, one enumerated value, closing
+        buf.extend(encode_opening_tag(0))
+        buf.extend(encode_application_enumerated(LifeSafetyState.FAULT))
+        buf.extend(encode_closing_tag(0))
+        # [1] opening + closing (empty mode_values)
+        buf.extend(encode_opening_tag(1))
+        buf.extend(encode_closing_tag(1))
+
+        result, offset = FaultLifeSafety.decode_inner(memoryview(bytes(buf)), 0)
+        assert result.fault_values == (LifeSafetyState.FAULT,)
+        assert result.mode_values == ()
+        assert offset == len(buf)
