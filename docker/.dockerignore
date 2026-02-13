@@ -1,5 +1,6 @@
 .venv/
 .git/
+.github/
 __pycache__/
 *.pyc
 docs/
@@ -13,3 +14,7 @@ dist/
 build/
 htmlcov/
 .coverage
+.env*
+tests/
+*.md
+!README.md

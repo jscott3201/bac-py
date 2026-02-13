@@ -40,6 +40,7 @@ capabilities, see :doc:`features`.
    guide/events-alarms
    guide/server-mode
    guide/device-management
+   guide/examples
 
 .. toctree::
    :caption: API Reference

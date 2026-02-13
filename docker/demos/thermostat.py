@@ -90,10 +90,13 @@ async def run() -> None:
     instance = int(os.environ.get("DEVICE_INSTANCE", "500"))
     port = int(os.environ.get("BACNET_PORT", "47808"))
 
+    broadcast_address = os.environ.get("BROADCAST_ADDRESS", "255.255.255.255")
+
     config = DeviceConfig(
         instance_number=instance,
         name=f"Smart-Thermostat-{instance}",
         port=port,
+        broadcast_address=broadcast_address,
     )
     app = BACnetApplication(config)
     await app.start()
@@ -105,8 +108,8 @@ async def run() -> None:
         vendor_name="bac-py",
         vendor_identifier=0,
         model_name="bac-py-thermostat",
-        firmware_revision="1.0.0",
-        application_software_version="1.0.0",
+        firmware_revision="1.2.0",
+        application_software_version="1.2.0",
     )
     app.object_db.add(device)
 

@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-02-12
+
+### Breaking Changes
+
+- **PropertyIdentifier enum values corrected** -- ~40+ numerical values realigned
+  to match ASHRAE 135-2020 Clause 21 pp. 933-942. Key changes:
+  `TIME_DELAY_NORMAL` 204→356, `TIME_SYNCHRONIZATION_INTERVAL` 205→204,
+  lift/escalator properties renumbered (`CAR_ASSIGNED_DIRECTION` 500→448, etc.),
+  staging properties renumbered (`PRESENT_STAGE` at 493, etc.), audit properties
+  renumbered (`AUDIT_LEVEL` 550→498, etc.). New properties added:
+  `ISSUE_CONFIRMED_NOTIFICATIONS` (51), `INTERFACE_VALUE` (387),
+  `LOW_DIFF_LIMIT` (390), `STRIKE_COUNT` (391), and others.
+- **EngineeringUnits enum expanded from 62 to 269 members** -- Complete per
+  ASHRAE 135-2020 Clause 21. Many existing values corrected: `WATTS` 48→47,
+  `KILOWATTS` 49→48, `MEGAWATTS` 50→49, `LITERS_PER_SECOND` 85→87,
+  `CUBIC_METERS` 46→80, `KILOGRAMS` 28→39, and others.
+- **StagingObject property names corrected** -- Renamed to match Clause 12.62:
+  `STAGING_STATE`→`PRESENT_STAGE`, `TARGET_OBJECT`→`STAGES`,
+  `TARGET_PROPERTY`→`STAGE_NAMES`, `STAGING_TIMEOUT`→`TARGET_REFERENCES`.
+- **AccessEvent enum corrected** -- Renamed
+  `NO_ENTRY_AFTER_GRANT`→`NO_ENTRY_AFTER_GRANTED`,
+  `DENIED_INCORRECT_AUTHENTICATION`→`DENIED_INCORRECT_AUTHENTICATION_FACTOR`,
+  `DENIED_OTHER` 133→164, and 30+ new denied event members added.
+
+### Added
+
+- **5 new enums** -- `AccessCredentialDisableReason` (10 members),
+  `LiftCarDoorCommand` (3), `LiftCarDriveStatus` (10), `LiftCarMode` (14),
+  `LiftFault` (17) per ASHRAE 135-2020.
+- **Bvlc6ResultCode fix** -- `VIRTUAL_ADDRESS_RESOLUTION_NAK` corrected from
+  0x0060 to 0x0040 per Clause 7.
+- **Examples guide** -- New `docs/guide/examples.rst` covering all 17 example
+  scripts organized into 5 categories with code snippets and cross-references.
+- **Device management guide sections** -- Added Device Communication Control,
+  Reinitialization, Time Synchronization, and Object Management sections to
+  `docs/guide/device-management.rst`.
+- 120+ new enum tests covering `LiftFault`, `LiftCarMode`, `LiftCarDoorCommand`,
+  `LiftCarDriveStatus`, `AccessCredentialDisableReason`, `AccessEvent`,
+  `StagingState`, `EscalatorMode`, `EscalatorFault`, `LiftCarDirection`,
+  `LiftGroupMode`, `LiftCarDoorStatus`, `AccessCredentialDisable`.
+
+### Fixed
+
+- **Docker infrastructure** -- Pinned uv from `latest` to `0.9` in Dockerfile
+  for deterministic builds. Updated firmware/application version strings from
+  `"0.1.0"` to `"1.2.0"` across all 4 server roles. Added `BROADCAST_ADDRESS`
+  env var support to thermostat demo. Added `.dockerignore` exclusions
+  (`.github/`, `.env*`, `tests/`, `*.md`).
+- **Makefile CI alignment** -- Added `docker/` to `lint`, `fix`, and `format`
+  targets to match CI. Added `--profile demo` and `--profile stress-runner`
+  to `docker-clean` target.
+
+### Changed
+
+- **Documentation completeness** -- Added missing services
+  (`SubscribeCOVProperty`, `SubscribeCOVPropertyMultiple`,
+  `ConfirmedCOVNotification`, `ConfirmedCOVNotificationMultiple`,
+  `GetEventInformation`, `UnconfirmedCOVNotificationMultiple`) to `features.rst`
+  and `README.md`. Updated test count from 4,920+ to 5,050+. Fixed stale
+  architecture link in `features.rst`.
+
 ## [1.1.1] - 2026-02-12
 
 ### Added

@@ -17,7 +17,6 @@ from bac_py.types.enums import (
     PropertyIdentifier,
     StagingState,
 )
-from bac_py.types.primitives import ObjectIdentifier
 
 
 @register_object_type
@@ -41,31 +40,30 @@ class StagingObject(BACnetObject):
             required=True,
         ),
         **status_properties(),
-        PropertyIdentifier.STAGING_STATE: PropertyDefinition(
-            PropertyIdentifier.STAGING_STATE,
+        PropertyIdentifier.PRESENT_STAGE: PropertyDefinition(
+            PropertyIdentifier.PRESENT_STAGE,
             StagingState,
             PropertyAccess.READ_ONLY,
             required=True,
             default=StagingState.NOT_STAGED,
         ),
-        PropertyIdentifier.TARGET_OBJECT: PropertyDefinition(
-            PropertyIdentifier.TARGET_OBJECT,
-            ObjectIdentifier,
+        PropertyIdentifier.STAGES: PropertyDefinition(
+            PropertyIdentifier.STAGES,
+            list,
             PropertyAccess.READ_WRITE,
             required=True,
         ),
-        PropertyIdentifier.TARGET_PROPERTY: PropertyDefinition(
-            PropertyIdentifier.TARGET_PROPERTY,
-            int,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.STAGING_TIMEOUT: PropertyDefinition(
-            PropertyIdentifier.STAGING_TIMEOUT,
-            int,
+        PropertyIdentifier.STAGE_NAMES: PropertyDefinition(
+            PropertyIdentifier.STAGE_NAMES,
+            list,
             PropertyAccess.READ_WRITE,
             required=False,
-            default=0,
+        ),
+        PropertyIdentifier.TARGET_REFERENCES: PropertyDefinition(
+            PropertyIdentifier.TARGET_REFERENCES,
+            list,
+            PropertyAccess.READ_WRITE,
+            required=True,
         ),
     }
 

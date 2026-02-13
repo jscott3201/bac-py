@@ -771,18 +771,18 @@ class TestStagingObject:
         assert obj.OBJECT_TYPE == ObjectType.STAGING
         assert obj.object_identifier.instance_number == 1
 
-    def test_staging_state_default(self):
+    def test_present_stage_default(self):
         from bac_py.objects.staging import StagingObject
 
         obj = StagingObject(1, object_name="staging-1")
-        assert obj.read_property(PropertyIdentifier.STAGING_STATE) == StagingState.NOT_STAGED
+        assert obj.read_property(PropertyIdentifier.PRESENT_STAGE) == StagingState.NOT_STAGED
 
-    def test_staging_state_is_read_only(self):
+    def test_present_stage_is_read_only(self):
         from bac_py.objects.staging import StagingObject
 
         obj = StagingObject(1, object_name="staging-1")
         with pytest.raises(BACnetError) as exc_info:
-            obj.write_property(PropertyIdentifier.STAGING_STATE, StagingState.STAGED)
+            obj.write_property(PropertyIdentifier.PRESENT_STAGE, StagingState.STAGED)
         assert exc_info.value.error_code == ErrorCode.WRITE_ACCESS_DENIED
 
     def test_write_present_value(self):
@@ -792,31 +792,21 @@ class TestStagingObject:
         obj.write_property(PropertyIdentifier.PRESENT_VALUE, 42.0)
         assert obj.read_property(PropertyIdentifier.PRESENT_VALUE) == 42.0
 
-    def test_staging_timeout_default(self):
+    def test_write_stages(self):
         from bac_py.objects.staging import StagingObject
 
         obj = StagingObject(1, object_name="staging-1")
-        assert obj.read_property(PropertyIdentifier.STAGING_TIMEOUT) == 0
+        stages = [{"name": "stage1"}, {"name": "stage2"}]
+        obj.write_property(PropertyIdentifier.STAGES, stages)
+        assert obj.read_property(PropertyIdentifier.STAGES) == stages
 
-    def test_write_staging_timeout(self):
+    def test_write_target_references(self):
         from bac_py.objects.staging import StagingObject
 
         obj = StagingObject(1, object_name="staging-1")
-        obj.write_property(PropertyIdentifier.STAGING_TIMEOUT, 60)
-        assert obj.read_property(PropertyIdentifier.STAGING_TIMEOUT) == 60
-
-    def test_write_target_property(self):
-        from bac_py.objects.staging import StagingObject
-
-        obj = StagingObject(1, object_name="staging-1")
-        obj.write_property(
-            PropertyIdentifier.TARGET_PROPERTY,
-            PropertyIdentifier.PRESENT_VALUE.value,
-        )
-        assert (
-            obj.read_property(PropertyIdentifier.TARGET_PROPERTY)
-            == PropertyIdentifier.PRESENT_VALUE.value
-        )
+        refs = [{"object": "analog-input:1", "property": "present-value"}]
+        obj.write_property(PropertyIdentifier.TARGET_REFERENCES, refs)
+        assert obj.read_property(PropertyIdentifier.TARGET_REFERENCES) == refs
 
     def test_out_of_service_default(self):
         from bac_py.objects.staging import StagingObject

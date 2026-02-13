@@ -112,9 +112,10 @@ Confirmed services (request/response, reliable delivery):
 - CreateObject / DeleteObject
 - AddListElement / RemoveListElement
 - AtomicReadFile / AtomicWriteFile
-- SubscribeCOV
+- SubscribeCOV / SubscribeCOVProperty / SubscribeCOVPropertyMultiple
+- ConfirmedCOVNotification / ConfirmedCOVNotificationMultiple
 - ConfirmedEventNotification
-- GetAlarmSummary / GetEnrollmentSummary
+- GetAlarmSummary / GetEnrollmentSummary / GetEventInformation
 - AcknowledgeAlarm
 - ConfirmedTextMessage
 - ConfirmedAuditNotification *(new in 2020)*
@@ -129,7 +130,7 @@ Unconfirmed services (broadcast, fire-and-forget):
 - Who-Is / I-Am
 - Who-Has / I-Have
 - TimeSynchronization / UTCTimeSynchronization
-- UnconfirmedCOVNotification
+- UnconfirmedCOVNotification / UnconfirmedCOVNotificationMultiple
 - UnconfirmedEventNotification
 - UnconfirmedTextMessage
 - UnconfirmedAuditNotification *(new in 2020)*
@@ -596,4 +597,4 @@ Architecture
      transport/      BACnet/IP (Annex J) UDP, BACnet/IPv6, Ethernet, BVLL, BBMD
      types/          Primitive types, enumerations, and string parsing
 
-See the :doc:`api/app` for full API documentation of each module.
+See the :doc:`api/app/index` for full API documentation of each module.

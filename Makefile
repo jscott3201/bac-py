@@ -4,8 +4,8 @@
        docker-test-events docker-demo docker-demo-auto docker-clean
 
 lint:
-	uv run ruff check src/ tests/
-	uv run ruff format --check src/ tests/
+	uv run ruff check src/ tests/ docker/
+	uv run ruff format --check src/ tests/ docker/
 
 typecheck:
 	uv run mypy src/
@@ -19,11 +19,11 @@ docs:
 check: lint typecheck test docs
 
 fix:
-	uv run ruff check --fix src/ tests/
-	uv run ruff format src/ tests/
+	uv run ruff check --fix src/ tests/ docker/
+	uv run ruff format src/ tests/ docker/
 
 format:
-	uv run ruff format src/ tests/
+	uv run ruff format src/ tests/ docker/
 
 coverage:
 	uv run pytest --cov --cov-report=term-missing
@@ -91,4 +91,5 @@ docker-demo-auto: docker-build
 
 docker-clean:
 	$(COMPOSE) --profile all down -v --rmi local
+	$(COMPOSE) --profile demo down -v --rmi local
 	$(COMPOSE) --profile stress-runner down -v --rmi local

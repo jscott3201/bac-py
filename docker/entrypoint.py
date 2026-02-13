@@ -48,8 +48,8 @@ async def run_server() -> None:
         vendor_name="bac-py",
         vendor_identifier=0,
         model_name="bac-py-docker",
-        firmware_revision="0.1.0",
-        application_software_version="0.1.0",
+        firmware_revision="1.2.0",
+        application_software_version="1.2.0",
     )
     app.object_db.add(device)
 
@@ -130,8 +130,8 @@ async def run_bbmd() -> None:
         vendor_name="bac-py",
         vendor_identifier=0,
         model_name="bac-py-docker-bbmd",
-        firmware_revision="0.1.0",
-        application_software_version="0.1.0",
+        firmware_revision="1.2.0",
+        application_software_version="1.2.0",
     )
     app.object_db.add(device)
 
@@ -201,8 +201,8 @@ async def run_router() -> None:
         vendor_name="bac-py",
         vendor_identifier=0,
         model_name="bac-py-docker-router",
-        firmware_revision="0.1.0",
-        application_software_version="0.1.0",
+        firmware_revision="1.2.0",
+        application_software_version="1.2.0",
     )
     app.object_db.add(device)
 
@@ -274,8 +274,8 @@ async def run_server_extended() -> None:
         vendor_name="bac-py",
         vendor_identifier=0,
         model_name="bac-py-docker-extended",
-        firmware_revision="0.1.0",
-        application_software_version="0.1.0",
+        firmware_revision="1.2.0",
+        application_software_version="1.2.0",
     )
     app.object_db.add(device)
 

@@ -322,7 +322,9 @@ PositiveInteger, Time, and pattern variants).
 **Confirmed:** ReadProperty, WriteProperty, ReadPropertyMultiple,
 WritePropertyMultiple, ReadRange, CreateObject, DeleteObject,
 AddListElement, RemoveListElement, AtomicReadFile, AtomicWriteFile,
-SubscribeCOV, ConfirmedEventNotification, AcknowledgeAlarm,
+SubscribeCOV, SubscribeCOVProperty, SubscribeCOVPropertyMultiple,
+ConfirmedCOVNotification, ConfirmedCOVNotificationMultiple,
+ConfirmedEventNotification, AcknowledgeAlarm,
 GetAlarmSummary, GetEnrollmentSummary, GetEventInformation,
 ConfirmedTextMessage, ConfirmedAuditNotification *(2020)*,
 AuditLogQuery *(2020)*, VT-Open, VT-Close, VT-Data,
@@ -330,7 +332,8 @@ DeviceCommunicationControl, ReinitializeDevice,
 ConfirmedPrivateTransfer.
 
 **Unconfirmed:** Who-Is/I-Am, Who-Has/I-Have,
-TimeSynchronization/UTCTimeSynchronization, UnconfirmedCOVNotification,
+TimeSynchronization/UTCTimeSynchronization,
+UnconfirmedCOVNotification, UnconfirmedCOVNotificationMultiple,
 UnconfirmedEventNotification, UnconfirmedTextMessage,
 UnconfirmedAuditNotification *(2020)*, Who-Am-I/You-Are *(2020)*,
 WriteGroup, UnconfirmedPrivateTransfer.
@@ -351,7 +354,9 @@ from bac_py.services.errors import (
 
 ## Examples
 
-The [`examples/`](examples/) directory contains runnable scripts:
+The [`examples/`](examples/) directory contains runnable scripts covering all
+major features. See the [Examples Guide](https://jscott3201.github.io/bac-py/guide/examples.html)
+for detailed walkthroughs.
 
 | File                      | Description                                          |
 | ------------------------- | ---------------------------------------------------- |
@@ -429,7 +434,7 @@ from bac_py.encoding.primitives import (
 ## Testing
 
 ```bash
-# Run the unit test suite (4,920+ tests)
+# Run the unit test suite (5,050+ tests)
 make test
 
 # With coverage

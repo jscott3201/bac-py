@@ -12,4 +12,4 @@ class TestStagingObject:
 
         obj = StagingObject(1, object_name="staging-1")
         assert obj.OBJECT_TYPE == ObjectType.STAGING
-        assert obj.read_property(PropertyIdentifier.STAGING_STATE) == StagingState.NOT_STAGED
+        assert obj.read_property(PropertyIdentifier.PRESENT_STAGE) == StagingState.NOT_STAGED

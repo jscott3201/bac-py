@@ -1,7 +1,7 @@
 FROM python:3.13-alpine AS base
 
 # Install uv from official distroless image (recommended by uv docs)
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+COPY --from=ghcr.io/astral-sh/uv:0.9 /uv /uvx /bin/
 
 # Build deps for orjson musl wheel compilation fallback
 RUN apk add --no-cache gcc musl-dev

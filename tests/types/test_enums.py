@@ -6,6 +6,9 @@ import pytest
 
 from bac_py.types.enums import (
     AbortReason,
+    AccessCredentialDisable,
+    AccessCredentialDisableReason,
+    AccessEvent,
     Action,
     BinaryPV,
     BvlcFunction,
@@ -15,8 +18,17 @@ from bac_py.types.enums import (
     EngineeringUnits,
     ErrorClass,
     ErrorCode,
+    EscalatorFault,
+    EscalatorMode,
     EventState,
     FileAccessMethod,
+    LiftCarDirection,
+    LiftCarDoorCommand,
+    LiftCarDoorStatus,
+    LiftCarDriveStatus,
+    LiftCarMode,
+    LiftFault,
+    LiftGroupMode,
     NetworkMessageType,
     NetworkPriority,
     NetworkReachability,
@@ -31,6 +43,7 @@ from bac_py.types.enums import (
     RejectReason,
     Reliability,
     Segmentation,
+    StagingState,
     UnconfirmedServiceChoice,
 )
 
@@ -62,6 +75,19 @@ ALL_ENUM_CLASSES = [
     Action,
     RejectMessageReason,
     NetworkReachability,
+    AccessEvent,
+    AccessCredentialDisable,
+    AccessCredentialDisableReason,
+    EscalatorMode,
+    EscalatorFault,
+    LiftCarDirection,
+    LiftCarDoorStatus,
+    LiftCarDoorCommand,
+    LiftCarDriveStatus,
+    LiftCarMode,
+    LiftFault,
+    LiftGroupMode,
+    StagingState,
 ]
 
 
@@ -705,7 +731,7 @@ class TestEngineeringUnits:
         assert EngineeringUnits.DEGREES_FAHRENHEIT == 64
 
     def test_watts(self) -> None:
-        assert EngineeringUnits.WATTS == 48
+        assert EngineeringUnits.WATTS == 47
 
     def test_kilowatt_hours(self) -> None:
         assert EngineeringUnits.KILOWATT_HOURS == 19
@@ -723,10 +749,10 @@ class TestEngineeringUnits:
         assert EngineeringUnits.AMPERES == 3
 
     def test_liters_per_second(self) -> None:
-        assert EngineeringUnits.LITERS_PER_SECOND == 85
+        assert EngineeringUnits.LITERS_PER_SECOND == 87
 
     def test_member_count(self) -> None:
-        assert len(EngineeringUnits) == 62
+        assert len(EngineeringUnits) == 269
 
 
 # ---------------------------------------------------------------------------
@@ -1003,3 +1029,124 @@ class TestEnumNameLookup:
     def test_invalid_name_raises(self) -> None:
         with pytest.raises(KeyError):
             ObjectType["DOES_NOT_EXIST"]
+
+
+# ---------------------------------------------------------------------------
+# New / expanded enums (spec compliance additions)
+# ---------------------------------------------------------------------------
+
+
+class TestLiftFault:
+    def test_controller_fault(self) -> None:
+        assert LiftFault.CONTROLLER_FAULT == 0
+
+    def test_load_measurement_fault(self) -> None:
+        assert LiftFault.LOAD_MEASUREMENT_FAULT == 16
+
+    def test_member_count(self) -> None:
+        assert len(LiftFault) == 17
+
+
+class TestLiftCarMode:
+    def test_unknown(self) -> None:
+        assert LiftCarMode.UNKNOWN == 0
+
+    def test_occupant_evacuation(self) -> None:
+        assert LiftCarMode.OCCUPANT_EVACUATION == 13
+
+    def test_member_count(self) -> None:
+        assert len(LiftCarMode) == 14
+
+
+class TestLiftCarDoorCommand:
+    def test_none(self) -> None:
+        assert LiftCarDoorCommand.NONE == 0
+
+    def test_close(self) -> None:
+        assert LiftCarDoorCommand.CLOSE == 2
+
+    def test_member_count(self) -> None:
+        assert len(LiftCarDoorCommand) == 3
+
+
+class TestLiftCarDriveStatus:
+    def test_unknown(self) -> None:
+        assert LiftCarDriveStatus.UNKNOWN == 0
+
+    def test_multi_floor_jump(self) -> None:
+        assert LiftCarDriveStatus.MULTI_FLOOR_JUMP == 9
+
+    def test_member_count(self) -> None:
+        assert len(LiftCarDriveStatus) == 10
+
+
+class TestAccessCredentialDisableReason:
+    def test_disabled(self) -> None:
+        assert AccessCredentialDisableReason.DISABLED == 0
+
+    def test_disabled_manual(self) -> None:
+        assert AccessCredentialDisableReason.DISABLED_MANUAL == 9
+
+    def test_member_count(self) -> None:
+        assert len(AccessCredentialDisableReason) == 10
+
+
+class TestAccessEvent:
+    def test_granted_events(self) -> None:
+        assert AccessEvent.NONE == 0
+        assert AccessEvent.GRANTED == 1
+        assert AccessEvent.NO_ENTRY_AFTER_GRANTED == 16
+
+    def test_denied_events(self) -> None:
+        assert AccessEvent.DENIED_DENY_ALL == 128
+        assert AccessEvent.DENIED_OTHER == 164
+
+    def test_member_count(self) -> None:
+        assert len(AccessEvent) == 54
+
+
+class TestStagingState:
+    def test_not_staged(self) -> None:
+        assert StagingState.NOT_STAGED == 0
+
+    def test_abandoned(self) -> None:
+        assert StagingState.ABANDONED == 6
+
+    def test_member_count(self) -> None:
+        assert len(StagingState) == 7
+
+
+class TestEscalatorMode:
+    def test_member_count(self) -> None:
+        assert len(EscalatorMode) == 6
+
+
+class TestEscalatorFault:
+    def test_member_count(self) -> None:
+        assert len(EscalatorFault) == 9
+
+
+class TestLiftCarDirection:
+    def test_member_count(self) -> None:
+        assert len(LiftCarDirection) == 6
+
+
+class TestLiftGroupMode:
+    def test_member_count(self) -> None:
+        assert len(LiftGroupMode) == 7
+
+
+class TestLiftCarDoorStatus:
+    def test_member_count(self) -> None:
+        assert len(LiftCarDoorStatus) == 8
+
+
+class TestAccessCredentialDisable:
+    def test_none(self) -> None:
+        assert AccessCredentialDisable.NONE == 0
+
+    def test_disable_lockout(self) -> None:
+        assert AccessCredentialDisable.DISABLE_LOCKOUT == 3
+
+    def test_member_count(self) -> None:
+        assert len(AccessCredentialDisable) == 4
