@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2026-02-12
+
+### Added
+
+- **5 new example scripts** -- `device_control.py` (communication control,
+  reinitialization, time synchronization), `object_management.py` (create,
+  list, and delete objects), `advanced_discovery.py` (Who-Has, unconfigured
+  device discovery, hierarchy traversal), `cov_property.py` (property-level
+  COV subscriptions with increment), `audit_log.py` (audit log queries with
+  pagination). Total example count is now 17.
+- **`get_enrollment_summary()` example** in `alarm_management.py` --
+  demonstrates querying enrollment summaries with acknowledgment filtering.
+
+### Fixed
+
+- **`extended_discovery.py`** -- changed `dev.address` to `dev.address_str`
+  for consistency with all other example scripts.
+
+### Changed
+
+- Updated README examples table and documentation to reflect the 5 new
+  example scripts.
+- Added `get_enrollment_summary()` to the events-alarms guide and features
+  convenience API list.
+
 ## [1.1.0] - 2026-02-12
 
 ### Added

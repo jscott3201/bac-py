@@ -9,15 +9,15 @@ Events and Alarms
 Alarm Management
 -----------------
 
-Get alarm summaries, query event information, and acknowledge alarms using
-string-based addressing:
+Get alarm summaries, query enrollment summaries, check event information, and
+acknowledge alarms using string-based addressing:
 
 .. code-block:: python
 
    import datetime
    from bac_py import Client
    from bac_py.types.constructed import BACnetTimeStamp
-   from bac_py.types.enums import EventState
+   from bac_py.types.enums import AcknowledgmentFilter, EventState
    from bac_py.types.primitives import BACnetTime
 
    async with Client(instance_number=999) as client:
@@ -27,6 +27,13 @@ string-based addressing:
        alarm_summary = await client.get_alarm_summary(addr)
        for entry in alarm_summary.list_of_alarm_summaries:
            print(f"  {entry.object_identifier}: {entry.alarm_state}")
+
+       # Get enrollment summaries (all event-generating objects)
+       enrollment = await client.get_enrollment_summary(
+           addr, acknowledgment_filter=AcknowledgmentFilter.ALL,
+       )
+       for entry in enrollment.list_of_enrollment_summaries:
+           print(f"  {entry.object_identifier}: {entry.event_type}")
 
        # Get detailed event information (supports pagination)
        event_info = await client.get_event_information(addr)
