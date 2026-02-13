@@ -1399,6 +1399,7 @@ class Client:
         network: int | None = None,
         destination: str | BACnetAddress | None = None,
         timeout: float = 3.0,
+        expected_count: int | None = None,
     ) -> list[RouterInfo]:
         """Discover routers and reachable networks.
 
@@ -1410,7 +1411,12 @@ class Client:
             a :class:`BACnetAddress`, or ``None`` for local
             broadcast.
         :param timeout: Seconds to wait for responses.
+        :param expected_count: When set, return early once this many
+            distinct routers have responded.
         """
         return await self._require_client().who_is_router_to_network(
-            network=network, destination=destination, timeout=timeout
+            network=network,
+            destination=destination,
+            timeout=timeout,
+            expected_count=expected_count,
         )

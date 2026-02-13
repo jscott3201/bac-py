@@ -18,6 +18,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+class BvlcNakError(Exception):
+    """Raised when a BVLC-Result NAK is received for a pending request."""
+
+    def __init__(self, result_code: int, source: BIPAddress) -> None:
+        self.result_code = result_code
+        self.source = source
+        super().__init__(f"BVLC NAK code {result_code:#06x} from {source}")
+
+
 # F3: Mapping from BVLC management functions to their NAK result codes.
 # Non-BBMD devices respond with NAK when receiving these messages.
 _BVLC_NAK_MAP: dict[BvlcFunction, BvlcResultCode] = {
@@ -27,6 +37,16 @@ _BVLC_NAK_MAP: dict[BvlcFunction, BvlcResultCode] = {
     BvlcFunction.READ_FOREIGN_DEVICE_TABLE: BvlcResultCode.READ_FOREIGN_DEVICE_TABLE_NAK,
     BvlcFunction.DELETE_FOREIGN_DEVICE_TABLE_ENTRY: BvlcResultCode.DELETE_FOREIGN_DEVICE_TABLE_ENTRY_NAK,
     BvlcFunction.DISTRIBUTE_BROADCAST_TO_NETWORK: BvlcResultCode.DISTRIBUTE_BROADCAST_TO_NETWORK_NAK,
+}
+
+# Reverse map: NAK result code -> the ACK function that a pending _bvlc_request
+# would be waiting for.  Used to immediately fail pending futures on NAK instead
+# of waiting for the full timeout.
+_NAK_TO_PENDING_ACK: dict[int, BvlcFunction] = {
+    BvlcResultCode.READ_BROADCAST_DISTRIBUTION_TABLE_NAK: BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK,
+    BvlcResultCode.READ_FOREIGN_DEVICE_TABLE_NAK: BvlcFunction.READ_FOREIGN_DEVICE_TABLE_ACK,
+    BvlcResultCode.WRITE_BROADCAST_DISTRIBUTION_TABLE_NAK: BvlcFunction.WRITE_BROADCAST_DISTRIBUTION_TABLE,
+    BvlcResultCode.DELETE_FOREIGN_DEVICE_TABLE_ENTRY_NAK: BvlcFunction.DELETE_FOREIGN_DEVICE_TABLE_ENTRY,
 }
 
 
@@ -385,6 +405,7 @@ class BIPTransport:
         :param timeout: Seconds to wait for a response.
         :returns: List of :class:`BDTEntry` instances from the remote BBMD.
         :raises RuntimeError: If transport not started.
+        :raises BvlcNakError: If the target is not a BBMD.
         :raises TimeoutError: If no response within *timeout*.
         """
         if self._transport is None:
@@ -452,6 +473,7 @@ class BIPTransport:
             The ``expiry`` field is set to ``0.0`` since it is not meaningful
             for remote entries; use the ``remaining`` property instead.
         :raises RuntimeError: If transport not started.
+        :raises BvlcNakError: If the target is not a BBMD.
         :raises TimeoutError: If no response within *timeout*.
         """
         if self._transport is None:
@@ -712,6 +734,11 @@ class BIPTransport:
         (if any) so it can track registration state.  Non-zero result
         codes are logged at warning level.
 
+        When a NAK maps to a pending ``_bvlc_request`` future (e.g. a
+        Read-BDT-NAK for a pending Read-BDT-ACK), the future is failed
+        immediately with :class:`BvlcNakError` instead of waiting for
+        the full timeout.
+
         S3: Only routes to the ForeignDeviceManager if the sender
         matches the expected BBMD address, preventing rogue devices
         from spoofing registration confirmations.
@@ -722,6 +749,13 @@ class BIPTransport:
         if len(data) >= 2:
             result_code = int.from_bytes(data[:2], "big")
             if result_code != 0:
-                logger.warning("BVLC-Result NAK: code %d", result_code)
+                logger.debug("BVLC-Result NAK: code %d from %s", result_code, source)
+                # Fail any pending _bvlc_request future immediately.
+                ack_func = _NAK_TO_PENDING_ACK.get(result_code)
+                if ack_func is not None:
+                    key = (ack_func, source)
+                    future = self._pending_bvlc.get(key)
+                    if future is not None and not future.done():
+                        future.set_exception(BvlcNakError(result_code, source))
             else:
                 logger.debug("BVLC-Result: %d", result_code)

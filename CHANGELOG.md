@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-02-12
+
+### Fixed
+
+- **`read_bdt()`/`read_fdt()` NAK handling** -- These client methods now convert
+  the internal `BvlcNakError` to `RuntimeError` when the target device rejects
+  the request (not a BBMD), matching the pattern already used by `write_bdt()`.
+  Previously the internal exception type was not exported, making it impossible
+  for callers to catch cleanly.
+
+### Changed
+
+- **Targeted unicast discovery early return** -- `who_is()` and `discover()`
+  now auto-infer `expected_count=1` when `low_limit == high_limit` and the
+  destination is a unicast address. This avoids waiting the full broadcast
+  timeout (typically 3s) when only one response is expected, reducing targeted
+  discovery from ~3s to RTT (~50ms).
+- **`who_is_router_to_network()` early return** -- Added `expected_count`
+  parameter to `who_is_router_to_network()` (both `BACnetClient` and `Client`
+  wrapper). When set, the method returns as soon as the expected number of
+  distinct routers have responded instead of waiting the full timeout.
+
 ## [1.2.0] - 2026-02-12
 
 ### Breaking Changes

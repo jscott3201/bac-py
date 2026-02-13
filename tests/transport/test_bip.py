@@ -190,13 +190,13 @@ class TestOnDatagramReceived:
 
         callback.assert_not_called()
 
-    def test_bvlc_result_handled_logs_warning(self, caplog):
+    def test_bvlc_result_handled_logs_debug(self, caplog):
         transport, _callback = self._make_transport_with_callback()
         result_data = b"\x00\x30"  # register-foreign-device NAK
         bvll_data = encode_bvll(BvlcFunction.BVLC_RESULT, result_data)
         addr = ("192.168.1.1", 47808)
 
-        with caplog.at_level(logging.WARNING, logger="bac_py.transport.bip"):
+        with caplog.at_level(logging.DEBUG, logger="bac_py.transport.bip"):
             transport._on_datagram_received(bvll_data, addr)
 
         assert "BVLC-Result NAK: code 48" in caplog.text
@@ -675,12 +675,79 @@ class TestHandleBvlcResult:
             transport._handle_bvlc_result(b"\x00\x00", source)
         assert "BVLC-Result: 0" in caplog.text
 
-    def test_nonzero_result_code_logs_warning(self, caplog):
+    def test_nonzero_result_code_logs_debug(self, caplog):
         transport = BIPTransport()
         source = BIPAddress(host="192.168.1.1", port=47808)
-        with caplog.at_level(logging.WARNING, logger="bac_py.transport.bip"):
+        with caplog.at_level(logging.DEBUG, logger="bac_py.transport.bip"):
             transport._handle_bvlc_result(b"\x00\x30", source)
         assert "BVLC-Result NAK: code 48" in caplog.text
+
+
+class TestBvlcNakResolvesePendingFutures:
+    """NAK results should immediately fail pending _bvlc_request futures."""
+
+    @pytest.mark.asyncio
+    async def test_read_bdt_nak_raises_immediately(self):
+        """Read-BDT-NAK (0x0020) should fail the pending read_bdt future."""
+        from bac_py.transport.bip import BvlcNakError
+
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+        target = BIPAddress(host="192.168.1.1", port=47808)
+
+        # Start read_bdt (will register a pending future)
+        task = asyncio.create_task(transport.read_bdt(target, timeout=10.0))
+        await asyncio.sleep(0)  # let the future register
+
+        # Simulate NAK response from the target
+        nak_data = (0x0020).to_bytes(2, "big")
+        bvll = encode_bvll(BvlcFunction.BVLC_RESULT, nak_data)
+        transport._on_datagram_received(bvll, (target.host, target.port))
+
+        with pytest.raises(BvlcNakError, match="0x0020"):
+            await task
+
+    @pytest.mark.asyncio
+    async def test_read_fdt_nak_raises_immediately(self):
+        """Read-FDT-NAK (0x0040) should fail the pending read_fdt future."""
+        from bac_py.transport.bip import BvlcNakError
+
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+        target = BIPAddress(host="192.168.1.1", port=47808)
+
+        task = asyncio.create_task(transport.read_fdt(target, timeout=10.0))
+        await asyncio.sleep(0)
+
+        nak_data = (0x0040).to_bytes(2, "big")
+        bvll = encode_bvll(BvlcFunction.BVLC_RESULT, nak_data)
+        transport._on_datagram_received(bvll, (target.host, target.port))
+
+        with pytest.raises(BvlcNakError, match="0x0040"):
+            await task
+
+    @pytest.mark.asyncio
+    async def test_unrelated_nak_does_not_affect_pending(self):
+        """A NAK from a different source should not affect pending futures."""
+        transport = BIPTransport()
+        mock_udp = MagicMock()
+        transport._transport = mock_udp
+        target = BIPAddress(host="192.168.1.1", port=47808)
+        other = BIPAddress(host="10.0.0.99", port=47808)
+
+        task = asyncio.create_task(transport.read_bdt(target, timeout=0.1))
+        await asyncio.sleep(0)
+
+        # NAK from a different address -- should not resolve the future
+        nak_data = (0x0020).to_bytes(2, "big")
+        bvll = encode_bvll(BvlcFunction.BVLC_RESULT, nak_data)
+        transport._on_datagram_received(bvll, (other.host, other.port))
+
+        # Future should still time out (not be resolved by wrong-source NAK)
+        with pytest.raises(TimeoutError):
+            await task
 
 
 class TestBvlcResultSenderValidation:
@@ -745,7 +812,7 @@ class TestBvlcResultSenderValidation:
 
         result_data = b"\x00\x30"  # NAK code
         bvll = encode_bvll(BvlcFunction.BVLC_RESULT, result_data)
-        with caplog.at_level(logging.WARNING, logger="bac_py.transport.bip"):
+        with caplog.at_level(logging.DEBUG, logger="bac_py.transport.bip"):
             transport._on_datagram_received(bvll, (rogue_addr.host, rogue_addr.port))
 
         # NAK is logged even though FD is not updated

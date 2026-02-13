@@ -1080,6 +1080,16 @@ class BACnetClient:
             full timeout.
         :returns: List of :class:`IAmRequest` responses received within the timeout.
         """
+        # Auto-infer expected_count=1 for targeted unicast to a single instance
+        if (
+            expected_count is None
+            and low_limit is not None
+            and low_limit == high_limit
+            and destination != GLOBAL_BROADCAST
+            and not destination.is_broadcast
+        ):
+            expected_count = 1
+
         request = WhoIsRequest(low_limit=low_limit, high_limit=high_limit)
         return await self._collect_unconfirmed_responses(
             send_service=UnconfirmedServiceChoice.WHO_IS,
@@ -1132,6 +1142,15 @@ class BACnetClient:
             for dev in devices:
                 print(dev.instance, dev.address_str, dev.vendor_id)
         """
+        # Auto-infer expected_count=1 for targeted unicast to a single instance
+        if (
+            expected_count is None
+            and low_limit is not None
+            and low_limit == high_limit
+            and destination != GLOBAL_BROADCAST
+            and not destination.is_broadcast
+        ):
+            expected_count = 1
 
         def _decode_device(service_data: bytes, source: BACnetAddress) -> DiscoveredDevice:
             iam = IAmRequest.decode(service_data)
@@ -1799,6 +1818,7 @@ class BACnetClient:
         network: int | None = None,
         destination: str | BACnetAddress | None = None,
         timeout: float = 3.0,
+        expected_count: int | None = None,
     ) -> list[RouterInfo]:
         """Discover routers and reachable networks.
 
@@ -1811,6 +1831,9 @@ class BACnetClient:
             a :class:`BACnetAddress`, or ``None`` for local
             broadcast.
         :param timeout: Seconds to wait for responses.
+        :param expected_count: When set, return early once this many
+            distinct routers have responded instead of waiting for the
+            full timeout.
         :returns: List of router information with address and accessible
             networks. Multiple responses from the same router are
             merged.
@@ -1831,6 +1854,7 @@ class BACnetClient:
 
         # Collect responses keyed by router MAC
         router_map: dict[str, list[int]] = {}
+        done_event: asyncio.Event | None = asyncio.Event() if expected_count is not None else None
 
         def on_i_am_router(msg: object, source_mac: bytes) -> None:
             if not isinstance(msg, IAmRouterToNetwork):
@@ -1843,6 +1867,12 @@ class BACnetClient:
                 if net not in existing:
                     existing.append(net)
             router_map[addr_str] = existing
+            if (
+                done_event is not None
+                and expected_count is not None
+                and len(router_map) >= expected_count
+            ):
+                done_event.set()
 
         self._app.register_network_message_handler(
             NetworkMessageType.I_AM_ROUTER_TO_NETWORK, on_i_am_router
@@ -1861,7 +1891,11 @@ class BACnetClient:
                 encode_network_message(who_msg),
                 dest_addr,
             )
-            await asyncio.sleep(timeout)
+            if done_event is not None:
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(done_event.wait(), timeout)
+            else:
+                await asyncio.sleep(timeout)
         finally:
             self._app.unregister_network_message_handler(
                 NetworkMessageType.I_AM_ROUTER_TO_NETWORK, on_i_am_router
@@ -1951,14 +1985,21 @@ class BACnetClient:
             ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
         :param timeout: Seconds to wait for a response.
         :returns: List of BDT entries with address and mask information.
-        :raises RuntimeError: If transport is not available.
+        :raises RuntimeError: If transport is not available or device
+            rejects the request (not a BBMD).
         :raises TimeoutError: If no response within *timeout*.
         """
+        from bac_py.transport.bip import BvlcNakError
+
         transport = self._require_transport()
         bip_addr = self._app._parse_bip_address(
             bbmd_address if isinstance(bbmd_address, str) else str(bbmd_address)
         )
-        entries = await transport.read_bdt(bip_addr, timeout=timeout)
+        try:
+            entries = await transport.read_bdt(bip_addr, timeout=timeout)
+        except BvlcNakError as exc:
+            msg = f"Device rejected Read-BDT: not a BBMD (NAK code {exc.result_code:#06x})"
+            raise RuntimeError(msg) from exc
         return [
             BDTEntryInfo(
                 address=f"{e.address.host}:{e.address.port}",
@@ -1978,14 +2019,21 @@ class BACnetClient:
             ``"192.168.1.1"`` or ``"192.168.1.1:47808"``).
         :param timeout: Seconds to wait for a response.
         :returns: List of FDT entries with address, TTL, and remaining time.
-        :raises RuntimeError: If transport is not available.
+        :raises RuntimeError: If transport is not available or device
+            rejects the request (not a BBMD).
         :raises TimeoutError: If no response within *timeout*.
         """
+        from bac_py.transport.bip import BvlcNakError
+
         transport = self._require_transport()
         bip_addr = self._app._parse_bip_address(
             bbmd_address if isinstance(bbmd_address, str) else str(bbmd_address)
         )
-        entries = await transport.read_fdt(bip_addr, timeout=timeout)
+        try:
+            entries = await transport.read_fdt(bip_addr, timeout=timeout)
+        except BvlcNakError as exc:
+            msg = f"Device rejected Read-FDT: not a BBMD (NAK code {exc.result_code:#06x})"
+            raise RuntimeError(msg) from exc
         return [
             FDTEntryInfo(
                 address=f"{e.address.host}:{e.address.port}",

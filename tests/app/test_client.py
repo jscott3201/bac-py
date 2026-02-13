@@ -2521,6 +2521,168 @@ class TestBBMDOperations:
 
         app.unregister_network_message_handler.assert_called_once()
 
+    async def test_read_bdt_nak_raises_runtime_error(self):
+        """read_bdt converts BvlcNakError to RuntimeError."""
+        from bac_py.transport.bip import BvlcNakError
+
+        app, transport = self._make_app_with_transport()
+        client = BACnetClient(app)
+
+        bip_addr = BIPAddress(host="192.168.1.1", port=47808)
+        app._parse_bip_address.return_value = bip_addr
+
+        transport.read_bdt.side_effect = BvlcNakError(0x0020, bip_addr)
+
+        with pytest.raises(RuntimeError, match=r"Device rejected Read-BDT.*NAK code 0x0020"):
+            await client.read_bdt("192.168.1.1")
+
+    async def test_read_fdt_nak_raises_runtime_error(self):
+        """read_fdt converts BvlcNakError to RuntimeError."""
+        from bac_py.transport.bip import BvlcNakError
+
+        app, transport = self._make_app_with_transport()
+        client = BACnetClient(app)
+
+        bip_addr = BIPAddress(host="192.168.1.1", port=47808)
+        app._parse_bip_address.return_value = bip_addr
+
+        transport.read_fdt.side_effect = BvlcNakError(0x0040, bip_addr)
+
+        with pytest.raises(RuntimeError, match=r"Device rejected Read-FDT.*NAK code 0x0040"):
+            await client.read_fdt("192.168.1.1")
+
+    async def test_who_is_router_to_network_expected_count_early_return(self):
+        """who_is_router_to_network returns early when expected_count is met."""
+        from bac_py.network.messages import IAmRouterToNetwork
+
+        app = self._make_app()
+        app._transport = MagicMock()
+        client = BACnetClient(app)
+
+        captured_handler = None
+
+        def capture_handler(msg_type, handler):
+            nonlocal captured_handler
+            captured_handler = handler
+
+        app.register_network_message_handler.side_effect = capture_handler
+
+        task = asyncio.create_task(client.who_is_router_to_network(timeout=5.0, expected_count=1))
+        await asyncio.sleep(0.01)
+
+        # Simulate a single router response — should trigger early return
+        assert captured_handler is not None
+        iam_msg = IAmRouterToNetwork(networks=(10, 20))
+        source_mac = BIPAddress(host="192.168.1.10", port=47808).encode()
+        captured_handler(iam_msg, source_mac)
+
+        result = await asyncio.wait_for(task, timeout=1.0)
+        assert len(result) == 1
+        assert result[0].address == "192.168.1.10:47808"
+        assert result[0].networks == [10, 20]
+
+
+class TestUnicastDiscoveryEarlyReturn:
+    """Tests for auto-inferred expected_count=1 on targeted unicast discovery."""
+
+    def _make_app(self):
+        app = MagicMock()
+        app.confirmed_request = AsyncMock()
+        app.unconfirmed_request = MagicMock()
+        app.register_temporary_handler = MagicMock()
+        app.unregister_temporary_handler = MagicMock()
+        return app
+
+    async def test_who_is_unicast_single_instance_returns_early(self):
+        """who_is with low_limit==high_limit + unicast returns on first I-Am."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        registered_handler = None
+
+        def capture_handler(service_choice, handler):
+            nonlocal registered_handler
+            registered_handler = handler
+
+        app.register_temporary_handler.side_effect = capture_handler
+
+        unicast_dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x64\xba\xc0")
+        task = asyncio.create_task(
+            client.who_is(low_limit=100, high_limit=100, destination=unicast_dest, timeout=5.0)
+        )
+        await asyncio.sleep(0.01)
+
+        # Deliver a single I-Am — should trigger early return
+        assert registered_handler is not None
+        iam = IAmRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 100),
+            max_apdu_length=1476,
+            segmentation_supported=Segmentation.BOTH,
+            vendor_id=7,
+        )
+        registered_handler(iam.encode(), unicast_dest)
+
+        results = await asyncio.wait_for(task, timeout=1.0)
+        assert len(results) == 1
+        assert results[0].object_identifier.instance_number == 100
+
+    async def test_discover_unicast_single_instance_returns_early(self):
+        """Discover with low_limit==high_limit + unicast returns on first I-Am."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        registered_handler = None
+
+        def capture_handler(service_choice, handler):
+            nonlocal registered_handler
+            registered_handler = handler
+
+        app.register_temporary_handler.side_effect = capture_handler
+
+        unicast_dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x64\xba\xc0")
+        task = asyncio.create_task(
+            client.discover(low_limit=200, high_limit=200, destination=unicast_dest, timeout=5.0)
+        )
+        await asyncio.sleep(0.01)
+
+        # Deliver a single I-Am — should trigger early return
+        assert registered_handler is not None
+        iam = IAmRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 200),
+            max_apdu_length=1476,
+            segmentation_supported=Segmentation.BOTH,
+            vendor_id=7,
+        )
+        registered_handler(iam.encode(), unicast_dest)
+
+        results = await asyncio.wait_for(task, timeout=1.0)
+        assert len(results) == 1
+        assert results[0].instance == 200
+
+    async def test_who_is_broadcast_does_not_auto_infer(self):
+        """who_is with low_limit==high_limit but broadcast does NOT auto-infer."""
+        from bac_py.network.address import GLOBAL_BROADCAST
+
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        # With global broadcast, should wait the full timeout (no early return)
+        results = await client.who_is(
+            low_limit=100, high_limit=100, destination=GLOBAL_BROADCAST, timeout=0.05
+        )
+        assert results == []
+
+    async def test_who_is_different_limits_does_not_auto_infer(self):
+        """who_is with low_limit != high_limit does NOT auto-infer expected_count."""
+        app = self._make_app()
+        client = BACnetClient(app)
+
+        unicast_dest = BACnetAddress(mac_address=b"\xc0\xa8\x01\x64\xba\xc0")
+        results = await client.who_is(
+            low_limit=100, high_limit=200, destination=unicast_dest, timeout=0.05
+        )
+        assert results == []
+
 
 # ---------------------------------------------------------------------------
 # Section 2D: Backup/Restore Procedures
