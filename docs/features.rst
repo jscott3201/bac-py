@@ -346,6 +346,60 @@ using ``network:hex_mac`` notation where the MAC is even-length hex:
    addr = parse_address("100:0a0b")
 
 
+.. _bacnet-sc:
+
+BACnet Secure Connect (Annex AB)
+---------------------------------
+
+BACnet/SC provides a modern, IT-friendly transport for BACnet using TLS-secured
+WebSocket connections per ASHRAE 135-2020 Annex AB. It replaces broadcast UDP
+with a hub-and-spoke topology that traverses firewalls and NAT without special
+network configuration.
+
+- **WebSocket/TLS hub-and-spoke topology** -- all nodes connect to a central
+  hub over TLS-secured WebSockets, eliminating the need for UDP broadcast
+  routing and BBMD infrastructure
+- **13 BVLC-SC message types** -- BVLC-Result, Encapsulated-NPDU,
+  Address-Resolution, Address-Resolution-ACK, Advertisement,
+  Advertisement-Solicitation, Connect-Request, Connect-Accept,
+  Disconnect-Request, Disconnect-ACK, Heartbeat-Request, Heartbeat-ACK,
+  and Proprietary-Message
+- **Hub Function** (server) -- accepts WebSocket connections from hub
+  connectors and broadcasts/unicasts encapsulated NPDUs to connected nodes
+- **Hub Connector** (client with failover) -- connects to a primary hub with
+  automatic failover to a secondary hub on connection loss
+- **Direct peer-to-peer connections** via Node Switch -- establishes direct
+  WebSocket connections between nodes for latency-sensitive traffic, bypassing
+  the hub when both peers are reachable
+- **TLS 1.3 with mutual authentication** -- both hub and node present X.509
+  certificates; the operational certificate includes the BACnet device UUID
+  for identity binding
+- **6-byte VMAC addressing** -- Virtual MAC addresses uniquely identify SC
+  nodes within the BACnet/SC network, analogous to Ethernet MAC addresses
+- **Optional dependency** -- install with ``pip install bac-py[secure]``
+  (requires ``websockets`` and ``cryptography``)
+
+.. code-block:: python
+
+   from bac_py.transport.sc import SCTransport, SCTransportConfig
+   from bac_py.transport.sc.tls import SCTLSConfig
+
+   config = SCTransportConfig(
+       primary_hub_uri="wss://hub.example.com:8443",
+       failover_hub_uri="wss://hub2.example.com:8443",
+       tls_config=SCTLSConfig(
+           ca_certificates_path="/path/to/ca.pem",
+           certificate_path="/path/to/device.pem",
+           private_key_path="/path/to/device.key",
+       ),
+   )
+   transport = SCTransport(config)
+   await transport.start()
+
+See :doc:`guide/secure-connect` for a full walkthrough of hub setup, direct
+connections, failover configuration, and TLS certificate management.
+
+
 .. _bbmd-support:
 
 BBMD Support
@@ -594,7 +648,7 @@ Architecture
      segmentation/   Segmented message assembly and transmission
      serialization/  JSON serialization (optional orjson backend)
      services/       Service request/response types and registry
-     transport/      BACnet/IP (Annex J) UDP, BACnet/IPv6, Ethernet, BVLL, BBMD
+     transport/      BACnet/IP (Annex J), BACnet/IPv6, Ethernet, BACnet/SC (Annex AB)
      types/          Primitive types, enumerations, and string parsing
 
 See the :doc:`api/app/index` for full API documentation of each module.

@@ -8,6 +8,9 @@ _refactors/
 _dev_examples/
 _dev_testing/
 _future/
+.claude/
+CLAUDE.md
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

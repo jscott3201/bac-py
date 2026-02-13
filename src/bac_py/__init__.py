@@ -8,7 +8,7 @@ Typical usage::
         value = await client.read("192.168.1.100", "ai,1", "pv")
 """
 
-__version__ = "1.2.2"
+__version__ = "1.3.0"
 
 from bac_py.app.application import (
     BACnetApplication,
@@ -45,9 +45,23 @@ __all__ = [
     "RouterConfig",
     "RouterInfo",
     "RouterPortConfig",
+    "SCTransport",
+    "SCTransportConfig",
     "UnconfiguredDevice",
     "__version__",
     "decode_cov_values",
     "deserialize",
     "serialize",
 ]
+
+
+def __getattr__(name: str) -> object:
+    """Lazy-load optional SC transport (requires ``pip install bac-py[secure]``)."""
+    if name in ("SCTransport", "SCTransportConfig"):
+        from bac_py.transport.sc import SCTransport, SCTransportConfig
+
+        globals()["SCTransport"] = SCTransport
+        globals()["SCTransportConfig"] = SCTransportConfig
+        return globals()[name]
+    msg = f"module {__name__!r} has no attribute {name!r}"
+    raise AttributeError(msg)

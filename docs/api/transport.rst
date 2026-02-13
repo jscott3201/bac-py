@@ -51,3 +51,63 @@ Transport Port
 
 .. automodule:: bac_py.transport.port
    :members:
+
+BACnet Secure Connect
+---------------------
+
+.. automodule:: bac_py.transport.sc
+   :members:
+
+SC BVLC Codec
+~~~~~~~~~~~~~~
+
+.. automodule:: bac_py.transport.sc.bvlc
+   :members:
+
+SC VMAC Addressing
+~~~~~~~~~~~~~~~~~~~
+
+.. automodule:: bac_py.transport.sc.vmac
+   :members:
+
+SC Connection
+~~~~~~~~~~~~~~
+
+.. automodule:: bac_py.transport.sc.connection
+   :members:
+
+SC Hub Function
+~~~~~~~~~~~~~~~~
+
+.. automodule:: bac_py.transport.sc.hub_function
+   :members:
+
+SC Hub Connector
+~~~~~~~~~~~~~~~~~
+
+.. automodule:: bac_py.transport.sc.hub_connector
+   :members:
+
+SC Node Switch
+~~~~~~~~~~~~~~~
+
+.. automodule:: bac_py.transport.sc.node_switch
+   :members:
+
+SC WebSocket
+~~~~~~~~~~~~~
+
+.. automodule:: bac_py.transport.sc.websocket
+   :members:
+
+SC TLS
+~~~~~~~
+
+.. automodule:: bac_py.transport.sc.tls
+   :members:
+
+SC Types
+~~~~~~~~~
+
+.. automodule:: bac_py.transport.sc.types
+   :members:

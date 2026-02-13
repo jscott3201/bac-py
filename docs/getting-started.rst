@@ -20,12 +20,20 @@ To enable JSON serialization support (using ``orjson``):
 
    pip install bac-py[serialization]
 
+To enable BACnet Secure Connect (BACnet/SC) support:
+
+.. code-block:: bash
+
+   pip install bac-py[secure]
+
 Requirements
 ^^^^^^^^^^^^
 
 - Python >= 3.13
 - No runtime dependencies for the core library
 - Optional: ``orjson`` (installed with the ``serialization`` extra)
+- Optional: ``websockets`` and ``cryptography`` (installed with the ``secure``
+  extra for BACnet/SC support)
 
 Development Setup
 ^^^^^^^^^^^^^^^^^

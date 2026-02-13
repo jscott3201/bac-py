@@ -3,7 +3,7 @@
 Example Scripts
 ===============
 
-The ``examples/`` directory contains 17 runnable scripts demonstrating bac-py's
+The ``examples/`` directory contains 19 runnable scripts demonstrating bac-py's
 capabilities. Each script is self-contained and uses the high-level
 :class:`~bac_py.client.Client` API with ``asyncio.run()``.
 
@@ -430,3 +430,64 @@ Query audit log records with target-based filtering and pagination:
            start_at_sequence_number=last_seq + 1,
            requested_count=50,
        )
+
+
+.. _examples-secure-connect:
+
+BACnet Secure Connect
+---------------------
+
+secure_connect.py
+^^^^^^^^^^^^^^^^^
+
+Connect to an SC hub over WebSocket/TLS and send a ReadProperty request to a
+remote device addressed by its 6-byte VMAC. Demonstrates the lower-level
+``SCTransport`` API with manual NPDU/APDU construction:
+
+.. code-block:: python
+
+   from bac_py.transport.sc import SCTransport, SCTransportConfig
+   from bac_py.transport.sc.tls import SCTLSConfig
+   from bac_py.transport.sc.vmac import SCVMAC
+
+   config = SCTransportConfig(
+       primary_hub_uri="ws://192.168.1.200:4443",
+       tls_config=SCTLSConfig(allow_plaintext=True),
+   )
+   transport = SCTransport(config)
+   await transport.start()
+   await transport.hub_connector.wait_connected(timeout=10.0)
+
+   # Build and send NPDU to a remote VMAC
+   transport.send_unicast(npdu_bytes, SCVMAC.from_hex("02:AA:BB:CC:DD:01").address)
+
+Install the ``secure`` extra (``pip install bac-py[secure]``) to use SC
+transport. See :doc:`secure-connect` for the full guide.
+
+
+secure_connect_hub.py
+^^^^^^^^^^^^^^^^^^^^^
+
+Run a BACnet/SC hub that accepts WebSocket connections from SC nodes, routes
+traffic between them, and optionally enables direct peer-to-peer connections
+via the Node Switch:
+
+.. code-block:: python
+
+   from bac_py.transport.sc import SCTransport, SCTransportConfig
+   from bac_py.transport.sc.hub_function import SCHubConfig
+   from bac_py.transport.sc.tls import SCTLSConfig
+
+   config = SCTransportConfig(
+       hub_function_config=SCHubConfig(
+           bind_address="0.0.0.0",
+           bind_port=4443,
+           tls_config=SCTLSConfig(allow_plaintext=True),
+       ),
+       tls_config=SCTLSConfig(allow_plaintext=True),
+   )
+   transport = SCTransport(config)
+   await transport.start()
+
+   # Hub is now accepting SC node connections on port 4443
+   print(f"Connected nodes: {transport.hub_function.connection_count}")

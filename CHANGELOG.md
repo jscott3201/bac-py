@@ -5,6 +5,95 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-02-13
+
+### Added
+
+- **BACnet Secure Connect (Annex AB)** -- Full implementation of BACnet/SC
+  per ASHRAE 135-2020 Annex AB, providing encrypted, authenticated BACnet
+  communication over WebSocket/TLS with a hub-and-spoke topology and optional
+  direct peer-to-peer connections. This is the largest feature addition since
+  the initial release.
+
+  New transport layer in `src/bac_py/transport/sc/` (10 modules):
+  - **BVLC-SC codec** (`bvlc.py`) -- Encode/decode for all 13 BVLC-SC message
+    types (BVLC-Result, Encapsulated-NPDU, Address-Resolution,
+    Address-Resolution-ACK, Advertisement, Advertisement-Solicitation,
+    Connect-Request, Connect-Accept, Disconnect-Request, Disconnect-ACK,
+    Heartbeat-Request, Heartbeat-ACK, Proprietary-Message) with typed payload
+    dataclasses, header option chaining, and control flag handling.
+  - **VMAC addressing** (`vmac.py`) -- 6-byte virtual MAC addresses with
+    locally-administered unicast bit management and 16-byte RFC 4122 Device
+    UUIDs for collision detection.
+  - **WebSocket I/O layer** (`websocket.py`) -- Sans-I/O `websockets` library
+    integration with asyncio TCP/TLS streams for both client and server
+    connections, binary frame send/receive, and subprotocol negotiation
+    (`hub.bsc.bacnet.org`, `dc.bsc.bacnet.org`).
+  - **TLS context builder** (`tls.py`) -- TLS 1.3 client and server SSL context
+    creation with mutual authentication, certificate chain loading, and
+    plaintext mode for testing.
+  - **Connection state machine** (`connection.py`) -- Initiating peer
+    (Figure AB-11) and accepting peer (Figure AB-12) state machines with
+    Connect-Request/Accept handshake, periodic heartbeat (AB.6.3), graceful
+    Disconnect-Request/ACK exchange, VMAC collision detection, and configurable
+    timeouts.
+  - **Hub Function** (`hub_function.py`) -- WebSocket server (AB.5.3) that
+    accepts hub connections from SC nodes, maintains a connection table indexed
+    by VMAC, routes unicast messages to destination VMAC, replicates broadcasts
+    to all connected nodes except the source, and detects VMAC/UUID collisions.
+  - **Hub Connector** (`hub_connector.py`) -- WebSocket client (AB.5.2) with
+    persistent connection to a primary hub, automatic reconnection with
+    exponential backoff (configurable min/max delay), and failover to a
+    secondary hub when the primary is unavailable.
+  - **Node Switch** (`node_switch.py`) -- Direct peer-to-peer connection
+    manager (AB.4) that listens for inbound direct connections, initiates
+    outbound connections via address resolution through the hub, and maintains
+    a connection pool with configurable limits.
+  - **SC Transport** (`__init__.py`) -- `SCTransport` class implementing the
+    `TransportPort` protocol, wiring together the hub connector, optional hub
+    function, and optional node switch. Integrates with the existing
+    `NetworkLayer` transparently -- the network layer sees standard 6-byte MAC
+    addresses (VMACs) and uses the same `send_unicast`/`send_broadcast` API.
+  - **Types and constants** (`types.py`) -- `BvlcSCFunction` (13 message types),
+    `SCControlFlag`, `SCResultCode`, `SCHubConnectionStatus`, header option
+    types, WebSocket subprotocol names, and VMAC constants.
+
+  Install with optional dependencies: `pip install bac-py[secure]`
+  (websockets>=14.0, cryptography>=42.0).
+
+- **Top-level lazy exports** -- `SCTransport` and `SCTransportConfig` are
+  available from `bac_py` via `__getattr__` lazy loading, so importing the
+  package incurs no cost when SC is not used.
+- **Docker SC integration scenario** -- `docker/scenarios/test_secure_connect.py`
+  with 5 tests: two-node unicast via hub, broadcast to all nodes, hub failover,
+  direct P2P connection, and concurrent message stress test.
+- 224 new unit tests across 10 test files covering BVLC-SC codec round-trips,
+  VMAC generation and parsing, WebSocket client/server handshake, TLS context
+  creation, connection state machine lifecycle, hub function routing, hub
+  connector failover, node switch direct connections, address resolution, SC
+  transport protocol compliance, and end-to-end NPDU exchange. Total test count
+  increased from 5,701 to 5,925.
+
+### Documentation
+
+- **BACnet/SC user guide** -- New `docs/guide/secure-connect.rst` covering hub
+  connection, hub function setup, direct connections via Node Switch, TLS
+  certificate configuration, failover, and VMAC address resolution.
+- **BACnet/SC features page** -- Added comprehensive SC section to
+  `docs/features.rst` with feature bullet list and code example.
+- **API reference** -- Added all 8 SC sub-modules to `docs/api/transport.rst`
+  (BVLC codec, VMAC, Connection, Hub Function, Hub Connector, Node Switch,
+  WebSocket, TLS, Types).
+- **Getting started** -- Added `pip install bac-py[secure]` installation
+  instructions and optional dependency note.
+- **Example scripts** -- Added `examples/secure_connect.py` (SC client with
+  manual NPDU/APDU construction) and `examples/secure_connect_hub.py` (SC hub
+  server with ObjectDatabase, Node Switch, and signal-based shutdown).
+- **Examples guide** -- Added BACnet Secure Connect section to
+  `docs/guide/examples.rst` documenting both new example scripts.
+- **README** -- Added SC feature bullet, `pip install bac-py[secure]`
+  installation section, updated architecture and test count.
+
 ## [1.2.2] - 2026-02-13
 
 ### Added

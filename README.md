@@ -34,6 +34,7 @@ async with Client(instance_number=999) as client:
 - **Device info caching** -- automatic caching of peer device capabilities from I-Am responses (Clause 19.4) for correct APDU size negotiation
 - **BACnet Ethernet** -- raw IEEE 802.3 transport with 802.2 LLC headers for legacy Ethernet data links (Clause 7)
 - **BACnet/IPv6** -- full Annex U transport with VMAC addressing and multicast
+- **BACnet Secure Connect** -- encrypted, authenticated communication over WebSocket/TLS with hub-and-spoke topology, automatic failover, and direct peer-to-peer connections (Annex AB)
 - **Smart encoding** -- property-aware type coercion for writes (int to Real for analog, Enumerated for binary, etc.)
 - **JSON serialization** -- `to_dict()`/`from_dict()` on all data types, optional `orjson` backend
 - **Type-safe** -- enums, frozen dataclasses, and comprehensive type hints throughout
@@ -49,6 +50,12 @@ With optional JSON serialization:
 
 ```bash
 pip install bac-py[serialization]
+```
+
+With BACnet Secure Connect support:
+
+```bash
+pip install bac-py[secure]
 ```
 
 ### Development
@@ -283,7 +290,7 @@ src/bac_py/
   segmentation/   Segmented message assembly and transmission
   serialization/  JSON serialization (optional orjson backend)
   services/       Service request/response types and registry
-  transport/      BACnet/IP (Annex J) UDP, BACnet/IPv6, Ethernet, BVLL, BBMD
+  transport/      BACnet/IP (Annex J), BACnet/IPv6, Ethernet, BACnet/SC (Annex AB)
   types/          Primitive types, enumerations, and string parsing
 ```
 
@@ -434,7 +441,7 @@ from bac_py.encoding.primitives import (
 ## Testing
 
 ```bash
-# Run the unit test suite (5,050+ tests)
+# Run the unit test suite (5,925+ tests)
 make test
 
 # With coverage
