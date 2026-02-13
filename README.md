@@ -353,20 +353,25 @@ from bac_py.services.errors import (
 
 The [`examples/`](examples/) directory contains runnable scripts:
 
-| File                      | Description                                    |
-| ------------------------- | ---------------------------------------------- |
-| `read_value.py`           | Read properties with short aliases             |
-| `write_value.py`          | Write values with auto-encoding and priority   |
-| `read_multiple.py`        | Read multiple properties from multiple objects |
-| `write_multiple.py`       | Write multiple properties in a single request  |
-| `discover_devices.py`     | Discover devices with Who-Is broadcast         |
-| `extended_discovery.py`   | Extended discovery with profile metadata       |
-| `monitor_cov.py`          | Subscribe to COV and decode notifications      |
-| `alarm_management.py`     | Alarm summary, event info, and acknowledgment  |
-| `text_message.py`         | Send confirmed/unconfirmed text messages       |
-| `backup_restore.py`       | Backup and restore device configuration        |
-| `router_discovery.py`     | Discover routers and remote networks           |
-| `foreign_device.py`       | Register as foreign device via BBMD            |
+| File                      | Description                                          |
+| ------------------------- | ---------------------------------------------------- |
+| `read_value.py`           | Read properties with short aliases                   |
+| `write_value.py`          | Write values with auto-encoding and priority         |
+| `read_multiple.py`        | Read multiple properties from multiple objects       |
+| `write_multiple.py`       | Write multiple properties in a single request        |
+| `discover_devices.py`     | Discover devices with Who-Is broadcast               |
+| `extended_discovery.py`   | Extended discovery with profile metadata             |
+| `advanced_discovery.py`   | Who-Has, unconfigured devices, hierarchy traversal   |
+| `monitor_cov.py`          | Subscribe to COV and decode notifications            |
+| `cov_property.py`         | Property-level COV subscriptions with increment      |
+| `alarm_management.py`     | Alarm/enrollment summary, event info, acknowledgment |
+| `text_message.py`         | Send confirmed/unconfirmed text messages             |
+| `backup_restore.py`       | Backup and restore device configuration              |
+| `object_management.py`    | Create, list, and delete objects                     |
+| `device_control.py`       | Communication control, reinitialization, time sync   |
+| `audit_log.py`            | Query audit log records with pagination              |
+| `router_discovery.py`     | Discover routers and remote networks                 |
+| `foreign_device.py`       | Register as foreign device via BBMD                  |
 
 ## Protocol-Level API
 

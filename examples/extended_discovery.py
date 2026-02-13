@@ -21,14 +21,14 @@ async def main() -> None:
         print("Standard discovery:")
         devices = await client.discover(timeout=3.0)
         for dev in devices:
-            print(f"  Device {dev.instance} at {dev.address}")
+            print(f"  Device {dev.instance} at {dev.address_str}")
             print(f"    vendor_id={dev.vendor_id}")
 
         # Extended discovery (adds Profile_Name, Profile_Location, Tags)
         print("\nExtended discovery:")
         ext_devices = await client.discover_extended(timeout=3.0, enrich_timeout=5.0)
         for dev in ext_devices:
-            print(f"  Device {dev.instance} at {dev.address}")
+            print(f"  Device {dev.instance} at {dev.address_str}")
             print(f"    vendor_id={dev.vendor_id}")
             if dev.profile_name:
                 print(f"    profile={dev.profile_name}")

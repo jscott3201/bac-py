@@ -1,7 +1,8 @@
-"""Alarm management: summary, event info, and acknowledgment.
+"""Alarm management: summary, enrollment, event info, and acknowledgment.
 
-Demonstrates querying active alarms from a device, checking event
-state information, and acknowledging alarm conditions.
+Demonstrates querying active alarms from a device, listing enrollment
+summaries, checking event state information, and acknowledging alarm
+conditions.
 
 Usage::
 
@@ -13,12 +14,12 @@ import datetime
 
 from bac_py import Client
 from bac_py.types.constructed import BACnetTimeStamp
-from bac_py.types.enums import EventState
+from bac_py.types.enums import AcknowledgmentFilter, EventState
 from bac_py.types.primitives import BACnetTime
 
 
 async def main() -> None:
-    """Query alarms and acknowledge one."""
+    """Query alarms, enrollment summaries, and acknowledge one."""
     async with Client(instance_number=999) as client:
         addr = "192.168.1.100"
 
@@ -27,6 +28,26 @@ async def main() -> None:
         print("Active alarms:")
         for entry in alarm_summary.list_of_alarm_summaries:
             print(f"  {entry.object_identifier}: state={entry.alarm_state}")
+
+        # Get enrollment summaries (all event-generating objects)
+        enrollment = await client.get_enrollment_summary(
+            addr,
+            acknowledgment_filter=AcknowledgmentFilter.ALL,
+        )
+        print(f"\nEnrollment summaries ({len(enrollment.list_of_enrollment_summaries)} entries):")
+        for entry in enrollment.list_of_enrollment_summaries:
+            print(
+                f"  {entry.object_identifier}: type={entry.event_type}, "
+                f"state={entry.event_state}, priority={entry.priority}, "
+                f"class={entry.notification_class}"
+            )
+
+        # Filter to only un-acknowledged enrollments
+        unacked = await client.get_enrollment_summary(
+            addr,
+            acknowledgment_filter=AcknowledgmentFilter.NOT_ACKED,
+        )
+        print(f"\nUn-acknowledged enrollments: {len(unacked.list_of_enrollment_summaries)}")
 
         # Get detailed event information (supports pagination)
         event_info = await client.get_event_information(addr)

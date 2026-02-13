@@ -41,13 +41,21 @@ common operations. See :doc:`getting-started` for a walkthrough.
   (see :ref:`smart-encoding`)
 - **Async context manager** -- ``async with Client(...) as client:`` handles
   startup and shutdown
-- **Alarm management** -- ``get_alarm_summary()``, ``get_event_information()``,
-  ``acknowledge_alarm()`` with string arguments
+- **Alarm management** -- ``get_alarm_summary()``, ``get_enrollment_summary()``,
+  ``get_event_information()``, ``acknowledge_alarm()`` with string arguments
 - **Extended discovery** -- ``discover_extended()`` enriches Who-Is results
   with Annex X profile metadata
 - **Text messaging** -- ``send_text_message()`` with confirmed/unconfirmed mode
 - **Backup/restore** -- ``backup()`` and ``restore()`` handle the full
   Clause 19.1 procedure
+- **Object management** -- ``create_object()``, ``delete_object()``, and
+  ``get_object_list()`` with string identifiers
+- **Device control** -- ``device_communication_control()`` and
+  ``reinitialize_device()`` accept string enum values (e.g. ``"disable"``,
+  ``"warmstart"``); ``time_synchronization()`` and
+  ``utc_time_synchronization()`` sync device clocks
+- **Object search** -- ``who_has()`` finds objects by identifier or name
+  across the network with string arguments
 - **Audit log queries** -- ``query_audit_log()`` with string addressing
 - **Property-level COV** -- ``subscribe_cov_property()`` for monitoring
   specific properties, ``subscribe_cov_property_multiple()`` for batching
