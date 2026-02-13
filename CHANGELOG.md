@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.3.2] - 2026-02-13
+## [1.3.3] - 2026-02-13
 
 ### Added
 
@@ -15,6 +15,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Shows the real-world building modernisation pattern where existing IP
   controllers communicate transparently with new SC devices through a
   pure-forwarding gateway.
+
+### Fixed
+
+- **`audit_log.py` example used invalid alias `"al,1"`** -- The short alias
+  `"al"` is not registered in `OBJECT_TYPE_ALIASES`. Changed to
+  `"audit-log,1"` which resolves correctly via hyphen-to-underscore conversion.
+  Also fixed the matching code snippet in `docs/guide/examples.rst`.
 
 ## [1.3.1] - 2026-02-13
 

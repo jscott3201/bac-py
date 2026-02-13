@@ -28,7 +28,7 @@ async def main() -> None:
         # Query the audit log object (audit-log,1)
         result = await client.query_audit_log(
             DEVICE_ADDRESS,
-            audit_log="al,1",
+            audit_log="audit-log,1",
             query_parameters=query,
             requested_count=50,
         )
@@ -43,7 +43,7 @@ async def main() -> None:
             last_seq = result.records[-1].sequence_number
             result = await client.query_audit_log(
                 DEVICE_ADDRESS,
-                audit_log="al,1",
+                audit_log="audit-log,1",
                 query_parameters=query,
                 start_at_sequence_number=last_seq + 1,
                 requested_count=50,

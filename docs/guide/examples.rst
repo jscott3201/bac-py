@@ -411,7 +411,7 @@ Query audit log records with target-based filtering and pagination:
 
    result = await client.query_audit_log(
        addr,
-       audit_log="al,1",
+       audit_log="audit-log,1",
        query_parameters=AuditQueryByTarget(
            target_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 100),
        ),
@@ -425,7 +425,7 @@ Query audit log records with target-based filtering and pagination:
    if not result.no_more_items:
        last_seq = result.records[-1].sequence_number
        next_page = await client.query_audit_log(
-           addr, audit_log="al,1",
+           addr, audit_log="audit-log,1",
            query_parameters=query,
            start_at_sequence_number=last_seq + 1,
            requested_count=50,
