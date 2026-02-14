@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.7] - 2026-02-14
+
+### Fixed
+
+- **SC connection state machine (`connection.py`)**: Added re-entry guards to
+  `initiate()` and `accept()` to prevent use from non-IDLE states. Fixed
+  `_go_idle()` double-cancellation race when called from both `disconnect()` and
+  background tasks. Wrapped `on_message` callback dispatch in try/except to
+  prevent callback exceptions from killing the receive loop.
+- **SC exception handling**: Narrowed broad `(TimeoutError, Exception)` catches
+  to specific `(TimeoutError, OSError, ConnectionError)` across connection.py,
+  hub_connector.py, and node_switch.py to avoid catching `SystemExit`,
+  `KeyboardInterrupt`, and other non-network exceptions.
+- **SC node switch shutdown ordering**: Reordered `stop()` to close direct
+  connections before `server.close()` + `wait_closed()`, preventing Python 3.13
+  hang where `wait_closed()` blocks until active connection handlers finish.
+
+### Changed
+
+- **SC BVLC-SC message encoding (`bvlc.py`)**: Replaced list-of-bytes + join
+  pattern with pre-sized `bytearray` + `struct.pack_into` across all encode
+  methods (`SCMessage.encode()`, `SCHeaderOption.encode()`, `_encode_options()`,
+  `BvlcResultPayload.encode()`). Reduces allocations on the hot path.
+- **SC payload consolidation**: Merged identical `ConnectRequestPayload` and
+  `ConnectAcceptPayload` into single `_ConnectPayload` with public aliases.
+- **SC TLS context caching**: Cached SSL contexts in `SCHubConnector.__init__()`
+  and `SCNodeSwitch.__init__()` instead of rebuilding per connection attempt.
+- **SC WebSocket accept timeout**: Added `handshake_timeout` parameter (default
+  10s) to `SCWebSocket.accept()` to prevent slow-client denial of service.
+- Removed dead code (`decode_list` unreachable break) and moved lazy `_WSState`
+  import to module level in websocket.py.
+
+### Added
+
+- **Example test suite (`tests/test_examples.py`)**: 110 tests covering all 21
+  example scripts -- syntax validation, module-level docstring checks,
+  `__main__` guard verification, `async def main()` presence, import validation
+  (core and SC examples separately), and functional tests for
+  `create_object_database()` and `generate_test_pki()` helpers.
+- **Expanded CI quality gates**: mypy type checking now covers `src/`, `examples/`,
+  and `docker/` (previously `src/` only). Ruff lint and format checks now cover
+  `examples/`. Added full type annotations to all 21 example scripts, 8 docker
+  test scenarios, 2 demo scripts, the docker entrypoint, and the stress runner.
+
+### Fixed
+
+- **`secure_connect_hub.py` example**: Fixed `AnalogInputObject` present-value
+  writes that failed because present-value is read-only per the spec unless
+  out-of-service is True. Now sets `OUT_OF_SERVICE = True` before writing values.
+
 ## [1.3.6] - 2026-02-14
 
 ### Added

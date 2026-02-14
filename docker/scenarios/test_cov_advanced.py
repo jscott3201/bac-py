@@ -5,10 +5,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from bac_py import Client
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 SERVER = os.environ.get("SERVER_ADDRESS", "172.30.1.102")
 INSTANCE = int(os.environ.get("SERVER_INSTANCE", "601"))
@@ -17,7 +21,7 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture
-async def client():
+async def client() -> AsyncGenerator[Client]:
     async with Client(instance_number=951, port=0) as c:
         yield c
 
@@ -25,7 +29,7 @@ async def client():
 # --- Basic COV subscription ---
 
 
-async def test_subscribe_cov_confirmed(client: Client):
+async def test_subscribe_cov_confirmed(client: Client) -> None:
     """Subscribe to COV with confirmed notifications, then unsubscribe."""
     await client.subscribe_cov_ex(
         SERVER,
@@ -38,7 +42,7 @@ async def test_subscribe_cov_confirmed(client: Client):
     await client.unsubscribe_cov_ex(SERVER, "av,1", process_id=1)
 
 
-async def test_subscribe_cov_unconfirmed(client: Client):
+async def test_subscribe_cov_unconfirmed(client: Client) -> None:
     """Subscribe to COV with unconfirmed notifications, then unsubscribe."""
     await client.subscribe_cov_ex(
         SERVER,
@@ -53,11 +57,11 @@ async def test_subscribe_cov_unconfirmed(client: Client):
 # --- COV with notification callback ---
 
 
-async def test_cov_notification_on_write(client: Client):
+async def test_cov_notification_on_write(client: Client) -> None:
     """Subscribe with callback, write to trigger COV, verify notification arrives."""
-    notifications: list = []
+    notifications: list[Any] = []
 
-    def on_cov(notification, source):
+    def on_cov(notification: Any, source: Any) -> None:
         notifications.append(notification)
 
     await client.subscribe_cov_ex(
@@ -82,7 +86,7 @@ async def test_cov_notification_on_write(client: Client):
 # --- COV property-level subscription ---
 
 
-async def test_subscribe_cov_property(client: Client):
+async def test_subscribe_cov_property(client: Client) -> None:
     """Subscribe to COV on a specific property of an object."""
     await client.subscribe_cov_property(
         SERVER,
@@ -100,7 +104,7 @@ async def test_subscribe_cov_property(client: Client):
 # --- Subscription lifecycle ---
 
 
-async def test_unsubscribe_cov(client: Client):
+async def test_unsubscribe_cov(client: Client) -> None:
     """Subscribe and then immediately unsubscribe with no errors."""
     await client.subscribe_cov_ex(
         SERVER,
@@ -112,11 +116,11 @@ async def test_unsubscribe_cov(client: Client):
     await client.unsubscribe_cov_ex(SERVER, "av,1", process_id=30)
 
 
-async def test_subscribe_cov_with_short_lifetime(client: Client):
+async def test_subscribe_cov_with_short_lifetime(client: Client) -> None:
     """Subscribe with a short lifetime, verify notification, then verify expiry."""
-    notifications: list = []
+    notifications: list[Any] = []
 
-    def on_cov(notification, source):
+    def on_cov(notification: Any, source: Any) -> None:
         notifications.append(notification)
 
     await client.subscribe_cov_ex(
@@ -151,7 +155,7 @@ async def test_subscribe_cov_with_short_lifetime(client: Client):
 # --- Multiple subscriptions ---
 
 
-async def test_multiple_cov_subscriptions(client: Client):
+async def test_multiple_cov_subscriptions(client: Client) -> None:
     """Subscribe to COV on two different objects with distinct process IDs."""
     await client.subscribe_cov_ex(
         SERVER,

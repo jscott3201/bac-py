@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import pytest
 
 from bac_py import Client
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 from bac_py.services.alarm_summary import (
     GetAlarmSummaryACK,
     GetEnrollmentSummaryACK,
@@ -21,7 +25,7 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture
-async def client():
+async def client() -> AsyncGenerator[Client]:
     async with Client(instance_number=952, port=0) as c:
         yield c
 
@@ -29,7 +33,7 @@ async def client():
 # --- GetAlarmSummary ---
 
 
-async def test_get_alarm_summary(client: Client):
+async def test_get_alarm_summary(client: Client) -> None:
     """GetAlarmSummary returns a valid ACK with an alarm list."""
     result = await client.get_alarm_summary(SERVER)
     assert isinstance(result, GetAlarmSummaryACK)
@@ -41,7 +45,7 @@ async def test_get_alarm_summary(client: Client):
 # --- GetEventInformation ---
 
 
-async def test_get_event_information(client: Client):
+async def test_get_event_information(client: Client) -> None:
     """GetEventInformation returns a valid ACK with event summaries."""
     result = await client.get_event_information(SERVER)
     assert isinstance(result, GetEventInformationACK)
@@ -52,7 +56,7 @@ async def test_get_event_information(client: Client):
 # --- GetEnrollmentSummary ---
 
 
-async def test_get_enrollment_summary(client: Client):
+async def test_get_enrollment_summary(client: Client) -> None:
     """GetEnrollmentSummary with ALL filter returns a valid ACK."""
     result = await client.get_enrollment_summary(SERVER, AcknowledgmentFilter.ALL)
     assert isinstance(result, GetEnrollmentSummaryACK)
@@ -62,7 +66,7 @@ async def test_get_enrollment_summary(client: Client):
 # --- ReadPropertyMultiple on extended objects ---
 
 
-async def test_read_extended_server_objects(client: Client):
+async def test_read_extended_server_objects(client: Client) -> None:
     """Object list from extended server has at least 25 objects."""
     obj_list = await client.get_object_list(SERVER, INSTANCE)
     # device + ai,1 + ao,1 + av,1 + bi,1 + bv,1 (6)
@@ -72,13 +76,13 @@ async def test_read_extended_server_objects(client: Client):
     assert len(obj_list) >= 25
 
 
-async def test_read_notification_class(client: Client):
+async def test_read_notification_class(client: Client) -> None:
     """NotificationClass object-name is 'Alarms'."""
     name = await client.read(SERVER, "notification-class,1", "object-name")
     assert name == "Alarms"
 
 
-async def test_read_event_enrollment(client: Client):
+async def test_read_event_enrollment(client: Client) -> None:
     """EventEnrollment object-name is 'TempHighAlarm'."""
     name = await client.read(SERVER, "event-enrollment,1", "object-name")
     assert name == "TempHighAlarm"
@@ -87,7 +91,7 @@ async def test_read_event_enrollment(client: Client):
 # --- Read multiple sensor objects ---
 
 
-async def test_read_multiple_sensors(client: Client):
+async def test_read_multiple_sensors(client: Client) -> None:
     """ReadPropertyMultiple returns data for several sensor objects."""
     result = await client.read_multiple(
         SERVER,
@@ -110,7 +114,7 @@ async def test_read_multiple_sensors(client: Client):
 @pytest.mark.skip(
     reason="Who-Is/I-Am requires broadcast; Docker bridge networks don't route broadcasts"
 )
-async def test_who_is_discovers_extended_server(client: Client):
+async def test_who_is_discovers_extended_server(client: Client) -> None:
     """Who-Is with instance range finds the extended server (device 602)."""
     devices = await client.discover(
         low_limit=INSTANCE,

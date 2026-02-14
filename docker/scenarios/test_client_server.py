@@ -3,10 +3,14 @@
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import pytest
 
 from bac_py import Client
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 SERVER = os.environ.get("SERVER_ADDRESS", "172.30.1.10")
 INSTANCE = int(os.environ.get("SERVER_INSTANCE", "100"))
@@ -15,7 +19,7 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture
-async def client():
+async def client() -> AsyncGenerator[Client]:
     async with Client(instance_number=900, port=0) as c:
         yield c
 
@@ -23,13 +27,13 @@ async def client():
 # --- ReadProperty ---
 
 
-async def test_read_present_value(client: Client):
+async def test_read_present_value(client: Client) -> None:
     value = await client.read(SERVER, "ai,1", "present-value")
     assert isinstance(value, float)
     assert value == pytest.approx(72.5)
 
 
-async def test_read_object_name(client: Client):
+async def test_read_object_name(client: Client) -> None:
     name = await client.read(SERVER, "ai,1", "object-name")
     assert name == "Temperature"
 
@@ -37,7 +41,7 @@ async def test_read_object_name(client: Client):
 # --- ReadPropertyMultiple ---
 
 
-async def test_read_multiple_objects(client: Client):
+async def test_read_multiple_objects(client: Client) -> None:
     result = await client.read_multiple(
         SERVER,
         {
@@ -55,7 +59,7 @@ async def test_read_multiple_objects(client: Client):
 # --- WriteProperty + readback ---
 
 
-async def test_write_and_readback(client: Client):
+async def test_write_and_readback(client: Client) -> None:
     await client.write(SERVER, "av,1", "present-value", 25.0)
     value = await client.read(SERVER, "av,1", "present-value")
     assert value == pytest.approx(25.0)
@@ -63,7 +67,7 @@ async def test_write_and_readback(client: Client):
     await client.write(SERVER, "av,1", "present-value", 70.0)
 
 
-async def test_write_with_priority(client: Client):
+async def test_write_with_priority(client: Client) -> None:
     await client.write(SERVER, "ao,1", "present-value", 50.0, priority=8)
     value = await client.read(SERVER, "ao,1", "present-value")
     assert value == pytest.approx(50.0)
@@ -77,7 +81,7 @@ async def test_write_with_priority(client: Client):
 @pytest.mark.skip(
     reason="Who-Is/I-Am requires broadcast; Docker bridge networks don't route broadcasts"
 )
-async def test_who_is_discovers_server(client: Client):
+async def test_who_is_discovers_server(client: Client) -> None:
     devices = await client.discover(destination=SERVER, timeout=5.0, expected_count=1)
     assert len(devices) >= 1
     instances = [d.instance for d in devices]
@@ -87,7 +91,7 @@ async def test_who_is_discovers_server(client: Client):
 @pytest.mark.skip(
     reason="Who-Is/I-Am requires broadcast; Docker bridge networks don't route broadcasts"
 )
-async def test_discover_with_range(client: Client):
+async def test_discover_with_range(client: Client) -> None:
     devices = await client.discover(
         low_limit=INSTANCE,
         high_limit=INSTANCE,
@@ -102,7 +106,7 @@ async def test_discover_with_range(client: Client):
 # --- Object list ---
 
 
-async def test_get_object_list(client: Client):
+async def test_get_object_list(client: Client) -> None:
     obj_list = await client.get_object_list(SERVER, INSTANCE)
     assert len(obj_list) >= 6  # device + ai + ao + av + bi + bv
 
@@ -110,7 +114,7 @@ async def test_get_object_list(client: Client):
 # --- WritePropertyMultiple ---
 
 
-async def test_write_multiple(client: Client):
+async def test_write_multiple(client: Client) -> None:
     await client.write_multiple(
         SERVER,
         {"av,1": {"present-value": 30.0}},

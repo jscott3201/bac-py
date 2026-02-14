@@ -35,11 +35,11 @@ async def main() -> None:
             acknowledgment_filter=AcknowledgmentFilter.ALL,
         )
         print(f"\nEnrollment summaries ({len(enrollment.list_of_enrollment_summaries)} entries):")
-        for entry in enrollment.list_of_enrollment_summaries:
+        for enroll in enrollment.list_of_enrollment_summaries:
             print(
-                f"  {entry.object_identifier}: type={entry.event_type}, "
-                f"state={entry.event_state}, priority={entry.priority}, "
-                f"class={entry.notification_class}"
+                f"  {enroll.object_identifier}: type={enroll.event_type}, "
+                f"state={enroll.event_state}, priority={enroll.priority}, "
+                f"class={enroll.notification_class}"
             )
 
         # Filter to only un-acknowledged enrollments

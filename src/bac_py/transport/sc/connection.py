@@ -135,6 +135,9 @@ class SCConnection:
 
         Transitions: IDLE → AWAITING_ACCEPT → CONNECTED (or IDLE on failure).
         """
+        if self._state != SCConnectionState.IDLE:
+            err = f"Cannot initiate: state is {self._state.name}, expected IDLE"
+            raise RuntimeError(err)
         self._role = SCConnectionRole.INITIATING
         self._ws = ws
         old_state = self._state
@@ -159,7 +162,7 @@ class SCConnection:
         try:
             async with asyncio.timeout(self._config.connect_wait_timeout):
                 raw = await self._ws.recv()
-        except (TimeoutError, Exception) as exc:
+        except (TimeoutError, OSError, ConnectionError) as exc:
             logger.debug("Connect wait timeout or error: %s", exc)
             await self._go_idle()
             return
@@ -211,6 +214,9 @@ class SCConnection:
 
         Transitions: IDLE → AWAITING_REQUEST → CONNECTED (or IDLE on failure).
         """
+        if self._state != SCConnectionState.IDLE:
+            err = f"Cannot accept: state is {self._state.name}, expected IDLE"
+            raise RuntimeError(err)
         self._role = SCConnectionRole.ACCEPTING
         self._ws = ws
         old_state = self._state
@@ -221,7 +227,7 @@ class SCConnection:
         try:
             async with asyncio.timeout(self._config.connect_wait_timeout):
                 raw = await self._ws.recv()
-        except (TimeoutError, Exception) as exc:
+        except (TimeoutError, OSError, ConnectionError) as exc:
             logger.debug("Accepting connect wait timeout or error: %s", exc)
             await self._go_idle()
             return
@@ -334,7 +340,7 @@ class SCConnection:
                     BvlcSCFunction.BVLC_RESULT,
                 ):
                     pass  # Expected, proceed to IDLE
-        except (TimeoutError, Exception):
+        except (TimeoutError, OSError, ConnectionError, ValueError):
             pass
 
         await self._go_idle()
@@ -406,16 +412,19 @@ class SCConnection:
 
             # Forward other messages (Encapsulated-NPDU, etc.) to callback
             if self.on_message:
-                result = self.on_message(msg)
-                if asyncio.iscoroutine(result):
-                    await result
+                try:
+                    result = self.on_message(msg)
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception as exc:
+                    logger.error(f"on_message callback error: {exc}", exc_info=True)
 
     async def _heartbeat_loop(self) -> None:
         """Periodic heartbeat (initiating peer only, AB.6.3)."""
         try:
             while self._state == SCConnectionState.CONNECTED and self._ws is not None:
                 await asyncio.sleep(self._config.heartbeat_timeout)
-                if self._state != SCConnectionState.CONNECTED:
+                if self._state != SCConnectionState.CONNECTED or self._ws is None:
                     break
                 hb = SCMessage(
                     BvlcSCFunction.HEARTBEAT_REQUEST,
@@ -435,6 +444,9 @@ class SCConnection:
 
     async def _go_idle(self) -> None:
         """Transition to IDLE state, clean up resources."""
+        if self._state == SCConnectionState.IDLE:
+            return  # Already idle, prevent re-entry
+
         was_connected = self._state in (
             SCConnectionState.CONNECTED,
             SCConnectionState.DISCONNECTING,
@@ -445,13 +457,13 @@ class SCConnection:
         if was_connected:
             logger.info(f"SC connection closed: peer={self.peer_vmac}")
 
-        # Cancel tasks (don't await — may be called from within a task)
-        if self._heartbeat_task and not self._heartbeat_task.done():
-            self._heartbeat_task.cancel()
-            self._heartbeat_task = None
-        if self._receive_task and not self._receive_task.done():
-            self._receive_task.cancel()
-            self._receive_task = None
+        # Cancel tasks — don't await since we may be called from within a task.
+        # The tasks check self._state and will exit on their next iteration.
+        for task in (self._heartbeat_task, self._receive_task):
+            if task and not task.done():
+                task.cancel()
+        self._heartbeat_task = None
+        self._receive_task = None
 
         # Close transport immediately (no graceful WS close handshake — the
         # BACnet SC layer handles graceful disconnect via Disconnect-Request/ACK)

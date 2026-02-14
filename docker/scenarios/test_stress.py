@@ -97,7 +97,7 @@ async def _cov_worker(
     """Subscribe to COV on ai,1, count notifications, resubscribe periodically."""
     process_id = 9000 + worker_id
 
-    def _on_notification(_notif, _source):
+    def _on_notification(_notif: object, _source: object) -> None:
         stats.cov_notifications[0] += 1
 
     async with Client(instance_number=800 + worker_id, port=0) as client:
@@ -130,11 +130,11 @@ def _pct(sorted_list: list[float], pct: float) -> float:
     return sorted_list[idx]
 
 
-async def test_sustained_ramp():
+async def test_sustained_ramp() -> None:
     """2-minute ramp: reads -> reads+writes -> reads+writes+COV."""
     stats = Stats()
     stop = asyncio.Event()
-    workers: list[asyncio.Task] = []
+    workers: list[asyncio.Task[None]] = []
     next_id = 0
 
     read_count = 0

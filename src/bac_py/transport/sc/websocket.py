@@ -17,6 +17,7 @@ from websockets.client import ClientProtocol
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK, ProtocolError
 from websockets.frames import Close, Frame, Opcode
 from websockets.http11 import Request
+from websockets.protocol import State as _WSState
 from websockets.server import ServerProtocol
 from websockets.typing import Subprotocol
 from websockets.uri import parse_uri
@@ -123,30 +124,34 @@ class SCWebSocket:
         reader: StreamReader,
         writer: StreamWriter,
         subprotocol: str,
+        *,
+        handshake_timeout: float = 10.0,
     ) -> SCWebSocket:
         """Accept an inbound WebSocket connection on existing streams.
 
         :param reader: asyncio StreamReader from accepted connection.
         :param writer: asyncio StreamWriter from accepted connection.
         :param subprotocol: WebSocket subprotocol to accept.
+        :param handshake_timeout: Maximum seconds to wait for the handshake.
         """
         protocol = ServerProtocol(subprotocols=[Subprotocol(subprotocol)])
 
-        # Read the HTTP upgrade request
-        while True:
-            data = await reader.read(_READ_SIZE)
-            if not data:
-                msg = "Connection closed before WebSocket handshake"
-                raise ConnectionError(msg)
-            protocol.receive_data(data)
+        # Read the HTTP upgrade request (with timeout to prevent slow clients)
+        async with asyncio.timeout(handshake_timeout):
+            while True:
+                data = await reader.read(_READ_SIZE)
+                if not data:
+                    msg = "Connection closed before WebSocket handshake"
+                    raise ConnectionError(msg)
+                protocol.receive_data(data)
 
-            events = protocol.events_received()
-            if events:
-                request = events[0]
-                if not isinstance(request, Request):
-                    msg = f"Expected HTTP request, got {type(request)}"
-                    raise ProtocolError(msg)
-                break
+                events = protocol.events_received()
+                if events:
+                    request = events[0]
+                    if not isinstance(request, Request):
+                        msg = f"Expected HTTP request, got {type(request)}"
+                        raise ProtocolError(msg)
+                    break
 
         # Accept the connection with the desired subprotocol
         response = protocol.accept(request)
@@ -247,9 +252,7 @@ class SCWebSocket:
     @property
     def is_open(self) -> bool:
         """Return True if the WebSocket connection appears open."""
-        from websockets.protocol import State
-
-        return self._protocol.state is State.OPEN
+        return self._protocol.state is _WSState.OPEN
 
     @property
     def subprotocol(self) -> str | None:

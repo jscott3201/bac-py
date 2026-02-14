@@ -12,6 +12,7 @@ import contextlib
 import os
 import sys
 import time
+from typing import Any
 
 SERVER_ADDRESS = os.environ.get("SERVER_ADDRESS", "172.30.1.90")
 SERVER_INSTANCE = int(os.environ.get("SERVER_INSTANCE", "500"))
@@ -49,7 +50,7 @@ def _header(title: str) -> None:
     print(f"\n--- {title} ---")
 
 
-def _fmt(val, suffix="") -> str:
+def _fmt(val: Any, suffix: str = "") -> str:
     if isinstance(val, float):
         return f"{val:.1f}{suffix}"
     return f"{val}{suffix}"
@@ -60,7 +61,7 @@ def _fmt(val, suffix="") -> str:
 # ---------------------------------------------------------------------------
 
 
-async def do_read_temperatures(client, addr):
+async def do_read_temperatures(client: Any, addr: str) -> None:
     _header("Temperatures")
     zone = await client.read(addr, "ai,1", "present-value")
     outside = await client.read(addr, "ai,2", "present-value")
@@ -68,7 +69,7 @@ async def do_read_temperatures(client, addr):
     print(f"  Outside Temperature: {_fmt(outside, ' F')}")
 
 
-async def do_read_setpoints(client, addr):
+async def do_read_setpoints(client: Any, addr: str) -> None:
     _header("Setpoints")
     heat = await client.read(addr, "av,1", "present-value")
     cool = await client.read(addr, "av,2", "present-value")
@@ -78,7 +79,7 @@ async def do_read_setpoints(client, addr):
     print(f"  Deadband:         {_fmt(db, ' F')}")
 
 
-async def do_write_heating_sp(client, addr, interactive=True):
+async def do_write_heating_sp(client: Any, addr: str, interactive: bool = True) -> None:
     _header("Write Heating Setpoint")
     if interactive:
         try:
@@ -93,7 +94,7 @@ async def do_write_heating_sp(client, addr, interactive=True):
     print(f"  Heating setpoint set to {val:.1f} F at priority 8")
 
 
-async def do_write_cooling_sp(client, addr, interactive=True):
+async def do_write_cooling_sp(client: Any, addr: str, interactive: bool = True) -> None:
     _header("Write Cooling Setpoint")
     if interactive:
         try:
@@ -108,7 +109,7 @@ async def do_write_cooling_sp(client, addr, interactive=True):
     print(f"  Cooling setpoint set to {val:.1f} F at priority 8")
 
 
-async def do_read_multiple(client, addr):
+async def do_read_multiple(client: Any, addr: str) -> None:
     _header("ReadPropertyMultiple")
     result = await client.read_multiple(
         addr,
@@ -131,7 +132,7 @@ async def do_read_multiple(client, addr):
         print(f"  {name}: {_fmt(pv)}{unit_str}")
 
 
-async def do_watch_simulation(client, addr, duration=30):
+async def do_watch_simulation(client: Any, addr: str, duration: int = 30) -> None:
     _header(f"Watching simulation for {duration}s")
     hdr = f"  {'Time':>5s}  {'Zone F':>7s}  {'Outside F':>10s}  {'Heat%':>6s}  {'Cool%':>6s}  {'Fan':>4s}"
     sep = f"  {'---':>5s}  {'---':>7s}  {'---':>10s}  {'---':>6s}  {'---':>6s}  {'---':>4s}"
@@ -153,11 +154,11 @@ async def do_watch_simulation(client, addr, duration=30):
         await asyncio.sleep(5)
 
 
-async def do_subscribe_cov(client, addr, duration=15):
+async def do_subscribe_cov(client: Any, addr: str, duration: int = 15) -> None:
     _header(f"COV Subscription on Zone Temperature ({duration}s)")
-    notifications: list = []
+    notifications: list[Any] = []
 
-    def on_cov(notification, source):
+    def on_cov(notification: Any, source: Any) -> None:
         notifications.append(notification)
         print(f"  COV #{len(notifications)}: {notification}")
 
@@ -177,7 +178,7 @@ async def do_subscribe_cov(client, addr, duration=15):
     print(f"  Received {len(notifications)} COV notification(s)")
 
 
-async def do_read_trend_log(client, addr):
+async def do_read_trend_log(client: Any, addr: str) -> None:
     _header("Trend Log (Zone Temperature)")
     try:
         count = await client.read(addr, "trend-log,1", "record-count")
@@ -195,7 +196,7 @@ async def do_read_trend_log(client, addr):
         print("  (Trend data may take a few seconds to accumulate)")
 
 
-async def do_check_alarms(client, addr):
+async def do_check_alarms(client: Any, addr: str) -> None:
     _header("Alarm Status")
     try:
         info = await client.get_event_information(addr)
@@ -208,7 +209,7 @@ async def do_check_alarms(client, addr):
         print(f"  Could not get event info: {e}")
 
 
-async def do_get_object_list(client, addr):
+async def do_get_object_list(client: Any, addr: str) -> None:
     _header("Object List")
     obj_list = await client.get_object_list(addr, SERVER_INSTANCE)
     print(f"  Found {len(obj_list)} objects:")
@@ -216,7 +217,7 @@ async def do_get_object_list(client, addr):
         print(f"    {oid}")
 
 
-async def do_toggle_system(client, addr):
+async def do_toggle_system(client: Any, addr: str) -> None:
     _header("Toggle System Enable")
     current = await client.read(addr, "bv,1", "present-value")
     is_on = bool(current)
@@ -226,7 +227,7 @@ async def do_toggle_system(client, addr):
     print(f"  System was {'ON' if is_on else 'OFF'}, now set to {state}")
 
 
-async def do_relinquish(client, addr):
+async def do_relinquish(client: Any, addr: str) -> None:
     _header("Relinquish Setpoint Overrides")
     await client.write(addr, "av,1", "present-value", None, priority=8)
     await client.write(addr, "av,2", "present-value", None, priority=8)
@@ -242,7 +243,7 @@ async def do_relinquish(client, addr):
 # ---------------------------------------------------------------------------
 
 
-async def auto_demo(client, addr):
+async def auto_demo(client: Any, addr: str) -> None:
     """Run all demo steps automatically."""
     _header("AUTO DEMO: Running all demonstrations")
 

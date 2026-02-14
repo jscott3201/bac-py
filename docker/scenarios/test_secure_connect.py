@@ -73,7 +73,7 @@ async def _send_and_wait_echo(
 # ---------------------------------------------------------------------------
 
 
-async def test_connect_to_hub(sc_hub_uri: str):
+async def test_connect_to_hub(sc_hub_uri: str) -> None:
     """Test runner creates SCTransport and connects to the hub."""
     transport = await _make_transport(sc_hub_uri)
     try:
@@ -85,7 +85,7 @@ async def test_connect_to_hub(sc_hub_uri: str):
         await transport.stop()
 
 
-async def test_hub_reports_connections(sc_hub_uri: str):
+async def test_hub_reports_connections(sc_hub_uri: str) -> None:
     """After connecting, verify the hub accepts our connection."""
     transport = await _make_transport(sc_hub_uri)
     try:
@@ -96,7 +96,7 @@ async def test_hub_reports_connections(sc_hub_uri: str):
         await transport.stop()
 
 
-async def test_unicast_to_node1(sc_hub_uri: str, sc_node1_vmac: str):
+async def test_unicast_to_node1(sc_hub_uri: str, sc_node1_vmac: str) -> None:
     """Send unicast NPDU to node1, verify echo response."""
     transport = await _make_transport(sc_hub_uri)
     try:
@@ -106,7 +106,7 @@ async def test_unicast_to_node1(sc_hub_uri: str, sc_node1_vmac: str):
         await transport.stop()
 
 
-async def test_unicast_to_node2(sc_hub_uri: str, sc_node2_vmac: str):
+async def test_unicast_to_node2(sc_hub_uri: str, sc_node2_vmac: str) -> None:
     """Send unicast NPDU to node2, confirm hub routes to correct destination."""
     transport = await _make_transport(sc_hub_uri)
     try:
@@ -118,7 +118,7 @@ async def test_unicast_to_node2(sc_hub_uri: str, sc_node2_vmac: str):
 
 async def test_broadcast_reaches_all_nodes(
     sc_hub_uri: str, sc_node1_vmac: str, sc_node2_vmac: str
-):
+) -> None:
     """Send broadcast NPDU, both nodes receive it and echo back."""
     transport = await _make_transport(sc_hub_uri)
     try:
@@ -152,7 +152,9 @@ async def test_broadcast_reaches_all_nodes(
         await transport.stop()
 
 
-async def test_bidirectional_exchange(sc_hub_uri: str, sc_node1_vmac: str, sc_node2_vmac: str):
+async def test_bidirectional_exchange(
+    sc_hub_uri: str, sc_node1_vmac: str, sc_node2_vmac: str
+) -> None:
     """Send to node1, get echo, send to node2, get echo — sequential multi-destination."""
     transport = await _make_transport(sc_hub_uri)
     try:
@@ -165,7 +167,7 @@ async def test_bidirectional_exchange(sc_hub_uri: str, sc_node1_vmac: str, sc_no
         await transport.stop()
 
 
-async def test_large_npdu_transfer(sc_hub_uri: str, sc_node1_vmac: str):
+async def test_large_npdu_transfer(sc_hub_uri: str, sc_node1_vmac: str) -> None:
     """Send a ~1400 byte NPDU (near max), verify echo response matches."""
     transport = await _make_transport(sc_hub_uri)
     try:
@@ -178,7 +180,7 @@ async def test_large_npdu_transfer(sc_hub_uri: str, sc_node1_vmac: str):
         await transport.stop()
 
 
-async def test_rapid_sequential_messages(sc_hub_uri: str, sc_node1_vmac: str):
+async def test_rapid_sequential_messages(sc_hub_uri: str, sc_node1_vmac: str) -> None:
     """Send 50 unicast messages rapidly, verify all echoes received."""
     transport = await _make_transport(sc_hub_uri)
     try:
@@ -210,7 +212,7 @@ async def test_rapid_sequential_messages(sc_hub_uri: str, sc_node1_vmac: str):
 
 async def test_concurrent_multi_node_traffic(
     sc_hub_uri: str, sc_node1_vmac: str, sc_node2_vmac: str
-):
+) -> None:
     """Send messages to both nodes concurrently, verify all responses."""
     transport = await _make_transport(sc_hub_uri)
     try:

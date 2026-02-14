@@ -86,13 +86,17 @@ def create_object_database() -> ObjectDatabase:
     )
     db.add(device)
 
-    # Add some example objects that connected nodes can read
+    # Add some example objects that connected nodes can read.
+    # AnalogInput present-value is read-only per the spec unless
+    # out-of-service is True, so we enable that before setting values.
     ai1 = AnalogInputObject(1, object_name="Zone-Temperature")
+    ai1.write_property(PropertyIdentifier.OUT_OF_SERVICE, True)
     ai1.write_property(PropertyIdentifier.PRESENT_VALUE, 72.5)
     ai1.write_property(PropertyIdentifier.UNITS, EngineeringUnits.DEGREES_FAHRENHEIT)
     db.add(ai1)
 
     ai2 = AnalogInputObject(2, object_name="Zone-Humidity")
+    ai2.write_property(PropertyIdentifier.OUT_OF_SERVICE, True)
     ai2.write_property(PropertyIdentifier.PRESENT_VALUE, 45.0)
     ai2.write_property(PropertyIdentifier.UNITS, EngineeringUnits.PERCENT_RELATIVE_HUMIDITY)
     db.add(ai2)

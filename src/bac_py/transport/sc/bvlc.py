@@ -63,9 +63,12 @@ class SCHeaderOption:
             marker |= _MARKER_MUST_UNDERSTAND
         if self.data:
             marker |= _MARKER_HAS_DATA
-            length = struct.pack("!H", len(self.data))
-            return bytes([marker]) + length + self.data
-        return bytes([marker])
+            buf = bytearray(3 + len(self.data))
+            buf[0] = marker
+            struct.pack_into("!H", buf, 1, len(self.data))
+            buf[3:] = self.data
+            return bytes(buf)
+        return bytes((marker,))
 
     @staticmethod
     def decode_list(data: memoryview) -> tuple[tuple[SCHeaderOption, ...], int]:
@@ -76,8 +79,6 @@ class SCHeaderOption:
         options: list[SCHeaderOption] = []
         offset = 0
         while offset < len(data):
-            if offset >= len(data):
-                break
             marker = data[offset]
             offset += 1
 
@@ -145,23 +146,23 @@ class SCMessage:
         if self.data_options:
             flags |= SCControlFlag.DATA_OPTIONS
 
-        parts: list[bytes] = [
-            bytes([self.function & 0xFF, int(flags) & 0xFF]),
-            struct.pack("!H", self.message_id & 0xFFFF),
-        ]
+        buf = bytearray(4)
+        buf[0] = self.function
+        buf[1] = flags
+        struct.pack_into("!H", buf, 2, self.message_id)
 
         if self.originating is not None:
-            parts.append(self.originating.address)
+            buf.extend(self.originating.address)
         if self.destination is not None:
-            parts.append(self.destination.address)
+            buf.extend(self.destination.address)
         if self.dest_options:
-            parts.append(_encode_options(self.dest_options))
+            buf.extend(_encode_options(self.dest_options))
         if self.data_options:
-            parts.append(_encode_options(self.data_options))
+            buf.extend(_encode_options(self.data_options))
         if self.payload:
-            parts.append(self.payload)
+            buf.extend(self.payload)
 
-        return b"".join(parts)
+        return bytes(buf)
 
     @staticmethod
     def decode(data: bytes | memoryview) -> SCMessage:
@@ -227,11 +228,11 @@ class SCMessage:
 
 def _encode_options(options: tuple[SCHeaderOption, ...]) -> bytes:
     """Encode a list of header options with proper More-Options chaining."""
-    parts: list[bytes] = []
+    buf = bytearray()
+    last = len(options) - 1
     for i, opt in enumerate(options):
-        more = i < len(options) - 1
-        parts.append(opt.encode(more=more))
-    return b"".join(parts)
+        buf.extend(opt.encode(more=i < last))
+    return bytes(buf)
 
 
 # ---------------------------------------------------------------------------
@@ -243,8 +244,8 @@ _CONNECT_PAYLOAD_LENGTH = VMAC_LENGTH + 16 + 2 + 2  # 26
 
 
 @dataclass(frozen=True, slots=True)
-class ConnectRequestPayload:
-    """Payload for Connect-Request messages (AB.2.10)."""
+class _ConnectPayload:
+    """Shared payload structure for Connect-Request (AB.2.10) and Connect-Accept (AB.2.11)."""
 
     vmac: SCVMAC
     uuid: DeviceUUID
@@ -260,50 +261,22 @@ class ConnectRequestPayload:
         )
 
     @staticmethod
-    def decode(data: bytes | memoryview) -> ConnectRequestPayload:
+    def decode(data: bytes | memoryview) -> _ConnectPayload:
         """Decode from payload bytes."""
         if len(data) < _CONNECT_PAYLOAD_LENGTH:
             msg = (
-                f"Connect-Request payload too short: need {_CONNECT_PAYLOAD_LENGTH} "
-                f"bytes, got {len(data)}"
+                f"Connect payload too short: need {_CONNECT_PAYLOAD_LENGTH} bytes, got {len(data)}"
             )
             raise ValueError(msg)
         vmac = SCVMAC(bytes(data[:6]))
         device_uuid = DeviceUUID(bytes(data[6:22]))
         max_bvlc, max_npdu = struct.unpack_from("!HH", data, 22)
-        return ConnectRequestPayload(vmac, device_uuid, max_bvlc, max_npdu)
+        return _ConnectPayload(vmac, device_uuid, max_bvlc, max_npdu)
 
 
-@dataclass(frozen=True, slots=True)
-class ConnectAcceptPayload:
-    """Payload for Connect-Accept messages (AB.2.11)."""
-
-    vmac: SCVMAC
-    uuid: DeviceUUID
-    max_bvlc_length: int
-    max_npdu_length: int
-
-    def encode(self) -> bytes:
-        """Encode to 26 bytes."""
-        return (
-            self.vmac.address
-            + self.uuid.value
-            + struct.pack("!HH", self.max_bvlc_length, self.max_npdu_length)
-        )
-
-    @staticmethod
-    def decode(data: bytes | memoryview) -> ConnectAcceptPayload:
-        """Decode from payload bytes."""
-        if len(data) < _CONNECT_PAYLOAD_LENGTH:
-            msg = (
-                f"Connect-Accept payload too short: need {_CONNECT_PAYLOAD_LENGTH} "
-                f"bytes, got {len(data)}"
-            )
-            raise ValueError(msg)
-        vmac = SCVMAC(bytes(data[:6]))
-        device_uuid = DeviceUUID(bytes(data[6:22]))
-        max_bvlc, max_npdu = struct.unpack_from("!HH", data, 22)
-        return ConnectAcceptPayload(vmac, device_uuid, max_bvlc, max_npdu)
+# Public aliases — same structure, separate names for API clarity
+ConnectRequestPayload = _ConnectPayload
+ConnectAcceptPayload = _ConnectPayload
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,13 +297,16 @@ class BvlcResultPayload:
 
     def encode(self) -> bytes:
         """Encode BVLC-Result payload."""
-        parts = [bytes([self.for_function & 0xFF, self.result_code & 0xFF])]
-        if self.result_code == SCResultCode.NAK:
-            parts.append(bytes([self.error_header_marker & 0xFF]))
-            parts.append(struct.pack("!HH", self.error_class, self.error_code))
-            if self.error_details:
-                parts.append(self.error_details.encode("utf-8"))
-        return b"".join(parts)
+        if self.result_code != SCResultCode.NAK:
+            return bytes((self.for_function, self.result_code))
+        buf = bytearray(7)
+        buf[0] = self.for_function
+        buf[1] = self.result_code
+        buf[2] = self.error_header_marker
+        struct.pack_into("!HH", buf, 3, self.error_class, self.error_code)
+        if self.error_details:
+            buf.extend(self.error_details.encode("utf-8"))
+        return bytes(buf)
 
     @staticmethod
     def decode(data: bytes | memoryview) -> BvlcResultPayload:

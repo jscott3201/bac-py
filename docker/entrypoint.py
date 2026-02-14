@@ -354,7 +354,7 @@ async def run_server_extended() -> None:
     app.object_db.add(audit_log)
 
     # Wire up audit manager
-    app._audit_manager = AuditManager(app.object_db)
+    object.__setattr__(app, "_audit_manager", AuditManager(app.object_db))
 
     # Register default handlers
     handlers = DefaultServerHandlers(app, app.object_db, device)
@@ -509,6 +509,8 @@ async def run_thermostat() -> None:
     spec = importlib.util.spec_from_file_location(
         "thermostat", os.path.join(os.path.dirname(__file__), "demos", "thermostat.py")
     )
+    if spec is None or spec.loader is None:
+        raise RuntimeError("Failed to load thermostat module")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     await mod.run()

@@ -12,6 +12,7 @@ import asyncio
 
 from bac_py import Client
 from bac_py.types.audit_types import AuditQueryByTarget
+from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import ObjectIdentifier
 
 DEVICE_ADDRESS = "192.168.1.100"
@@ -22,7 +23,7 @@ async def main() -> None:
     async with Client(instance_number=999) as client:
         # Build a query targeting a specific device's records
         query = AuditQueryByTarget(
-            target_device_identifier=ObjectIdentifier(8, 1000),  # device,1000
+            target_device_identifier=ObjectIdentifier(ObjectType.DEVICE, 1000),
         )
 
         # Query the audit log object (audit-log,1)

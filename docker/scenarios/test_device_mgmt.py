@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
 
 from bac_py import Client
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 from bac_py.network.address import parse_address
 from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import BACnetDate, BACnetTime, ObjectIdentifier
@@ -19,7 +23,7 @@ pytestmark = pytest.mark.asyncio
 
 
 @pytest.fixture
-async def client():
+async def client() -> AsyncGenerator[Client]:
     async with Client(instance_number=950, port=0) as c:
         yield c
 
@@ -27,14 +31,14 @@ async def client():
 # --- Device Communication Control ---
 
 
-async def test_dcc_disable_initiation(client: Client):
+async def test_dcc_disable_initiation(client: Client) -> None:
     """Send DCC disable-initiation and then re-enable."""
     await client.device_communication_control(SERVER, "disable-initiation")
     # Re-enable to leave the server in a clean state
     await client.device_communication_control(SERVER, "enable")
 
 
-async def test_dcc_enable(client: Client):
+async def test_dcc_enable(client: Client) -> None:
     """Send DCC enable succeeds without error."""
     await client.device_communication_control(SERVER, "enable")
 
@@ -42,7 +46,7 @@ async def test_dcc_enable(client: Client):
 # --- CreateObject / DeleteObject ---
 
 
-async def test_create_and_delete_object(client: Client):
+async def test_create_and_delete_object(client: Client) -> None:
     """Create an analog-value, verify it exists, then delete it."""
     created_oid = await client.create_object(SERVER, object_identifier="av,99")
     assert isinstance(created_oid, ObjectIdentifier)
@@ -65,7 +69,7 @@ async def test_create_and_delete_object(client: Client):
     )
 
 
-async def test_create_object_by_type(client: Client):
+async def test_create_object_by_type(client: Client) -> None:
     """Create object by type string, verify result, then delete."""
     created_oid = await client.create_object(SERVER, object_type="av")
     assert isinstance(created_oid, ObjectIdentifier)
@@ -78,7 +82,7 @@ async def test_create_object_by_type(client: Client):
 # --- TimeSynchronization ---
 
 
-async def test_time_synchronization(client: Client):
+async def test_time_synchronization(client: Client) -> None:
     """Send TimeSynchronization (unconfirmed) -- no exception expected."""
     now = datetime.now()
     date = BACnetDate(
@@ -97,7 +101,7 @@ async def test_time_synchronization(client: Client):
     client.time_synchronization(dest, date, time)
 
 
-async def test_utc_time_synchronization(client: Client):
+async def test_utc_time_synchronization(client: Client) -> None:
     """Send UTCTimeSynchronization (unconfirmed) -- no exception expected."""
     now = datetime.now(tz=UTC)
     date = BACnetDate(
@@ -119,7 +123,7 @@ async def test_utc_time_synchronization(client: Client):
 # --- TextMessage ---
 
 
-async def test_send_confirmed_text_message(client: Client):
+async def test_send_confirmed_text_message(client: Client) -> None:
     """Send a confirmed text message to the server."""
     await client.send_text_message(
         SERVER,
@@ -128,7 +132,7 @@ async def test_send_confirmed_text_message(client: Client):
     )
 
 
-async def test_send_unconfirmed_text_message(client: Client):
+async def test_send_unconfirmed_text_message(client: Client) -> None:
     """Send an unconfirmed text message (fire-and-forget)."""
     await client.send_text_message(
         SERVER,
@@ -143,7 +147,7 @@ async def test_send_unconfirmed_text_message(client: Client):
 @pytest.mark.skip(
     reason="Who-Has/I-Have requires broadcast; Docker bridge networks don't route broadcasts"
 )
-async def test_who_has_by_name(client: Client):
+async def test_who_has_by_name(client: Client) -> None:
     """Who-Has by object name returns I-Have with the matching object."""
     responses = await client.who_has(
         object_name="Temperature",
@@ -160,7 +164,7 @@ async def test_who_has_by_name(client: Client):
 @pytest.mark.skip(
     reason="Who-Has/I-Have requires broadcast; Docker bridge networks don't route broadcasts"
 )
-async def test_who_has_by_identifier(client: Client):
+async def test_who_has_by_identifier(client: Client) -> None:
     """Who-Has by ObjectIdentifier returns I-Have for analog-input,1."""
     oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
     responses = await client.who_has(
@@ -177,7 +181,7 @@ async def test_who_has_by_identifier(client: Client):
 # --- Object list ---
 
 
-async def test_get_object_list_via_read(client: Client):
+async def test_get_object_list_via_read(client: Client) -> None:
     """Read object-list property and verify at least 6 objects."""
     obj_list = await client.get_object_list(SERVER, INSTANCE)
     # Server has at minimum: device + ai + ao + av + bi + bv = 6

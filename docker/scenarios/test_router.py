@@ -8,10 +8,14 @@ under Docker Compose. They pass with host networking or on a physical LAN.
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import pytest
 
 from bac_py import Client
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 ROUTER = os.environ.get("ROUTER_ADDRESS", "172.30.1.50")
 SERVER_NET2 = os.environ.get("SERVER_NET2_ADDRESS", "172.30.2.10")
@@ -29,12 +33,12 @@ pytestmark = [
 
 
 @pytest.fixture
-async def client():
+async def client() -> AsyncGenerator[Client]:
     async with Client(instance_number=902, port=0) as c:
         yield c
 
 
-async def test_who_is_router_finds_networks(client: Client):
+async def test_who_is_router_finds_networks(client: Client) -> None:
     routers = await client.who_is_router_to_network(timeout=5.0)
     assert len(routers) >= 1
     all_networks = []
@@ -43,13 +47,13 @@ async def test_who_is_router_finds_networks(client: Client):
     assert NETWORK_2 in all_networks
 
 
-async def test_discover_across_router(client: Client):
+async def test_discover_across_router(client: Client) -> None:
     devices = await client.discover(destination=f"{NETWORK_2}:*", timeout=5.0, expected_count=1)
     instances = [d.instance for d in devices]
     assert SERVER_NET2_INSTANCE in instances
 
 
-async def test_read_across_router(client: Client):
+async def test_read_across_router(client: Client) -> None:
     # First discover to learn the remote address
     devices = await client.discover(destination=f"{NETWORK_2}:*", timeout=5.0, expected_count=1)
     remote = next(d for d in devices if d.instance == SERVER_NET2_INSTANCE)

@@ -10,6 +10,7 @@ Usage::
 """
 
 import asyncio
+from typing import Any
 
 from bac_py import Client, decode_cov_values
 
@@ -21,7 +22,7 @@ async def main() -> None:
     """Subscribe to property-level COV and print notifications."""
     async with Client(instance_number=999) as client:
 
-        def on_notification(notification, source):
+        def on_notification(notification: Any, source: Any) -> None:
             values = decode_cov_values(notification)
             print(f"Property COV from {source}:")
             for name, value in values.items():

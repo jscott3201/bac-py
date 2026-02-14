@@ -14,6 +14,7 @@ import math
 import os
 import signal
 import time
+from typing import Any
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,7 +37,7 @@ OCCUPIED_HEATING_SP = 72.0
 OCCUPIED_COOLING_SP = 76.0
 
 
-def _get_commandable_value(obj, default=0.0):
+def _get_commandable_value(obj: Any, default: Any = 0.0) -> Any:
     """Resolve the effective present-value of a commandable object."""
     from bac_py.types.enums import PropertyIdentifier
 
@@ -343,17 +344,17 @@ async def run() -> None:
 async def _simulation_loop(
     stop: asyncio.Event,
     *,
-    zone_temp,
-    outside_temp,
-    heating_out,
-    cooling_out,
-    heating_sp,
-    cooling_sp,
-    deadband_obj,
-    occupancy_sensor,
-    system_enable,
-    fan_status,
-    schedule,
+    zone_temp: Any,
+    outside_temp: Any,
+    heating_out: Any,
+    cooling_out: Any,
+    heating_sp: Any,
+    cooling_sp: Any,
+    deadband_obj: Any,
+    occupancy_sensor: Any,
+    system_enable: Any,
+    fan_status: Any,
+    schedule: Any,
 ) -> None:
     from bac_py.types.enums import BinaryPV, PropertyIdentifier
 

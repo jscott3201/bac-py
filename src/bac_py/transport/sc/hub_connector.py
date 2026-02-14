@@ -74,6 +74,7 @@ class SCHubConnector:
         self._running = False
         self._connect_task: asyncio.Task[None] | None = None
         self._connected_event = asyncio.Event()
+        self._ssl_ctx = build_client_ssl_context(self._config.tls_config)
 
         # Callbacks
         self.on_message: Callable[[SCMessage], Awaitable[None] | None] | None = None
@@ -168,8 +169,6 @@ class SCHubConnector:
                     continue
 
                 # Try failover hub
-                if self._config.failover_hub_uri:
-                    logger.info(f"Failing over to {self._config.failover_hub_uri}")
                 if self._config.failover_hub_uri and await self._try_connect(
                     self._config.failover_hub_uri,
                     _STATUS_FAILOVER,
@@ -194,9 +193,8 @@ class SCHubConnector:
 
         :returns: True if connected successfully.
         """
-        ssl_ctx = build_client_ssl_context(self._config.tls_config)
         try:
-            ws = await SCWebSocket.connect(uri, ssl_ctx, SC_HUB_SUBPROTOCOL)
+            ws = await SCWebSocket.connect(uri, self._ssl_ctx, SC_HUB_SUBPROTOCOL)
         except (OSError, ConnectionError, Exception) as exc:
             logger.debug("Failed to connect to %s: %s", uri, exc)
             return False
@@ -236,7 +234,10 @@ class SCHubConnector:
         self._connection = conn
         self._set_status(status)
         self._connected_event.set()
-        logger.info("Connected to hub: %s (status=%s)", uri, status.name)
+        if status == _STATUS_FAILOVER:
+            logger.info("Failed over to hub: %s", uri)
+        else:
+            logger.info("Connected to hub: %s", uri)
         return True
 
     async def _run_until_disconnected(self) -> None:

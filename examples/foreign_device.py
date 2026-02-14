@@ -40,8 +40,8 @@ async def main() -> None:
         # Read FDT from the BBMD
         fdt = await client.read_fdt(BBMD_ADDRESS)
         print(f"\nFDT has {len(fdt)} entries:")
-        for entry in fdt:
-            print(f"  {entry.address} ttl={entry.ttl}s remaining={entry.remaining}s")
+        for fdt_entry in fdt:
+            print(f"  {fdt_entry.address} ttl={fdt_entry.ttl}s remaining={fdt_entry.remaining}s")
 
 
 if __name__ == "__main__":

@@ -4,11 +4,11 @@
        docker-test-events docker-test-sc docker-demo docker-demo-auto docker-clean
 
 lint:
-	uv run ruff check src/ tests/ docker/
-	uv run ruff format --check src/ tests/ docker/
+	uv run ruff check src/ tests/ docker/ examples/
+	uv run ruff format --check src/ tests/ docker/ examples/
 
 typecheck:
-	uv run mypy src/
+	uv run mypy src/ examples/ docker/
 
 test:
 	uv run pytest --tb=short -q
@@ -19,11 +19,11 @@ docs:
 check: lint typecheck test docs
 
 fix:
-	uv run ruff check --fix src/ tests/ docker/
-	uv run ruff format src/ tests/ docker/
+	uv run ruff check --fix src/ tests/ docker/ examples/
+	uv run ruff format src/ tests/ docker/ examples/
 
 format:
-	uv run ruff format src/ tests/ docker/
+	uv run ruff format src/ tests/ docker/ examples/
 
 coverage:
 	uv run pytest --cov --cov-report=term-missing

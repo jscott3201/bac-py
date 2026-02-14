@@ -72,6 +72,10 @@ class SCNodeSwitch:
         self._client_tasks: set[asyncio.Task[None]] = set()
         self._pending_resolutions: dict[SCVMAC, asyncio.Future[list[str]]] = {}
 
+        # Cache TLS contexts (immutable after init)
+        self._client_ssl_ctx = build_client_ssl_context(self._config.tls_config)
+        self._server_ssl_ctx = build_server_ssl_context(self._config.tls_config)
+
         # Callbacks
         self.on_message: Callable[[SCMessage], Awaitable[None] | None] | None = None
 
@@ -98,12 +102,11 @@ class SCNodeSwitch:
         """Start the node switch, listening for inbound direct connections."""
         if not self._config.enable:
             return
-        ssl_ctx = build_server_ssl_context(self._config.tls_config)
         self._server = await asyncio.start_server(
             self._handle_inbound,
             self._config.bind_address,
             self._config.bind_port,
-            ssl=ssl_ctx,
+            ssl=self._server_ssl_ctx,
         )
         logger.info(
             "SC Node Switch listening on %s:%d",
@@ -114,7 +117,14 @@ class SCNodeSwitch:
     async def stop(self) -> None:
         """Stop the node switch and close all direct connections."""
         logger.info("SC node switch stopping")
-        # Close all direct connections
+        # Cancel pending resolutions
+        for fut in self._pending_resolutions.values():
+            if not fut.done():
+                fut.cancel()
+        self._pending_resolutions.clear()
+
+        # Close all direct connections (must happen BEFORE server.close()
+        # because Python 3.13 wait_closed() blocks until handlers finish)
         for conn in list(self._direct_connections.values()):
             with contextlib.suppress(Exception):
                 await conn._go_idle()
@@ -128,13 +138,7 @@ class SCNodeSwitch:
             await asyncio.gather(*self._client_tasks, return_exceptions=True)
         self._client_tasks.clear()
 
-        # Cancel pending resolutions
-        for fut in self._pending_resolutions.values():
-            if not fut.done():
-                fut.cancel()
-        self._pending_resolutions.clear()
-
-        # Stop server
+        # Stop server (after connections are closed)
         if self._server:
             self._server.close()
             await self._server.wait_closed()
@@ -189,7 +193,7 @@ class SCNodeSwitch:
             await hub_send(msg)
             async with asyncio.timeout(self._config.address_resolution_timeout):
                 return await fut
-        except (TimeoutError, Exception):
+        except (TimeoutError, OSError, ConnectionError, asyncio.CancelledError):
             return []
         finally:
             self._pending_resolutions.pop(dest, None)
@@ -215,11 +219,10 @@ class SCNodeSwitch:
             return False
 
         logger.debug(f"SC establishing direct connection to {dest} via {uris}")
-        ssl_ctx = build_client_ssl_context(self._config.tls_config)
         for uri in uris:
             try:
-                ws = await SCWebSocket.connect(uri, ssl_ctx, SC_DIRECT_SUBPROTOCOL)
-            except (OSError, ConnectionError, Exception):
+                ws = await SCWebSocket.connect(uri, self._client_ssl_ctx, SC_DIRECT_SUBPROTOCOL)
+            except (OSError, ConnectionError):
                 continue
 
             conn = SCConnection(
