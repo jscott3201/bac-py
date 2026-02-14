@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.10] - 2026-02-14
+
+### Fixed
+
+- **Missing `docker/lib/` in repository** (`.gitignore`): The `lib/` gitignore
+  pattern was excluding `docker/lib/`, which contains shared stress test worker
+  modules (`bip_stress.py`, `sc_stress.py`, `stress_runner.py`,
+  `sc_stress_runner.py`). Added `!docker/lib/` negation so the directory is
+  tracked. This caused mypy CI failures since `docker.lib.*` imports could not
+  resolve.
+
 ## [1.3.9] - 2026-02-14
 
 ### Added

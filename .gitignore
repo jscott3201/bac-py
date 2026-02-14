@@ -29,6 +29,7 @@ downloads/
 eggs/
 .eggs/
 lib/
+!docker/lib/
 lib64/
 parts/
 sdist/
