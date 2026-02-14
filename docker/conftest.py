@@ -72,3 +72,23 @@ def sc_node1_vmac() -> str:
 def sc_node2_vmac() -> str:
     """SC node2 VMAC hex string from env."""
     return os.environ.get("SC_NODE2_VMAC", "02AA00000002")
+
+
+@pytest.fixture
+def sc_stress_hub_uri() -> str:
+    """SC stress hub WebSocket URI from env."""
+    host = os.environ.get("SC_STRESS_HUB_ADDRESS", "172.30.1.130")
+    port = os.environ.get("SC_STRESS_HUB_PORT", "4443")
+    return f"ws://{host}:{port}"
+
+
+@pytest.fixture
+def sc_stress_node1_vmac() -> str:
+    """SC stress node1 VMAC hex string from env."""
+    return os.environ.get("SC_STRESS_NODE1_VMAC", "02BB00000001")
+
+
+@pytest.fixture
+def sc_stress_node2_vmac() -> str:
+    """SC stress node2 VMAC hex string from env."""
+    return os.environ.get("SC_STRESS_NODE2_VMAC", "02BB00000002")

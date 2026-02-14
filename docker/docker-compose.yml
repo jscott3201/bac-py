@@ -1,3 +1,31 @@
+# =============================================================================
+# bac-py Docker Integration Tests
+# =============================================================================
+#
+# Scenarios:
+#   1. Client/Server       (profile: client-server)   — basic read/write/discover
+#   2. BBMD                (profile: bbmd)             — foreign device forwarding
+#   3. Router              (profile: router)           — cross-network routing
+#   4. BIP Stress          (profile: stress)           — mixed-workload throughput
+#   5. Demo Thermostat     (profile: demo)             — interactive demo
+#   6. Device Management   (profile: device-mgmt)      — DCC, TimeSynchronization
+#   7. COV Advanced        (profile: cov-advanced)     — subscriptions, lifetime
+#   8. Events & Alarms     (profile: events)           — alarms, acknowledgement
+#   9. Secure Connect      (profile: secure-connect)   — SC hub/node WebSocket
+#  10. SC Stress           (profile: sc-stress)        — SC throughput/latency
+#
+# Runners (JSON report to stdout):
+#   - BIP stress runner    (profile: stress-runner)
+#   - SC stress runner     (profile: sc-stress-runner)
+#
+# Usage:
+#   make docker-test              # run all test scenarios
+#   make docker-test-client       # run scenario 1 only
+#   make docker-stress            # run BIP stress runner (JSON output)
+#   make docker-sc-stress         # run SC stress runner (JSON output)
+#   make docker-clean             # remove all containers/images
+# =============================================================================
+
 networks:
   bacnet-main:
     driver: bridge
@@ -15,6 +43,10 @@ networks:
       config:
         - subnet: 172.30.3.0/24
 
+# ---------------------------------------------------------------------------
+# Shared anchors
+# ---------------------------------------------------------------------------
+
 x-healthcheck: &healthcheck
   healthcheck:
     test: ["CMD", "test", "-f", "/tmp/healthy"]
@@ -28,11 +60,12 @@ x-build: &build
     context: ..
     dockerfile: docker/Dockerfile
 
-# =============================================================================
-# Scenario 1: Client/Server (basic read/write/discover)
-# =============================================================================
-
 services:
+
+  # ===========================================================================
+  # Scenario 1: Client/Server (basic read/write/discover)
+  # ===========================================================================
+
   server1:
     <<: [*build, *healthcheck]
     container_name: bacnet-server1
@@ -172,7 +205,7 @@ services:
     profiles: ["router", "all"]
 
   # ===========================================================================
-  # Scenario 4: Stress (throughput/latency)
+  # Scenario 4: BIP Stress (mixed-workload throughput/latency)
   # ===========================================================================
 
   server-stress:
@@ -180,7 +213,7 @@ services:
     container_name: bacnet-server-stress
     mem_limit: 2g
     environment:
-      ROLE: server
+      ROLE: stress-server
       DEVICE_INSTANCE: "400"
       BACNET_PORT: "47808"
       BROADCAST_ADDRESS: "172.30.1.255"
@@ -205,6 +238,31 @@ services:
       server-stress:
         condition: service_healthy
     profiles: ["stress", "all"]
+
+  stress-runner:
+    <<: *build
+    container_name: bacnet-stress-runner
+    mem_limit: 2g
+    environment:
+      ROLE: stress
+      SERVER_ADDRESS: "172.30.1.70"
+      SERVER_INSTANCE: "400"
+      NUM_POOLS: "1"
+      READERS_PER_POOL: "2"
+      WRITERS_PER_POOL: "1"
+      RPM_PER_POOL: "1"
+      WPM_PER_POOL: "1"
+      OBJLIST_WORKERS: "1"
+      COV_SUBSCRIBERS: "1"
+      WARMUP_SECONDS: "15"
+      SUSTAIN_SECONDS: "60"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.81
+    depends_on:
+      server-stress:
+        condition: service_healthy
+    profiles: ["stress-runner"]
 
   # ===========================================================================
   # Scenario 5: Demo Thermostat (interactive demo application)
@@ -237,23 +295,6 @@ services:
       thermostat:
         condition: service_healthy
     profiles: ["demo"]
-
-  stress-runner:
-    <<: *build
-    container_name: bacnet-stress-runner
-    mem_limit: 2g
-    environment:
-      ROLE: stress
-      SERVER_ADDRESS: "172.30.1.70"
-      SERVER_INSTANCE: "400"
-      RAMP_SCHEDULE: "30:2:0:0,30:3:2:0,30:4:3:3,30:8:6:6"
-    networks:
-      bacnet-main:
-        ipv4_address: 172.30.1.81
-    depends_on:
-      server-stress:
-        condition: service_healthy
-    profiles: ["stress-runner"]
 
   # ===========================================================================
   # Scenario 6: Device Management (DCC, TimeSynchronization, CreateObject, etc.)
@@ -421,3 +462,96 @@ services:
       sc-node2:
         condition: service_healthy
     profiles: ["secure-connect", "all"]
+
+  # ===========================================================================
+  # Scenario 10: SC Stress (WebSocket hub/node throughput)
+  # ===========================================================================
+
+  sc-stress-hub:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-sc-stress-hub
+    mem_limit: 2g
+    environment:
+      ROLE: sc-hub
+      BIND_ADDRESS: "0.0.0.0"
+      BIND_PORT: "4443"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.130
+    profiles: ["sc-stress", "sc-stress-runner"]
+
+  sc-stress-node1:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-sc-stress-node1
+    mem_limit: 1g
+    environment:
+      ROLE: sc-node
+      HUB_URI: "ws://172.30.1.130:4443"
+      VMAC: "02BB00000001"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.131
+    depends_on:
+      sc-stress-hub:
+        condition: service_healthy
+    profiles: ["sc-stress", "sc-stress-runner"]
+
+  sc-stress-node2:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-sc-stress-node2
+    mem_limit: 1g
+    environment:
+      ROLE: sc-node
+      HUB_URI: "ws://172.30.1.130:4443"
+      VMAC: "02BB00000002"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.132
+    depends_on:
+      sc-stress-hub:
+        condition: service_healthy
+    profiles: ["sc-stress", "sc-stress-runner"]
+
+  test-sc-stress:
+    <<: *build
+    container_name: bacnet-test-sc-stress
+    mem_limit: 2g
+    environment:
+      ROLE: test
+      TEST_FILE: test_sc_stress.py
+      SC_STRESS_HUB_ADDRESS: "172.30.1.130"
+      SC_STRESS_HUB_PORT: "4443"
+      SC_STRESS_NODE1_VMAC: "02BB00000001"
+      SC_STRESS_NODE2_VMAC: "02BB00000002"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.133
+    depends_on:
+      sc-stress-node1:
+        condition: service_healthy
+      sc-stress-node2:
+        condition: service_healthy
+    profiles: ["sc-stress"]
+
+  sc-stress-runner:
+    <<: *build
+    container_name: bacnet-sc-stress-runner
+    mem_limit: 2g
+    environment:
+      ROLE: sc-stress
+      SC_STRESS_HUB_URI: "ws://172.30.1.130:4443"
+      SC_STRESS_NODE1_VMAC: "02BB00000001"
+      SC_STRESS_NODE2_VMAC: "02BB00000002"
+      UNICAST_WORKERS: "8"
+      BROADCAST_WORKERS: "2"
+      WARMUP_SECONDS: "15"
+      SUSTAIN_SECONDS: "60"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.134
+    depends_on:
+      sc-stress-node1:
+        condition: service_healthy
+      sc-stress-node2:
+        condition: service_healthy
+    profiles: ["sc-stress-runner"]

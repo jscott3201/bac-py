@@ -36,6 +36,7 @@ capabilities, see :doc:`features`.
    :caption: User Guide
    :maxdepth: 2
 
+   guide/client-guide
    guide/reading-writing
    guide/discovery-networking
    guide/events-alarms
@@ -43,6 +44,7 @@ capabilities, see :doc:`features`.
    guide/device-management
    guide/secure-connect
    guide/debugging-logging
+   guide/benchmarks
    guide/security
    guide/examples
 

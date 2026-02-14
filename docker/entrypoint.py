@@ -9,6 +9,8 @@ import signal
 import subprocess
 import sys
 
+import bac_py
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
@@ -48,8 +50,8 @@ async def run_server() -> None:
         vendor_name="bac-py",
         vendor_identifier=0,
         model_name="bac-py-docker",
-        firmware_revision="1.3.8",
-        application_software_version="1.3.8",
+        firmware_revision=bac_py.__version__,
+        application_software_version=bac_py.__version__,
     )
     app.object_db.add(device)
 
@@ -130,8 +132,8 @@ async def run_bbmd() -> None:
         vendor_name="bac-py",
         vendor_identifier=0,
         model_name="bac-py-docker-bbmd",
-        firmware_revision="1.3.8",
-        application_software_version="1.3.8",
+        firmware_revision=bac_py.__version__,
+        application_software_version=bac_py.__version__,
     )
     app.object_db.add(device)
 
@@ -201,8 +203,8 @@ async def run_router() -> None:
         vendor_name="bac-py",
         vendor_identifier=0,
         model_name="bac-py-docker-router",
-        firmware_revision="1.3.8",
-        application_software_version="1.3.8",
+        firmware_revision=bac_py.__version__,
+        application_software_version=bac_py.__version__,
     )
     app.object_db.add(device)
 
@@ -226,6 +228,156 @@ async def run_router() -> None:
     await stop.wait()
 
     logger.info("Shutting down router...")
+    await app.stop()
+
+
+async def run_stress_server() -> None:
+    """Run a BACnet server with diverse objects for stress testing.
+
+    Provides 39 objects (+ device = 40 total) spanning analog, binary,
+    multi-state, schedule, calendar, and notification class types.
+    """
+    from bac_py.app.application import BACnetApplication, DeviceConfig
+    from bac_py.app.server import DefaultServerHandlers
+    from bac_py.objects.analog import AnalogInputObject, AnalogOutputObject, AnalogValueObject
+    from bac_py.objects.binary import (
+        BinaryInputObject,
+        BinaryOutputObject,
+        BinaryValueObject,
+    )
+    from bac_py.objects.calendar import CalendarObject
+    from bac_py.objects.device import DeviceObject
+    from bac_py.objects.multistate import MultiStateInputObject, MultiStateValueObject
+    from bac_py.objects.notification import NotificationClassObject
+    from bac_py.objects.schedule import ScheduleObject
+    from bac_py.types.enums import EngineeringUnits, PropertyIdentifier
+
+    instance = int(os.environ.get("DEVICE_INSTANCE", "400"))
+    port = int(os.environ.get("BACNET_PORT", "47808"))
+
+    config = DeviceConfig(
+        instance_number=instance,
+        name=f"Docker-Stress-{instance}",
+        port=port,
+        broadcast_address=BROADCAST_ADDRESS,
+    )
+    app = BACnetApplication(config)
+    await app.start()
+
+    device = DeviceObject(
+        instance,
+        object_name=f"Docker-Stress-{instance}",
+        vendor_name="bac-py",
+        vendor_identifier=0,
+        model_name="bac-py-docker-stress",
+        firmware_revision=bac_py.__version__,
+        application_software_version=bac_py.__version__,
+    )
+    app.object_db.add(device)
+
+    # --- 10x AnalogInput (read-only, varied values/units) ---
+    ai_units = [
+        EngineeringUnits.DEGREES_FAHRENHEIT,
+        EngineeringUnits.DEGREES_CELSIUS,
+        EngineeringUnits.PERCENT_RELATIVE_HUMIDITY,
+        EngineeringUnits.PASCALS,
+        EngineeringUnits.LITERS_PER_SECOND,
+        EngineeringUnits.WATTS,
+        EngineeringUnits.KILOWATT_HOURS,
+        EngineeringUnits.AMPERES,
+        EngineeringUnits.VOLTS,
+        EngineeringUnits.HERTZ,
+    ]
+    for i in range(1, 11):
+        ai = AnalogInputObject(
+            i,
+            object_name=f"AI-{i}",
+            present_value=60.0 + i * 1.5,
+            units=ai_units[i - 1],
+        )
+        app.object_db.add(ai)
+
+    # --- 5x AnalogOutput (commandable) ---
+    for i in range(1, 6):
+        ao = AnalogOutputObject(
+            i,
+            object_name=f"AO-{i}",
+            present_value=50.0 + i,
+            units=EngineeringUnits.DEGREES_FAHRENHEIT,
+        )
+        app.object_db.add(ao)
+
+    # --- 5x AnalogValue (commandable) ---
+    for i in range(1, 6):
+        av = AnalogValueObject(
+            i,
+            object_name=f"AV-{i}",
+            present_value=70.0 + i,
+            units=EngineeringUnits.DEGREES_FAHRENHEIT,
+            commandable=True,
+        )
+        app.object_db.add(av)
+
+    # --- 5x BinaryInput (read-only) ---
+    for i in range(1, 6):
+        bi = BinaryInputObject(i, object_name=f"BI-{i}")
+        app.object_db.add(bi)
+
+    # --- 3x BinaryOutput (commandable) ---
+    for i in range(1, 4):
+        bo = BinaryOutputObject(i, object_name=f"BO-{i}")
+        app.object_db.add(bo)
+
+    # --- 3x BinaryValue (commandable) ---
+    for i in range(1, 4):
+        bv = BinaryValueObject(i, object_name=f"BV-{i}", commandable=True)
+        app.object_db.add(bv)
+
+    # --- 3x MultiStateInput (4 states each) ---
+    for i in range(1, 4):
+        msi = MultiStateInputObject(i, object_name=f"MSI-{i}", number_of_states=4)
+        app.object_db.add(msi)
+
+    # --- 2x MultiStateValue (commandable, 3 states) ---
+    for i in range(1, 3):
+        msv = MultiStateValueObject(
+            i, object_name=f"MSV-{i}", commandable=True, number_of_states=3
+        )
+        app.object_db.add(msv)
+
+    # --- 1x Schedule ---
+    schedule = ScheduleObject(1, object_name="Schedule-1")
+    app.object_db.add(schedule)
+
+    # --- 1x Calendar ---
+    calendar = CalendarObject(1, object_name="Calendar-1")
+    app.object_db.add(calendar)
+
+    # --- 1x NotificationClass ---
+    nc = NotificationClassObject(1, object_name="NC-1")
+    nc._properties[PropertyIdentifier.PRIORITY] = [3, 3, 3]
+    nc._properties[PropertyIdentifier.ACK_REQUIRED] = [True, False, False]
+    app.object_db.add(nc)
+
+    # Register default handlers
+    handlers = DefaultServerHandlers(app, app.object_db, device)
+    handlers.register()
+
+    logger.info(
+        "Stress server running: device %d on port %d (%d objects)",
+        instance,
+        port,
+        len(list(app.object_db)),
+    )
+    _write_healthy()
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+    logger.info("Shutting down stress server...")
     await app.stop()
 
 
@@ -274,8 +426,8 @@ async def run_server_extended() -> None:
         vendor_name="bac-py",
         vendor_identifier=0,
         model_name="bac-py-docker-extended",
-        firmware_revision="1.3.8",
-        application_software_version="1.3.8",
+        firmware_revision=bac_py.__version__,
+        application_software_version=bac_py.__version__,
     )
     app.object_db.add(device)
 
@@ -496,7 +648,17 @@ def run_stress() -> None:
     """Run the stress test runner."""
     logger.info("Running stress tests...")
     result = subprocess.run(
-        ["uv", "run", "python", "docker/lib/stress_runner.py"],
+        ["uv", "run", "python", "-m", "docker.lib.stress_runner"],
+        cwd="/app",
+    )
+    sys.exit(result.returncode)
+
+
+def run_sc_stress() -> None:
+    """Run the SC stress test runner."""
+    logger.info("Running SC stress tests...")
+    result = subprocess.run(
+        ["uv", "run", "python", "-m", "docker.lib.sc_stress_runner"],
         cwd="/app",
     )
     sys.exit(result.returncode)
@@ -540,6 +702,8 @@ def main() -> None:
         asyncio.run(run_server())
     elif role == "server-extended":
         asyncio.run(run_server_extended())
+    elif role == "stress-server":
+        asyncio.run(run_stress_server())
     elif role == "bbmd":
         asyncio.run(run_bbmd())
     elif role == "router":
@@ -552,14 +716,17 @@ def main() -> None:
         run_test()
     elif role == "stress":
         run_stress()
+    elif role == "sc-stress":
+        run_sc_stress()
     elif role == "thermostat":
         asyncio.run(run_thermostat())
     elif role == "demo-client":
         run_demo_client()
     else:
         logger.error(
-            "Unknown ROLE: %r (expected: server, server-extended, bbmd, router, "
-            "sc-hub, sc-node, test, stress, thermostat, demo-client)",
+            "Unknown ROLE: %r (expected: server, server-extended, stress-server, "
+            "bbmd, router, sc-hub, sc-node, test, stress, sc-stress, "
+            "thermostat, demo-client)",
             role,
         )
         sys.exit(1)

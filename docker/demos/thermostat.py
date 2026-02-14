@@ -16,6 +16,8 @@ import signal
 import time
 from typing import Any
 
+import bac_py
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
@@ -109,8 +111,8 @@ async def run() -> None:
         vendor_name="bac-py",
         vendor_identifier=0,
         model_name="bac-py-thermostat",
-        firmware_revision="1.3.8",
-        application_software_version="1.3.8",
+        firmware_revision=bac_py.__version__,
+        application_software_version=bac_py.__version__,
     )
     app.object_db.add(device)
 

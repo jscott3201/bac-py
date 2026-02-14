@@ -1,7 +1,8 @@
 .PHONY: lint typecheck test docs check fix format coverage coverage-html \
        docker-build docker-test docker-stress docker-test-client docker-test-bbmd \
        docker-test-router docker-test-device-mgmt docker-test-cov-advanced \
-       docker-test-events docker-test-sc docker-demo docker-demo-auto docker-clean
+       docker-test-events docker-test-sc docker-test-sc-stress docker-sc-stress \
+       docker-demo docker-demo-auto docker-clean
 
 lint:
 	uv run ruff check src/ tests/ docker/ examples/
@@ -38,7 +39,7 @@ coverage-html:
 COMPOSE := docker compose -f docker/docker-compose.yml
 
 docker-build:
-	$(COMPOSE) build
+	$(COMPOSE) build --no-cache
 
 docker-test-client: docker-build
 	$(COMPOSE) --profile client-server up --abort-on-container-exit --exit-code-from test-client-server
@@ -72,6 +73,10 @@ docker-test-sc: docker-build
 	$(COMPOSE) --profile secure-connect up --abort-on-container-exit --exit-code-from test-secure-connect
 	$(COMPOSE) --profile secure-connect down -v
 
+docker-test-sc-stress: docker-build
+	$(COMPOSE) --profile sc-stress up --abort-on-container-exit --exit-code-from test-sc-stress
+	$(COMPOSE) --profile sc-stress down -v
+
 docker-test: docker-build
 	$(MAKE) docker-test-client
 	$(MAKE) docker-test-bbmd
@@ -86,6 +91,10 @@ docker-stress: docker-build
 	$(COMPOSE) --profile stress-runner up --abort-on-container-exit --exit-code-from stress-runner
 	$(COMPOSE) --profile stress-runner down -v
 
+docker-sc-stress: docker-build
+	$(COMPOSE) --profile sc-stress-runner up --abort-on-container-exit --exit-code-from sc-stress-runner
+	$(COMPOSE) --profile sc-stress-runner down -v
+
 docker-demo: docker-build
 	$(COMPOSE) --profile demo run --rm demo-client
 	$(COMPOSE) --profile demo down -v
@@ -98,3 +107,5 @@ docker-clean:
 	$(COMPOSE) --profile all down -v --rmi local
 	$(COMPOSE) --profile demo down -v --rmi local
 	$(COMPOSE) --profile stress-runner down -v --rmi local
+	$(COMPOSE) --profile sc-stress down -v --rmi local
+	$(COMPOSE) --profile sc-stress-runner down -v --rmi local

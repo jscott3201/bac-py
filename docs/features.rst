@@ -22,7 +22,8 @@ Convenience API
 ---------------
 
 The :class:`~bac_py.client.Client` class provides a simplified interface for
-common operations. See :doc:`getting-started` for a walkthrough.
+common operations. See :doc:`getting-started` for a walkthrough and
+:doc:`guide/client-guide` for the full capabilities reference.
 
 - **String-based addressing** -- pass IP addresses as strings instead of
   constructing :class:`~bac_py.network.address.BACnetAddress` objects
@@ -139,7 +140,9 @@ Unconfirmed services (broadcast, fire-and-forget):
 - UnconfirmedPrivateTransfer
 
 See :ref:`reading-properties`, :ref:`writing-properties`,
-:ref:`device-discovery`, and :ref:`cov-subscriptions` for usage examples.
+:ref:`device-discovery`, :ref:`cov-subscriptions`, and :ref:`client-guide`
+for usage examples. File access, private transfer, WriteGroup, virtual
+terminal, and list element operations are documented in :doc:`guide/client-guide`.
 
 
 .. _object-model:
@@ -172,8 +175,9 @@ property validation and read/write access control:
   TimeValue, BitStringValue, and pattern variants
 
 Each object type defines its standard properties, default values, and which
-properties are writable. See :ref:`serving-objects` for an example of
-creating and hosting objects.
+properties are writable. See :ref:`basic-server-setup` for creating and
+hosting objects, :ref:`commandable-objects` for priority arrays, and
+:ref:`supported-object-types` for the categorized list.
 
 
 .. _device-info-caching:
@@ -602,7 +606,7 @@ sockets between separate application instances running in containers. The
 infrastructure lives under ``docker/`` and uses Docker Compose with isolated
 bridge networks to simulate realistic BACnet/IP topologies.
 
-Nine scenarios are provided:
+Ten scenarios are provided:
 
 - **Client/Server** -- ReadProperty, WriteProperty, ReadPropertyMultiple,
   WritePropertyMultiple, Who-Is discovery, and object list enumeration over
@@ -612,9 +616,11 @@ Nine scenarios are provided:
 - **Router** -- Who-Is-Router-To-Network discovery, cross-network device
   discovery, and cross-network property reads through a router container
   bridging two Docker networks.
-- **Stress** -- Concurrent client reads (10 parallel clients) and rapid
-  sequential reads (100 in a row) for throughput validation. A standalone
+- **Stress** -- Mixed-workload stress testing with ReadProperty, WriteProperty,
+  ReadPropertyMultiple, WritePropertyMultiple, object-list queries, and COV
+  subscriptions against a server hosting 40 diverse objects. A standalone
   stress runner produces structured JSON reports with latency percentiles.
+  See :ref:`benchmarks` for details.
 - **Device Management** -- DeviceCommunicationControl disable/enable cycles,
   time synchronization, confirmed text messages, and private transfer
   round-trips.
@@ -628,6 +634,9 @@ Nine scenarios are provided:
   VMAC addressing, and BVLC-SC message exchange over WebSocket connections.
 - **Demo** -- Interactive demonstration of client/server capabilities
   including reads, writes, discovery, and COV subscriptions.
+- **SC Stress** -- Sustained WebSocket throughput testing with varied-size
+  NPDU payloads through an SC hub, measuring unicast and broadcast latency
+  with echo correlation. See :ref:`benchmarks` for details.
 
 Run with ``make docker-test`` (all scenarios) or individual targets like
 ``make docker-test-client``, ``make docker-test-sc``, etc.

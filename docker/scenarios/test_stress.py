@@ -1,9 +1,6 @@
-"""Scenario 4: 2-minute sustained stress test with mixed operation types.
+"""Sustained stress test: mixed-workload throughput for 60 seconds.
 
-Ramps concurrent clients across four 30-second phases, progressively
-introducing reads, writes, and COV subscriptions.  Reports per-phase
-throughput and latency by operation type, then asserts the overall
-error rate stays below 5%.
+Default concurrency: 1 pool x (2R + 1W + 1RPM + 1WPM) + 1 OL + 1 COV = 7
 """
 
 from __future__ import annotations
@@ -11,238 +8,167 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
-import statistics
 import time
 
 import pytest
 
 from bac_py import Client
+from docker.lib.bip_stress import Stats, latency_summary, spawn_workers, stop_phase
 
 SERVER = os.environ.get("SERVER_ADDRESS", "172.30.1.70")
 SERVER_INSTANCE = int(os.environ.get("SERVER_INSTANCE", "400"))
 
+NUM_POOLS = int(os.environ.get("NUM_POOLS", "1"))
+READERS_PER_POOL = int(os.environ.get("READERS_PER_POOL", "2"))
+WRITERS_PER_POOL = int(os.environ.get("WRITERS_PER_POOL", "1"))
+RPM_PER_POOL = int(os.environ.get("RPM_PER_POOL", "1"))
+WPM_PER_POOL = int(os.environ.get("WPM_PER_POOL", "1"))
+OBJLIST_WORKERS = int(os.environ.get("OBJLIST_WORKERS", "1"))
+COV_SUBSCRIBERS = int(os.environ.get("COV_SUBSCRIBERS", "1"))
+ERROR_BACKOFF = float(os.environ.get("ERROR_BACKOFF", "0.05"))
+WARMUP_SECONDS = int(os.environ.get("WARMUP_SECONDS", "15"))
+SUSTAIN_SECONDS = int(os.environ.get("SUSTAIN_SECONDS", "60"))
+
 pytestmark = pytest.mark.asyncio
 
-# (duration_seconds, readers, writers, cov_subscribers)
-RAMP_SCHEDULE = [
-    (30, 2, 0, 0),
-    (30, 3, 2, 0),
-    (30, 4, 3, 3),
-    (30, 8, 6, 6),
-]
 
-
-class Stats:
-    """Thread-safe-ish stats collector (safe in single-threaded asyncio)."""
-
-    def __init__(self) -> None:
-        self.read_latencies: list[float] = []
-        self.write_latencies: list[float] = []
-        self.cov_latencies: list[float] = []  # subscribe round-trip
-        self.cov_notifications: list[int] = [0]
-        self.errors: list[int] = [0]
-
-    @property
-    def all_latencies(self) -> list[float]:
-        return self.read_latencies + self.write_latencies + self.cov_latencies
-
-    @property
-    def total_ok(self) -> int:
-        return len(self.read_latencies) + len(self.write_latencies) + len(self.cov_latencies)
-
-
-async def _read_worker(
-    worker_id: int,
-    server: str,
-    stats: Stats,
-    stop: asyncio.Event,
-) -> None:
-    """Continuous sequential reads of ai,1 present-value."""
-    async with Client(instance_number=800 + worker_id, port=0) as client:
-        while not stop.is_set():
-            t0 = time.monotonic()
-            try:
-                await client.read(server, "ai,1", "present-value")
-                stats.read_latencies.append((time.monotonic() - t0) * 1000.0)
-            except Exception:
-                stats.errors[0] += 1
-
-
-async def _write_worker(
-    worker_id: int,
-    server: str,
-    stats: Stats,
-    stop: asyncio.Event,
-) -> None:
-    """Continuous sequential writes to av,1 present-value, alternating values."""
-    async with Client(instance_number=800 + worker_id, port=0) as client:
-        toggle = False
-        while not stop.is_set():
-            value = 72.5 if toggle else 68.0
-            toggle = not toggle
-            t0 = time.monotonic()
-            try:
-                await client.write(server, "av,1", "present-value", value, priority=8)
-                stats.write_latencies.append((time.monotonic() - t0) * 1000.0)
-            except Exception:
-                stats.errors[0] += 1
-
-
-async def _cov_worker(
-    worker_id: int,
-    server: str,
-    stats: Stats,
-    stop: asyncio.Event,
-) -> None:
-    """Subscribe to COV on ai,1, count notifications, resubscribe periodically."""
-    process_id = 9000 + worker_id
-
-    def _on_notification(_notif: object, _source: object) -> None:
-        stats.cov_notifications[0] += 1
-
-    async with Client(instance_number=800 + worker_id, port=0) as client:
-        while not stop.is_set():
-            t0 = time.monotonic()
-            try:
-                await client.subscribe_cov_ex(
-                    server,
-                    "ai,1",
-                    process_id=process_id,
-                    confirmed=False,
-                    lifetime=60,
-                    callback=_on_notification,
-                )
-                stats.cov_latencies.append((time.monotonic() - t0) * 1000.0)
-            except Exception:
-                stats.errors[0] += 1
-
-            # Hold subscription for 10s then resubscribe (exercises the path)
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(stop.wait(), timeout=10.0)
-
-            if not stop.is_set():
-                with contextlib.suppress(Exception):
-                    await client.unsubscribe_cov_ex(server, "ai,1", process_id=process_id)
-
-
-def _pct(sorted_list: list[float], pct: float) -> float:
-    idx = min(int(len(sorted_list) * pct), len(sorted_list) - 1)
-    return sorted_list[idx]
-
-
-async def test_sustained_ramp() -> None:
-    """2-minute ramp: reads -> reads+writes -> reads+writes+COV."""
-    stats = Stats()
-    stop = asyncio.Event()
-    workers: list[asyncio.Task[None]] = []
-    next_id = 0
-
-    read_count = 0
-    write_count = 0
-    cov_count = 0
-
-    wall_start = time.monotonic()
-    header = (
-        f"  {'Phase':>5s}  {'R':>3s}  {'W':>3s}  {'C':>3s}  "
-        f"{'Reads':>7s}  {'Writes':>7s}  {'COVs':>5s}  {'Notifs':>6s}  "
-        f"{'Errs':>5s}  {'RPS':>8s}  {'p50ms':>7s}  {'p95ms':>7s}"
-    )
-    print(f"\n{header}")
+async def test_sustained_max_throughput() -> None:
+    """60-second sustained stress test with mixed BACnet workloads."""
+    per_pool = READERS_PER_POOL + WRITERS_PER_POOL + RPM_PER_POOL + WPM_PER_POOL
+    total_workers = NUM_POOLS * per_pool + OBJLIST_WORKERS + COV_SUBSCRIBERS
     print(
-        f"  {'─' * 5}  {'─' * 3}  {'─' * 3}  {'─' * 3}  "
-        f"{'─' * 7}  {'─' * 7}  {'─' * 5}  {'─' * 6}  "
-        f"{'─' * 5}  {'─' * 8}  {'─' * 7}  {'─' * 7}"
+        f"\n{'=' * 70}"
+        f"\n  Stress Test: {NUM_POOLS} pools x "
+        f"({READERS_PER_POOL}R + {WRITERS_PER_POOL}W + "
+        f"{RPM_PER_POOL}RPM + {WPM_PER_POOL}WPM) + "
+        f"{OBJLIST_WORKERS}OL + {COV_SUBSCRIBERS}COV"
+        f"\n  Total workers: {total_workers}  |  "
+        f"Warmup: {WARMUP_SECONDS}s  |  Sustained: {SUSTAIN_SECONDS}s"
+        f"\n  Server: {SERVER} (instance {SERVER_INSTANCE})"
+        f"\n{'=' * 70}"
     )
 
-    for phase_idx, (duration, target_readers, target_writers, target_cov) in enumerate(
-        RAMP_SCHEDULE
-    ):
-        snap_reads = len(stats.read_latencies)
-        snap_writes = len(stats.write_latencies)
-        snap_covs = len(stats.cov_latencies)
-        snap_notifs = stats.cov_notifications[0]
-        snap_errs = stats.errors[0]
+    # -- Create client pools --------------------------------------------------
+    async with contextlib.AsyncExitStack() as stack:
+        pools: list[Client] = []
+        for i in range(NUM_POOLS):
+            client = await stack.enter_async_context(Client(instance_number=800 + i, port=0))
+            pools.append(client)
 
-        # Ramp up readers
-        while read_count < target_readers:
-            task = asyncio.create_task(_read_worker(next_id, SERVER, stats, stop))
-            workers.append(task)
-            next_id += 1
-            read_count += 1
+        objlist_client = await stack.enter_async_context(Client(instance_number=850, port=0))
 
-        # Ramp up writers
-        while write_count < target_writers:
-            task = asyncio.create_task(_write_worker(next_id, SERVER, stats, stop))
-            workers.append(task)
-            next_id += 1
-            write_count += 1
-
-        # Ramp up COV subscribers
-        while cov_count < target_cov:
-            task = asyncio.create_task(_cov_worker(next_id, SERVER, stats, stop))
-            workers.append(task)
-            next_id += 1
-            cov_count += 1
-
-        await asyncio.sleep(duration)
-
-        # Phase deltas
-        phase_reads = len(stats.read_latencies) - snap_reads
-        phase_writes = len(stats.write_latencies) - snap_writes
-        phase_covs = len(stats.cov_latencies) - snap_covs
-        phase_notifs = stats.cov_notifications[0] - snap_notifs
-        phase_errs = stats.errors[0] - snap_errs
-        phase_total = phase_reads + phase_writes + phase_covs
-        rps = phase_total / duration if duration else 0
-
-        phase_all = sorted(
-            stats.read_latencies[snap_reads:]
-            + stats.write_latencies[snap_writes:]
-            + stats.cov_latencies[snap_covs:]
+        # -- Warmup phase -----------------------------------------------------
+        warmup_stats = Stats()
+        warmup_stop = asyncio.Event()
+        warmup_tasks = spawn_workers(
+            pools,
+            objlist_client,
+            SERVER,
+            SERVER_INSTANCE,
+            warmup_stats,
+            warmup_stop,
+            readers_per_pool=READERS_PER_POOL,
+            writers_per_pool=WRITERS_PER_POOL,
+            rpm_per_pool=RPM_PER_POOL,
+            wpm_per_pool=WPM_PER_POOL,
+            objlist_workers=OBJLIST_WORKERS,
+            cov_subscribers=COV_SUBSCRIBERS,
+            error_backoff=ERROR_BACKOFF,
         )
-        if phase_all:
-            p50 = _pct(phase_all, 0.50)
-            p95 = _pct(phase_all, 0.95)
-        else:
-            p50 = p95 = 0.0
+
+        print(f"\n  Warmup: {len(warmup_tasks)} workers for {WARMUP_SECONDS}s ...")
+        await asyncio.sleep(WARMUP_SECONDS)
+        await stop_phase(warmup_stop, warmup_tasks)
+
+        warmup_rps = warmup_stats.total_ok / WARMUP_SECONDS
+        print(
+            f"  Warmup complete: {warmup_rps:.0f} req/s "
+            f"({warmup_stats.total_ok} ok, {warmup_stats.errors} errors)"
+        )
+
+        # -- Sustained measurement phase --------------------------------------
+        stats = Stats()
+        stop = asyncio.Event()
+        workers = spawn_workers(
+            pools,
+            objlist_client,
+            SERVER,
+            SERVER_INSTANCE,
+            stats,
+            stop,
+            readers_per_pool=READERS_PER_POOL,
+            writers_per_pool=WRITERS_PER_POOL,
+            rpm_per_pool=RPM_PER_POOL,
+            wpm_per_pool=WPM_PER_POOL,
+            objlist_workers=OBJLIST_WORKERS,
+            cov_subscribers=COV_SUBSCRIBERS,
+            error_backoff=ERROR_BACKOFF,
+        )
+
+        wall_start = time.monotonic()
+        print(
+            f"\n  Sustained: {len(workers)} workers for {SUSTAIN_SECONDS}s"
+            f"\n  {'Time':>6s}  {'Reads':>8s}  {'Writes':>8s}  {'RPM':>6s}  "
+            f"{'WPM':>6s}  {'ObjL':>5s}  {'COV':>5s}  "
+            f"{'Errors':>6s}  {'RPS':>8s}"
+            f"\n  {'─' * 6}  {'─' * 8}  {'─' * 8}  {'─' * 6}  "
+            f"{'─' * 6}  {'─' * 5}  {'─' * 5}  "
+            f"{'─' * 6}  {'─' * 8}"
+        )
+
+        prev_snap = stats.snapshot()
+        for tick in range(10, SUSTAIN_SECONDS + 1, 10):
+            remaining = min(10.0, SUSTAIN_SECONDS - (tick - 10))
+            if remaining <= 0:
+                break
+            await asyncio.sleep(remaining)
+
+            snap = stats.snapshot()
+            d = tuple(snap[i] - prev_snap[i] for i in range(8))
+            interval_total = d[0] + d[1] + d[2] + d[3] + d[4] + d[5]
+            interval_rps = interval_total / remaining
+            prev_snap = snap
+
+            print(
+                f"  {tick:>4d}s  {d[0]:>8d}  {d[1]:>8d}  {d[2]:>6d}  "
+                f"{d[3]:>6d}  {d[4]:>5d}  {d[5]:>5d}  "
+                f"{d[7]:>6d}  {interval_rps:>7.0f}"
+            )
+
+        # -- Shutdown ---------------------------------------------------------
+        await stop_phase(stop, workers)
+        wall_elapsed = time.monotonic() - wall_start
+
+        # -- Results ----------------------------------------------------------
+        total = stats.total_ok + stats.errors
+        error_rate = stats.errors / total if total else 0.0
+        rps = stats.total_ok / wall_elapsed
+        all_lats = stats.combined_latencies()
 
         print(
-            f"  {phase_idx + 1:>5d}  {target_readers:>3d}  {target_writers:>3d}  {target_cov:>3d}  "
-            f"{phase_reads:>7d}  {phase_writes:>7d}  {phase_covs:>5d}  {phase_notifs:>6d}  "
-            f"{phase_errs:>5d}  {rps:>7.1f}  {p50:>7.1f}  {p95:>7.1f}"
+            f"\n{'=' * 70}"
+            f"\n  RESULTS ({wall_elapsed:.1f}s sustained)"
+            f"\n{'=' * 70}"
+            f"\n  Throughput:    {rps:,.0f} req/s"
+            f"\n  Reads:         {len(stats.read_latencies):,}"
+            f"\n  Writes:        {len(stats.write_latencies):,}"
+            f"\n  RPM reads:     {len(stats.rpm_latencies):,}"
+            f"\n  WPM writes:    {len(stats.wpm_latencies):,}"
+            f"\n  Object-list:   {len(stats.objlist_latencies):,}"
+            f"\n  COV subs:      {len(stats.cov_latencies):,}"
+            f"\n  COV notifs:    {stats.cov_notifications:,}"
+            f"\n  Errors:        {stats.errors:,} ({error_rate:.2%})"
+            f"\n  Overall lat:   {latency_summary(all_lats)}"
+            f"\n  Read lat:      {latency_summary(stats.read_latencies)}"
+            f"\n  Write lat:     {latency_summary(stats.write_latencies)}"
+            f"\n  RPM lat:       {latency_summary(stats.rpm_latencies)}"
+            f"\n  WPM lat:       {latency_summary(stats.wpm_latencies)}"
+            f"\n  ObjList lat:   {latency_summary(stats.objlist_latencies)}"
+            f"\n{'=' * 70}"
         )
 
-    # Shutdown
-    stop.set()
-    _done, pending = await asyncio.wait(workers, timeout=10.0)
-    for t in pending:
-        t.cancel()
-
-    wall_elapsed = time.monotonic() - wall_start
-    total = stats.total_ok + stats.errors[0]
-    error_rate = stats.errors[0] / total if total else 0.0
-    overall_rps = stats.total_ok / wall_elapsed if wall_elapsed else 0
-
-    all_lats = stats.all_latencies
-    if all_lats:
-        s = sorted(all_lats)
-        p50 = _pct(s, 0.50)
-        p95 = _pct(s, 0.95)
-        p99 = _pct(s, 0.99)
-        mean = statistics.mean(all_lats)
-    else:
-        p50 = p95 = p99 = mean = 0.0
-
-    print(
-        f"\n  Total: {stats.total_ok} ok ({len(stats.read_latencies)} reads, "
-        f"{len(stats.write_latencies)} writes, {len(stats.cov_latencies)} cov subs, "
-        f"{stats.cov_notifications[0]} cov notifs), "
-        f"{stats.errors[0]} errors ({error_rate:.1%}), "
-        f"{wall_elapsed:.1f}s, {overall_rps:.1f} rps"
-    )
-    print(f"  Latency: mean={mean:.1f}ms  p50={p50:.1f}ms  p95={p95:.1f}ms  p99={p99:.1f}ms")
-
-    assert error_rate < 0.05, f"Error rate {error_rate:.1%} exceeds 5%"
-    assert len(stats.read_latencies) > 0, "No successful reads"
-    assert len(stats.write_latencies) > 0, "No successful writes"
-    assert len(stats.cov_latencies) > 0, "No successful COV subscriptions"
+        assert error_rate < 0.005, f"Error rate {error_rate:.2%} exceeds 0.5%"
+        assert len(stats.read_latencies) > 0, "No successful reads"
+        assert len(stats.write_latencies) > 0, "No successful writes"
+        assert len(stats.rpm_latencies) > 0, "No successful RPM reads"
+        assert len(stats.wpm_latencies) > 0, "No successful WPM writes"

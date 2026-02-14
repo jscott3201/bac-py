@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.9] - 2026-02-14
+
+### Added
+
+- **SC stress test scenario** -- New Docker-based sustained WebSocket throughput
+  test (`docker/scenarios/test_sc_stress.py`) with unicast and broadcast workers
+  through an SC hub, measuring latency with echo correlation. New `make
+  docker-test-sc-stress` and `make docker-sc-stress` targets.
+- **Benchmarks guide** -- New `docs/guide/benchmarks.rst` documenting both BIP
+  and SC stress test configurations, server object inventories, workload profiles,
+  latency targets, and tuning guidance.
+
+### Changed
+
+- **DeviceConfig version defaults** (`application.py`): `firmware_revision` and
+  `application_software_version` now default to `bac_py.__version__` instead of
+  a hardcoded `"0.1.0"`. Docker entrypoint and thermostat demo updated to use
+  `bac_py.__version__` instead of hardcoded version strings.
+- **Docker build caching** (`Makefile`): `docker-build` target now uses
+  `--no-cache` to ensure clean builds.
+- **BIP stress test refactored** (`docker/scenarios/test_stress.py`,
+  `docker/entrypoint.py`): Dedicated `stress-server` role with 40 diverse
+  objects (analog, binary, multi-state, schedule, calendar, notification class).
+  Configurable worker pools (readers, writers, RPM, WPM, object-list, COV) with
+  environment variables. Warmup/sustain phase architecture replaces ramp schedule.
+  Shared worker logic extracted to `docker/lib/` modules; `docker/__init__.py`
+  added to enable package imports from test scenarios.
+- **Docker Compose reorganized** (`docker/docker-compose.yml`): Added Scenario 10
+  (SC Stress) with hub, two echo nodes, test container, and stress runner.
+  Stress runner container moved next to its server. Header comment with scenario
+  index and usage guide.
+
+### Documentation
+
+- **Server mode guide expansion** (`docs/guide/server-mode.rst`): Expanded from
+  188 to 954 lines. Added sections for DeviceConfig options (password,
+  broadcast_address, APDU settings), Object Database management (add/remove/query,
+  change callbacks), supported object types (categorized list of 40+ types),
+  commandable objects and priority arrays, COV subscriptions (server side),
+  custom service handlers (signatures, registration, validation example, error
+  responses), event engine (18 algorithms, intrinsic/algorithmic reporting),
+  audit logging (server side), error handling (error table, password validation,
+  DCC states), application lifecycle (context manager, manual, combined
+  client+server), and registered services reference.
+- **Client guide** (`docs/guide/client-guide.rst`): New consolidated client
+  reference page covering API level comparison, capabilities-at-a-glance table
+  with cross-references, and previously undocumented features: file access
+  (AtomicReadFile/AtomicWriteFile with stream and record examples), private
+  transfer (confirmed/unconfirmed vendor-specific), WriteGroup (channel group
+  writes), virtual terminal sessions (VT-Open/Data/Close), list element
+  operations (AddListElement/RemoveListElement), hierarchy traversal
+  (StructuredView walking), and protocol-level API examples.
+- Added `guide/client-guide` and `guide/benchmarks` to User Guide toctree in
+  `docs/index.rst`.
+- Updated `docs/getting-started.rst` with cross-references to client guide and
+  protocol-level API section.
+- Updated `docs/features.rst` with cross-references to client guide, commandable
+  objects, supported object types, and new service documentation. Added SC Stress
+  scenario, updated Docker scenario count from nine to ten, added benchmark
+  cross-references.
+
 ## [1.3.8] - 2026-02-14
 
 ### Fixed

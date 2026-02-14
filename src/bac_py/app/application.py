@@ -112,11 +112,11 @@ class DeviceConfig:
     model_name: str = "bac-py"
     """Device model name string."""
 
-    firmware_revision: str = "0.1.0"
-    """Firmware revision string."""
+    firmware_revision: str = ""
+    """Firmware revision string. Defaults to the bac-py package version."""
 
-    application_software_version: str = "0.1.0"
-    """Application software version string."""
+    application_software_version: str = ""
+    """Application software version string. Defaults to the bac-py package version."""
 
     interface: str = "0.0.0.0"
     """Local IP address to bind to (``"0.0.0.0"`` for all)."""
@@ -152,6 +152,16 @@ class DeviceConfig:
     """Optional password for DeviceCommunicationControl and ReinitializeDevice
     services (1-20 characters, per Clause 16.1.3.1 and 16.4.3.4).
     When set, incoming requests must include a matching password."""
+
+    def __post_init__(self) -> None:
+        """Fill version defaults from the bac-py package version."""
+        if not self.firmware_revision or not self.application_software_version:
+            import bac_py  # lazy to avoid circular import
+
+            if not self.firmware_revision:
+                self.firmware_revision = bac_py.__version__
+            if not self.application_software_version:
+                self.application_software_version = bac_py.__version__
 
 
 @dataclass(frozen=True, slots=True)

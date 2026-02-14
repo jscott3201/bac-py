@@ -67,7 +67,8 @@ handles starting and stopping the underlying BACnet application. It binds a
 UDP socket, assigns your device a BACnet instance number, and is ready to
 communicate.
 
-See :ref:`reading-properties` for more read examples.
+See :ref:`reading-properties` for more read examples, or :doc:`guide/client-guide`
+for the full client capabilities reference.
 
 
 Your First Write
@@ -306,7 +307,8 @@ values. Ideal for scripts, integrations, and most client-side work.
 :class:`~bac_py.app.client.BACnetClient` -- full protocol-level access. Use
 this when you need server handlers, router mode, custom service registration,
 raw encoded bytes, or direct access to the transport and network layers. See
-:ref:`serving-objects` for server-mode examples.
+:ref:`server-mode` for server examples and :ref:`protocol-level-api` for
+client-side protocol-level usage.
 
 The ``Client`` wrapper exposes both levels. All ``BACnetClient`` protocol-level
 methods are available alongside the convenience methods, and the underlying
