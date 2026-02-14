@@ -235,6 +235,118 @@ a Python ``ssl.SSLContext`` from the
 version and verification settings.
 
 
+Generating Test Certificates
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Production deployments use certificates issued by a site-specific BACnet CA
+(often managed by the building's IT department).  For development and testing,
+you can generate a self-signed CA and device certificates using the
+``cryptography`` library that ships with ``bac-py[secure]``.
+
+The test PKI consists of three layers:
+
+1. **CA certificate** -- a self-signed Certificate Authority that signs all
+   device certificates.  Every device loads this CA to verify its peers.
+2. **Hub certificate** -- signed by the CA, presented by the hub during the
+   TLS handshake.
+3. **Node certificate(s)** -- signed by the same CA, presented by each
+   connecting node.  Because TLS is *mutual*, both sides verify each other.
+
+BACnet/SC recommends EC P-256 (``SECP256R1``) keys: they are compact, fast,
+and natively supported by TLS 1.3.
+
+.. code-block:: python
+
+   import datetime, ipaddress
+   from cryptography import x509
+   from cryptography.hazmat.primitives import hashes, serialization
+   from cryptography.hazmat.primitives.asymmetric import ec
+   from cryptography.x509.oid import NameOID
+
+   now = datetime.datetime.now(tz=datetime.UTC)
+   validity = datetime.timedelta(days=365)
+
+   # 1. CA key + self-signed certificate
+   ca_key = ec.generate_private_key(ec.SECP256R1())
+   ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "BACnet Test CA")])
+   ca_cert = (
+       x509.CertificateBuilder()
+       .subject_name(ca_name)
+       .issuer_name(ca_name)
+       .public_key(ca_key.public_key())
+       .serial_number(x509.random_serial_number())
+       .not_valid_before(now)
+       .not_valid_after(now + validity)
+       .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+       .add_extension(
+           x509.KeyUsage(
+               digital_signature=True, key_cert_sign=True, crl_sign=True,
+               content_commitment=False, key_encipherment=False,
+               data_encipherment=False, key_agreement=False,
+               encipher_only=False, decipher_only=False,
+           ),
+           critical=True,
+       )
+       .sign(ca_key, hashes.SHA256())
+   )
+
+   # 2. Device key + certificate signed by the CA
+   device_key = ec.generate_private_key(ec.SECP256R1())
+   device_cert = (
+       x509.CertificateBuilder()
+       .subject_name(x509.Name(
+           [x509.NameAttribute(NameOID.COMMON_NAME, "BACnet SC Hub")]
+       ))
+       .issuer_name(ca_name)
+       .public_key(device_key.public_key())
+       .serial_number(x509.random_serial_number())
+       .not_valid_before(now)
+       .not_valid_after(now + validity)
+       .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+       .add_extension(
+           x509.SubjectAlternativeName([
+               x509.DNSName("localhost"),
+               x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+           ]),
+           critical=False,
+       )
+       .sign(ca_key, hashes.SHA256())
+   )
+
+   # 3. Write PEM files
+   Path("hub.key").write_bytes(device_key.private_bytes(
+       serialization.Encoding.PEM,
+       serialization.PrivateFormat.PKCS8,
+       serialization.NoEncryption(),
+   ))
+   Path("hub.crt").write_bytes(device_cert.public_bytes(serialization.Encoding.PEM))
+   Path("ca.crt").write_bytes(ca_cert.public_bytes(serialization.Encoding.PEM))
+
+Repeat step 2 for each device (node, router, etc.), giving each its own
+key pair and a unique Common Name.
+
+Key points:
+
+- The **SubjectAlternativeName** extension must include the hostname or IP
+  address that peers use to connect.  Use ``x509.DNSName`` for hostnames
+  and ``x509.IPAddress`` for IP addresses -- Python's TLS hostname verifier
+  requires IP addresses to appear as ``iPAddress`` SAN entries, not
+  ``dNSName``.
+- The CA's **BasicConstraints** must set ``ca=True`` and **KeyUsage** must
+  include ``key_cert_sign`` so that device certificates pass chain
+  validation.
+- Device certificates set ``ca=False`` -- they are leaf certificates.
+
+For a complete runnable example that generates a full test PKI (CA + hub +
+two nodes) and verifies mutual TLS end-to-end, see
+``examples/sc_generate_certs.py`` and the :ref:`examples guide
+<examples-secure-connect>`.
+
+For testing without any certificates, set ``allow_plaintext=True`` on
+:class:`~bac_py.transport.sc.tls.SCTLSConfig` and use ``ws://`` URIs.
+This disables all TLS and must never be used in production.
+
+
 Failover: Primary and Failover Hub
 ------------------------------------
 

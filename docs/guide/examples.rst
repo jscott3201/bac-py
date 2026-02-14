@@ -3,7 +3,7 @@
 Example Scripts
 ===============
 
-The ``examples/`` directory contains 20 runnable scripts demonstrating bac-py's
+The ``examples/`` directory contains 21 runnable scripts demonstrating bac-py's
 capabilities. Each script is self-contained and uses the high-level
 :class:`~bac_py.client.Client` API with ``asyncio.run()``.
 
@@ -530,3 +530,62 @@ SC devices -- the router handles all NPDU forwarding in both directions:
    # Start the gateway (pure forwarding, no local application)
    router = NetworkRouter([bip_port, sc_port])
    await router.start()
+
+
+sc_generate_certs.py
+^^^^^^^^^^^^^^^^^^^^
+
+Generate a self-signed test PKI (CA + three device certificates for a hub and
+two nodes) and demonstrate TLS-secured SC communication with mutual
+authentication.  Uses EC P-256 keys (the recommended curve for BACnet/SC) and
+the ``cryptography`` library that ships with ``bac-py[secure]``.  The demo
+starts a hub, connects two nodes via mutual TLS 1.3, and routes a test NPDU
+from node 1 to node 2 through the hub:
+
+.. code-block:: python
+
+   from cryptography import x509
+   from cryptography.hazmat.primitives import hashes, serialization
+   from cryptography.hazmat.primitives.asymmetric import ec
+   from cryptography.x509.oid import NameOID
+
+   # Generate CA key + self-signed certificate
+   ca_key = ec.generate_private_key(ec.SECP256R1())
+   ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "BACnet Test CA")])
+   ca_cert = (
+       x509.CertificateBuilder()
+       .subject_name(ca_name)
+       .issuer_name(ca_name)
+       .public_key(ca_key.public_key())
+       .serial_number(x509.random_serial_number())
+       .not_valid_before(now)
+       .not_valid_after(now + datetime.timedelta(days=365))
+       .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+       .sign(ca_key, hashes.SHA256())
+   )
+
+   # Generate device certificate signed by the CA
+   device_key = ec.generate_private_key(ec.SECP256R1())
+   device_cert = (
+       x509.CertificateBuilder()
+       .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "SC Hub")]))
+       .issuer_name(ca_name)
+       .public_key(device_key.public_key())
+       .serial_number(x509.random_serial_number())
+       .not_valid_before(now)
+       .not_valid_after(now + datetime.timedelta(days=365))
+       .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+       .sign(ca_key, hashes.SHA256())
+   )
+
+   # Wire into SCTLSConfig for mutual TLS
+   hub_tls = SCTLSConfig(
+       private_key_path="hub.key",
+       certificate_path="hub.crt",
+       ca_certificates_path="ca.crt",
+   )
+   node_tls = SCTLSConfig(
+       private_key_path="node1.key",
+       certificate_path="node1.crt",
+       ca_certificates_path="ca.crt",
+   )

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.4] - 2026-02-14
+
+### Added
+
+- **Self-signed certificate generation example** (`examples/sc_generate_certs.py`) --
+  Generates a test PKI (EC P-256 CA + hub and two node device certificates) and
+  demonstrates TLS-secured BACnet/SC communication with mutual authentication by
+  routing an NPDU between two nodes through a hub.  Provides the missing guidance
+  for users who need to test SC transport with real TLS instead of
+  `allow_plaintext=True`.
+- **Certificate generation guide** -- New "Generating Test Certificates" section in
+  the BACnet Secure Connect documentation (`docs/guide/secure-connect.rst`) with
+  step-by-step instructions for creating a self-signed CA and device certificates
+  using EC P-256 and the ``cryptography`` library, including SAN configuration
+  notes for IP address vs DNS hostname verification.
+
 ## [1.3.3] - 2026-02-13
 
 ### Added

@@ -265,6 +265,7 @@ debug.log
 
 # Project-specific
 # Add any project-specific files or directories you want to ignore
+sc_test_certs/
 config/local_config.json
 logs/
 temp/
