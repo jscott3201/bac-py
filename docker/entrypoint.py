@@ -101,6 +101,83 @@ async def run_server() -> None:
     await app.stop()
 
 
+async def run_server_ipv6() -> None:
+    """Run a BACnet/IPv6 server with sample objects."""
+    from bac_py.app.application import BACnetApplication, DeviceConfig
+    from bac_py.app.server import DefaultServerHandlers
+    from bac_py.objects.analog import AnalogInputObject, AnalogOutputObject, AnalogValueObject
+    from bac_py.objects.binary import BinaryInputObject, BinaryValueObject
+    from bac_py.objects.device import DeviceObject
+    from bac_py.types.enums import EngineeringUnits
+
+    instance = int(os.environ.get("DEVICE_INSTANCE", "100"))
+    port = int(os.environ.get("BACNET_PORT", "47808"))
+    interface = os.environ.get("IPV6_INTERFACE", "::")
+    multicast = os.environ.get("IPV6_MULTICAST", "ff02::bac0")
+
+    config = DeviceConfig(
+        instance_number=instance,
+        name=f"Docker-Device-IPv6-{instance}",
+        port=port,
+        ipv6=True,
+        interface=interface,
+        multicast_address=multicast,
+    )
+    app = BACnetApplication(config)
+    await app.start()
+
+    device = DeviceObject(
+        instance,
+        object_name=f"Docker-Device-IPv6-{instance}",
+        vendor_name="bac-py",
+        vendor_identifier=0,
+        model_name="bac-py-docker-ipv6",
+        firmware_revision=bac_py.__version__,
+        application_software_version=bac_py.__version__,
+    )
+    app.object_db.add(device)
+
+    ai = AnalogInputObject(
+        1,
+        object_name="Temperature",
+        present_value=72.5,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+    )
+    ao = AnalogOutputObject(
+        1,
+        object_name="Setpoint-Output",
+        present_value=68.0,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+    )
+    av = AnalogValueObject(
+        1,
+        object_name="Setpoint",
+        present_value=70.0,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+        commandable=True,
+    )
+    bi = BinaryInputObject(1, object_name="Occupancy")
+    bv = BinaryValueObject(1, object_name="Override", commandable=True)
+
+    for obj in (ai, ao, av, bi, bv):
+        app.object_db.add(obj)
+
+    handlers = DefaultServerHandlers(app, app.object_db, device)
+    handlers.register()
+
+    logger.info("IPv6 server running: device %d on port %d iface %s", instance, port, interface)
+    _write_healthy()
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+    logger.info("Shutting down IPv6 server...")
+    await app.stop()
+
+
 async def run_bbmd() -> None:
     """Run a BACnet server with BBMD enabled."""
     from bac_py.app.application import BACnetApplication, DeviceConfig
@@ -720,6 +797,8 @@ def main() -> None:
 
     if role == "server":
         asyncio.run(run_server())
+    elif role == "server-ipv6":
+        asyncio.run(run_server_ipv6())
     elif role == "server-extended":
         asyncio.run(run_server_extended())
     elif role == "stress-server":
@@ -748,9 +827,9 @@ def main() -> None:
         run_demo_client()
     else:
         logger.error(
-            "Unknown ROLE: %r (expected: server, server-extended, stress-server, "
-            "bbmd, router, sc-hub, sc-node, test, stress, sc-stress, "
-            "router-stress, bbmd-stress, thermostat, demo-client)",
+            "Unknown ROLE: %r (expected: server, server-ipv6, server-extended, "
+            "stress-server, bbmd, router, sc-hub, sc-node, test, stress, "
+            "sc-stress, router-stress, bbmd-stress, thermostat, demo-client)",
             role,
         )
         sys.exit(1)

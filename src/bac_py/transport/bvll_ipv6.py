@@ -16,6 +16,7 @@ BIP6_ADDRESS_LENGTH = 18  # 16-byte IPv6 + 2-byte port
 # Which function codes include source VMAC, dest VMAC, and/or originating address.
 _HAS_SOURCE_VMAC = frozenset(
     {
+        Bvlc6Function.BVLC_RESULT,
         Bvlc6Function.ORIGINAL_UNICAST_NPDU,
         Bvlc6Function.ORIGINAL_BROADCAST_NPDU,
         Bvlc6Function.FORWARDED_NPDU,
@@ -24,6 +25,9 @@ _HAS_SOURCE_VMAC = frozenset(
         Bvlc6Function.ADDRESS_RESOLUTION_ACK,
         Bvlc6Function.VIRTUAL_ADDRESS_RESOLUTION,
         Bvlc6Function.VIRTUAL_ADDRESS_RESOLUTION_ACK,
+        Bvlc6Function.REGISTER_FOREIGN_DEVICE,
+        Bvlc6Function.DELETE_FOREIGN_DEVICE_TABLE_ENTRY,
+        Bvlc6Function.DISTRIBUTE_BROADCAST_NPDU,
     }
 )
 

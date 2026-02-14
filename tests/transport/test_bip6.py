@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from bac_py.network.address import BIP6Address
+from bac_py.transport.bbmd6 import BDT6Entry
 from bac_py.transport.bip6 import (
     MULTICAST_LINK_LOCAL,
     MULTICAST_SITE_LOCAL,
@@ -459,13 +460,16 @@ class TestOnDatagramReceived:
     def test_register_foreign_device_nak(self):
         transport = self._make_transport()
 
-        bvll = encode_bvll6(Bvlc6Function.REGISTER_FOREIGN_DEVICE, b"\x00\x3c")
+        bvll = encode_bvll6(
+            Bvlc6Function.REGISTER_FOREIGN_DEVICE, b"\x00\x3c", source_vmac=b"\x11\x22\x33"
+        )
         transport._on_datagram_received(bvll, ("::1", 47809, 0, 0))
 
         transport._transport.sendto.assert_called_once()
         sent_data, _ = transport._transport.sendto.call_args[0]
         decoded = decode_bvll6(sent_data)
         assert decoded.function == Bvlc6Function.BVLC_RESULT
+        assert decoded.source_vmac == b"\xaa\xbb\xcc"
 
 
 class TestAddressResolution:
@@ -769,25 +773,35 @@ class TestNakResponses:
 
     def test_delete_foreign_device_nak(self):
         transport = self._make_transport()
-        bvll = encode_bvll6(Bvlc6Function.DELETE_FOREIGN_DEVICE_TABLE_ENTRY, b"\x00")
+        bvll = encode_bvll6(
+            Bvlc6Function.DELETE_FOREIGN_DEVICE_TABLE_ENTRY,
+            b"\x00",
+            source_vmac=b"\x11\x22\x33",
+        )
         transport._on_datagram_received(bvll, ("::1", 47809, 0, 0))
 
         transport._transport.sendto.assert_called_once()
         sent_data, _sent_addr = transport._transport.sendto.call_args[0]
         decoded = decode_bvll6(sent_data)
         assert decoded.function == Bvlc6Function.BVLC_RESULT
+        assert decoded.source_vmac == b"\xaa\xbb\xcc"
         result_code = int.from_bytes(decoded.data[:2], "big")
         assert result_code == Bvlc6ResultCode.DELETE_FOREIGN_DEVICE_TABLE_ENTRY_NAK
 
     def test_distribute_broadcast_nak(self):
         transport = self._make_transport()
-        bvll = encode_bvll6(Bvlc6Function.DISTRIBUTE_BROADCAST_NPDU, b"\x01\x02")
+        bvll = encode_bvll6(
+            Bvlc6Function.DISTRIBUTE_BROADCAST_NPDU,
+            b"\x01\x02",
+            source_vmac=b"\x11\x22\x33",
+        )
         transport._on_datagram_received(bvll, ("::1", 47809, 0, 0))
 
         transport._transport.sendto.assert_called_once()
         sent_data, _sent_addr = transport._transport.sendto.call_args[0]
         decoded = decode_bvll6(sent_data)
         assert decoded.function == Bvlc6Function.BVLC_RESULT
+        assert decoded.source_vmac == b"\xaa\xbb\xcc"
         result_code = int.from_bytes(decoded.data[:2], "big")
         assert result_code == Bvlc6ResultCode.DISTRIBUTE_BROADCAST_TO_NETWORK_NAK
 
@@ -877,7 +891,7 @@ class TestResolvePendingBvlc:
         future = asyncio.Future()
         transport._pending_bvlc[key] = future
 
-        bvll = encode_bvll6(Bvlc6Function.BVLC_RESULT, b"\x00\x00")
+        bvll = encode_bvll6(Bvlc6Function.BVLC_RESULT, b"\x00\x00", source_vmac=b"\x11\x22\x33")
         transport._on_datagram_received(bvll, ("::1", 47809, 0, 0))
 
         assert future.done()
@@ -929,3 +943,265 @@ class TestVMACCacheCleanupOnStop:
 
         await transport.stop()
         assert len(transport._vmac_cache._entries) == 0
+
+
+# ------------------------------------------------------------------
+# BBMD6 / FD6 integration tests
+# ------------------------------------------------------------------
+
+
+class TestBBMD6Integration:
+    """Tests for BBMD6 attachment and integration with BIP6Transport."""
+
+    def _make_transport(self):
+        transport = BIP6Transport(vmac=b"\xaa\xbb\xcc")
+        transport._vmac = b"\xaa\xbb\xcc"
+        transport._local_address = BIP6Address(host="fd00::1", port=47808)
+        transport._transport = MagicMock()
+        return transport
+
+    def test_bbmd_initially_none(self):
+        transport = BIP6Transport()
+        assert transport.bbmd is None
+
+    def test_foreign_device_initially_none(self):
+        transport = BIP6Transport()
+        assert transport.foreign_device is None
+
+    async def test_attach_bbmd(self):
+        transport = self._make_transport()
+        bbmd = await transport.attach_bbmd()
+        assert transport.bbmd is bbmd
+        assert bbmd is not None
+        await transport.stop()
+
+    async def test_attach_bbmd_with_bdt(self):
+        transport = self._make_transport()
+        bdt = [
+            BDT6Entry(address=BIP6Address(host="fd00::1", port=47808)),
+            BDT6Entry(address=BIP6Address(host="fd00::2", port=47808)),
+        ]
+        bbmd = await transport.attach_bbmd(bdt_entries=bdt)
+        assert len(bbmd.bdt) == 2
+        await transport.stop()
+
+    async def test_attach_bbmd_not_started_raises(self):
+        transport = BIP6Transport()
+        with pytest.raises(RuntimeError, match="Transport not started"):
+            await transport.attach_bbmd()
+
+    async def test_attach_bbmd_already_attached_raises(self):
+        transport = self._make_transport()
+        await transport.attach_bbmd()
+        with pytest.raises(RuntimeError, match="BBMD already attached"):
+            await transport.attach_bbmd()
+        await transport.stop()
+
+    async def test_stop_clears_bbmd(self):
+        transport = self._make_transport()
+        await transport.attach_bbmd()
+        assert transport.bbmd is not None
+        await transport.stop()
+        assert transport.bbmd is None
+
+    def test_bbmd_intercepts_register_foreign_device(self):
+        """With BBMD attached, Register-Foreign-Device is handled by BBMD, not NAK'd."""
+        transport = self._make_transport()
+        # Manually set up BBMD without async start (it just needs a cleanup task)
+        from bac_py.transport.bbmd6 import BBMD6Manager
+
+        transport._bbmd = BBMD6Manager(
+            local_address=transport._local_address,
+            local_vmac=transport._vmac,
+            send_callback=transport._send_raw,
+            local_broadcast_callback=transport._bbmd_local_deliver,
+            multicast_send_callback=transport._send_multicast,
+        )
+
+        fd_addr = ("fd00::10", 47808, 0, 0)
+        fd_vmac = b"\x11\x22\x33"
+        bvll = encode_bvll6(
+            Bvlc6Function.REGISTER_FOREIGN_DEVICE,
+            (60).to_bytes(2, "big"),
+            source_vmac=fd_vmac,
+        )
+        transport._on_datagram_received(bvll, fd_addr)
+
+        # BBMD should have responded with BVLC-Result (success)
+        assert transport._transport.sendto.called
+        sent_data, _ = transport._transport.sendto.call_args[0]
+        decoded = decode_bvll6(sent_data)
+        assert decoded.function == Bvlc6Function.BVLC_RESULT
+        result_code = int.from_bytes(decoded.data[:2], "big")
+        assert result_code == Bvlc6ResultCode.SUCCESSFUL_COMPLETION
+
+    def test_bbmd_broadcast_forwarding_on_send(self):
+        """send_broadcast() with BBMD attached should trigger BBMD forwarding."""
+        transport = self._make_transport()
+        from bac_py.transport.bbmd6 import BBMD6Manager
+
+        transport._bbmd = BBMD6Manager(
+            local_address=transport._local_address,
+            local_vmac=transport._vmac,
+            send_callback=transport._send_raw,
+            local_broadcast_callback=transport._bbmd_local_deliver,
+            multicast_send_callback=transport._send_multicast,
+        )
+        peer = BIP6Address(host="fd00::2", port=47808)
+        transport._bbmd.set_bdt(
+            [
+                BDT6Entry(address=transport._local_address),
+                BDT6Entry(address=peer),
+            ]
+        )
+
+        transport.send_broadcast(b"\x01\x00\x10")
+
+        # Should have sent: multicast broadcast + forwarded to peer
+        assert transport._transport.sendto.call_count >= 2
+
+    def test_forwarded_npdu_with_bbmd_skips_double_delivery(self):
+        """Forwarded-NPDU with BBMD attached should not double-deliver."""
+        transport = self._make_transport()
+        from bac_py.transport.bbmd6 import BBMD6Manager
+
+        transport._bbmd = BBMD6Manager(
+            local_address=transport._local_address,
+            local_vmac=transport._vmac,
+            send_callback=transport._send_raw,
+            local_broadcast_callback=transport._bbmd_local_deliver,
+            multicast_send_callback=transport._send_multicast,
+        )
+
+        received = []
+        transport.on_receive(lambda npdu, mac: received.append((npdu, mac)))
+
+        orig = BIP6Address(host="fd00::20", port=47808)
+        bvll = encode_bvll6(
+            Bvlc6Function.FORWARDED_NPDU,
+            b"\x01\x00",
+            source_vmac=b"\x44\x55\x66",
+            originating_address=orig,
+        )
+        transport._on_datagram_received(bvll, ("fd00::5", 47808, 0, 0))
+
+        # BBMD delivers via local_broadcast_callback, then the receive path
+        # skips Forwarded-NPDU to prevent double delivery. Should get exactly 1.
+        assert len(received) == 1
+
+
+class TestFD6Integration:
+    """Tests for ForeignDevice6Manager attachment and integration."""
+
+    def _make_transport(self):
+        transport = BIP6Transport(vmac=b"\xaa\xbb\xcc")
+        transport._vmac = b"\xaa\xbb\xcc"
+        transport._local_address = BIP6Address(host="fd00::50", port=47808)
+        transport._transport = MagicMock()
+        return transport
+
+    async def test_attach_foreign_device(self):
+        transport = self._make_transport()
+        bbmd_addr = BIP6Address(host="fd00::1", port=47808)
+        fd = await transport.attach_foreign_device(bbmd_addr, ttl=60)
+        assert transport.foreign_device is fd
+        assert fd is not None
+        await transport.stop()
+
+    async def test_attach_foreign_device_not_started_raises(self):
+        transport = BIP6Transport()
+        bbmd_addr = BIP6Address(host="fd00::1", port=47808)
+        with pytest.raises(RuntimeError, match="Transport not started"):
+            await transport.attach_foreign_device(bbmd_addr, ttl=60)
+
+    async def test_attach_foreign_device_already_attached_raises(self):
+        transport = self._make_transport()
+        bbmd_addr = BIP6Address(host="fd00::1", port=47808)
+        await transport.attach_foreign_device(bbmd_addr, ttl=60)
+        with pytest.raises(RuntimeError, match="Foreign device manager already attached"):
+            await transport.attach_foreign_device(bbmd_addr, ttl=60)
+        await transport.stop()
+
+    async def test_stop_clears_foreign_device(self):
+        transport = self._make_transport()
+        bbmd_addr = BIP6Address(host="fd00::1", port=47808)
+        await transport.attach_foreign_device(bbmd_addr, ttl=60)
+        assert transport.foreign_device is not None
+        await transport.stop()
+        assert transport.foreign_device is None
+
+    def test_send_broadcast_uses_distribute_when_fd_registered(self):
+        """send_broadcast() with registered FD uses Distribute-Broadcast-NPDU."""
+        transport = self._make_transport()
+        from bac_py.transport.foreign_device6 import ForeignDevice6Manager
+
+        bbmd_addr = BIP6Address(host="fd00::1", port=47808)
+        transport._foreign_device = ForeignDevice6Manager(
+            bbmd_address=bbmd_addr,
+            ttl=60,
+            send_callback=transport._send_raw,
+            local_vmac=transport._vmac,
+            local_address=transport._local_address,
+        )
+        # Simulate successful registration
+        ok = Bvlc6ResultCode.SUCCESSFUL_COMPLETION.to_bytes(2, "big")
+        transport._foreign_device.handle_bvlc_result(ok)
+
+        transport.send_broadcast(b"\x01\x00\x10")
+
+        # Should send Distribute-Broadcast-NPDU to BBMD
+        assert transport._transport.sendto.called
+        sent_data, sent_addr = transport._transport.sendto.call_args[0]
+        assert sent_addr == (bbmd_addr.host, bbmd_addr.port)
+        decoded = decode_bvll6(sent_data)
+        assert decoded.function == Bvlc6Function.DISTRIBUTE_BROADCAST_NPDU
+
+    def test_bvlc_result_routed_to_fd_manager(self):
+        """BVLC-Result from BBMD address is routed to ForeignDevice6Manager."""
+        transport = self._make_transport()
+        from bac_py.transport.foreign_device6 import ForeignDevice6Manager
+
+        bbmd_addr = BIP6Address(host="fd00::1", port=47808)
+        transport._foreign_device = ForeignDevice6Manager(
+            bbmd_address=bbmd_addr,
+            ttl=60,
+            send_callback=transport._send_raw,
+            local_vmac=transport._vmac,
+            local_address=transport._local_address,
+        )
+
+        # Simulate BVLC-Result from the BBMD
+        result_payload = Bvlc6ResultCode.SUCCESSFUL_COMPLETION.to_bytes(2, "big")
+        bvll = encode_bvll6(
+            Bvlc6Function.BVLC_RESULT,
+            result_payload,
+            source_vmac=b"\x11\x22\x33",
+        )
+        transport._on_datagram_received(bvll, ("fd00::1", 47808, 0, 0))
+
+        assert transport._foreign_device.is_registered is True
+
+    def test_bvlc_result_not_routed_from_wrong_address(self):
+        """BVLC-Result from non-BBMD address is not routed to FD manager."""
+        transport = self._make_transport()
+        from bac_py.transport.foreign_device6 import ForeignDevice6Manager
+
+        bbmd_addr = BIP6Address(host="fd00::1", port=47808)
+        transport._foreign_device = ForeignDevice6Manager(
+            bbmd_address=bbmd_addr,
+            ttl=60,
+            send_callback=transport._send_raw,
+            local_vmac=transport._vmac,
+            local_address=transport._local_address,
+        )
+
+        # BVLC-Result from a different address
+        result_payload = Bvlc6ResultCode.SUCCESSFUL_COMPLETION.to_bytes(2, "big")
+        bvll = encode_bvll6(
+            Bvlc6Function.BVLC_RESULT,
+            result_payload,
+            source_vmac=b"\x11\x22\x33",
+        )
+        transport._on_datagram_received(bvll, ("fd00::99", 47808, 0, 0))
+
+        assert transport._foreign_device.is_registered is False

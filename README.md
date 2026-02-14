@@ -26,7 +26,7 @@ async with Client(instance_number=999) as client:
 
 | Category | Highlights |
 |----------|-----------|
-| **Transports** | BACnet/IP (Annex J), BACnet/IPv6 (Annex U), BACnet Ethernet (Clause 7), BACnet Secure Connect over WebSocket/TLS (Annex AB) |
+| **Transports** | BACnet/IP (Annex J), BACnet/IPv6 with BBMD and foreign device (Annex U), BACnet Ethernet (Clause 7), BACnet Secure Connect over WebSocket/TLS (Annex AB) |
 | **Client & Server** | Full-duplex -- serve objects and issue requests from the same application |
 | **Object Model** | 40+ object types with property definitions, priority arrays, and commandable outputs |
 | **Services** | All confirmed and unconfirmed services including COV, alarms, file access, audit logging, and private transfer |
@@ -372,6 +372,7 @@ make docker-test-bbmd-stress     # BBMD stress: foreign device throughput (60s)
 make docker-test-device-mgmt     # Device management: DCC, time sync, text message
 make docker-test-cov-advanced    # COV: concurrent subscriptions, property-level COV
 make docker-test-events          # Events: alarm reporting, acknowledgment, queries
+make docker-test-ipv6            # IPv6: BACnet/IPv6 client/server (Annex U)
 make docker-stress               # BIP stress runner (JSON report to stdout)
 make docker-sc-stress            # SC stress runner (JSON report to stdout)
 make docker-router-stress        # Router stress runner (JSON report to stdout)

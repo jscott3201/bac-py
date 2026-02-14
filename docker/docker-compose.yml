@@ -15,6 +15,7 @@
 #  10. SC Stress           (profile: sc-stress)        — SC throughput/latency
 #  11. Router Stress       (profile: router-stress)    — cross-network routing
 #  12. BBMD Stress         (profile: bbmd-stress)      — foreign device forwarding
+#  13. IPv6 Client/Server  (profile: ipv6)             — BACnet/IPv6 (Annex U)
 #
 # Runners (JSON report to stdout):
 #   - BIP stress runner    (profile: stress-runner)
@@ -46,6 +47,12 @@ networks:
     ipam:
       config:
         - subnet: 172.30.3.0/24
+  bacnet-ipv6:
+    driver: bridge
+    enable_ipv6: true
+    ipam:
+      config:
+        - subnet: fd00:bac:1::/64
 
 # ---------------------------------------------------------------------------
 # Shared anchors
@@ -730,3 +737,37 @@ services:
       server-bbmd-stress:
         condition: service_healthy
     profiles: ["bbmd-stress-runner"]
+
+  # ===========================================================================
+  # Scenario 13: IPv6 Client/Server (BACnet/IPv6 Annex U)
+  # ===========================================================================
+
+  server-ipv6:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-server-ipv6
+    environment:
+      ROLE: server-ipv6
+      DEVICE_INSTANCE: "700"
+      BACNET_PORT: "47808"
+      IPV6_INTERFACE: "::"
+      IPV6_MULTICAST: "ff02::bac0"
+    networks:
+      bacnet-ipv6:
+        ipv6_address: fd00:bac:1::10
+    profiles: ["ipv6", "all"]
+
+  test-ipv6:
+    <<: *build
+    container_name: bacnet-test-ipv6
+    environment:
+      ROLE: test
+      TEST_FILE: test_ipv6_client_server.py
+      SERVER_ADDRESS: "fd00:bac:1::10"
+      SERVER_INSTANCE: "700"
+    networks:
+      bacnet-ipv6:
+        ipv6_address: fd00:bac:1::20
+    depends_on:
+      server-ipv6:
+        condition: service_healthy
+    profiles: ["ipv6", "all"]

@@ -1,9 +1,9 @@
 """Network layer manager wiring transport to application per Clause 6.
 
 Provides :class:`NetworkLayer`, the non-router network layer manager that
-bridges a single :class:`~bac_py.transport.bip.BIPTransport` with the
-application layer by handling NPDU wrapping/unwrapping, router cache
-management, and network-number learning.
+bridges a single transport (any :class:`~bac_py.transport.port.TransportPort`
+implementation) with the application layer by handling NPDU
+wrapping/unwrapping, router cache management, and network-number learning.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from bac_py.network.address import BACnetAddress, BIPAddress
+from bac_py.network.address import BACnetAddress
 from bac_py.network.messages import (
     IAmRouterToNetwork,
     NetworkNumberIs,
@@ -27,7 +27,7 @@ from bac_py.types.enums import NetworkMessageType, NetworkPriority
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from bac_py.transport.bip import BIPTransport
+    from bac_py.transport.port import TransportPort
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,9 @@ _DEFAULT_CACHE_TTL: float = 300.0
 class NetworkLayer:
     """Network layer manager (non-router mode).
 
-    Bridges the transport layer (BIPTransport) and the application layer.
+    Bridges the transport layer and the application layer.  Accepts any
+    transport implementing :class:`~bac_py.transport.port.TransportPort`
+    (BACnet/IP, BACnet/IPv6, Ethernet, etc.).
     Handles NPDU wrapping/unwrapping for application-layer APDUs.
 
     Supports optional network number assignment and maintains a router
@@ -67,7 +69,7 @@ class NetworkLayer:
 
     def __init__(
         self,
-        transport: BIPTransport,
+        transport: TransportPort,
         network_number: int | None = None,
         *,
         network_number_configured: bool = False,
@@ -75,7 +77,9 @@ class NetworkLayer:
     ) -> None:
         """Initialise the network layer.
 
-        :param transport: The BIP transport used for sending and receiving.
+        :param transport: The transport used for sending and receiving.
+            Must satisfy the :class:`~bac_py.transport.port.TransportPort`
+            protocol.
         :param network_number: Local network number, or ``None`` if unknown.
         :param network_number_configured: ``True`` if the network number was
             explicitly configured (prevents learning via
@@ -201,9 +205,14 @@ class NetworkLayer:
             self._send_remote(npdu_bytes, destination)
 
     @property
-    def local_address(self) -> BIPAddress:
-        """The local address of the underlying transport."""
-        return self._transport.local_address
+    def local_address(self) -> object:
+        """The local address of the underlying transport.
+
+        Returns the transport-specific address type (e.g.
+        :class:`~bac_py.network.address.BIPAddress` for BACnet/IP,
+        :class:`~bac_py.network.address.BIP6Address` for BACnet/IPv6).
+        """
+        return self._transport.local_address  # type: ignore[attr-defined]
 
     def get_router_for_network(self, dnet: int) -> bytes | None:
         """Look up the cached router MAC for a remote network.

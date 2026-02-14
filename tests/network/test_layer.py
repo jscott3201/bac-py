@@ -1290,3 +1290,111 @@ class TestSendRemoteDefensiveCheck:
 
         with pytest.raises(ValueError, match="Cannot send to remote destination"):
             layer._send_remote(b"\x01\x00\x10\x08", dest)
+
+
+# --------------------------------------------------------------------------
+# NetworkLayer -- BIP6 (3-byte VMAC) transport compatibility
+# --------------------------------------------------------------------------
+
+
+class FakeBIP6Transport:
+    """Minimal fake BACnet/IPv6 transport for testing NetworkLayer."""
+
+    def __init__(self, vmac: bytes = b"\xaa\xbb\xcc"):
+        self.sent_unicast: list[tuple[bytes, bytes]] = []
+        self.sent_broadcast: list[bytes] = []
+        self._receive_callback = None
+        self._vmac = vmac
+
+    def on_receive(self, callback):
+        self._receive_callback = callback
+
+    def send_unicast(self, data: bytes, dest: bytes):
+        self.sent_unicast.append((data, dest))
+
+    def send_broadcast(self, data: bytes):
+        self.sent_broadcast.append(data)
+
+    @property
+    def local_mac(self) -> bytes:
+        return self._vmac
+
+    @property
+    def max_npdu_length(self) -> int:
+        return 1497
+
+    def inject_receive(self, data: bytes, source: bytes):
+        if self._receive_callback:
+            self._receive_callback(data, source)
+
+
+class TestNetworkLayerBIP6:
+    """Verify NetworkLayer works with 3-byte VMAC transports (BACnet/IPv6)."""
+
+    def test_send_unicast_with_3byte_vmac(self):
+        """Send to a local address with a 3-byte MAC (VMAC)."""
+        transport = FakeBIP6Transport()
+        layer = NetworkLayer(transport)
+        dest = BACnetAddress(mac_address=b"\x11\x22\x33")
+        apdu = b"\x10\x08"
+        layer.send(apdu, dest, expecting_reply=True)
+        assert len(transport.sent_unicast) == 1
+        npdu_bytes, bip_dest = transport.sent_unicast[0]
+        assert bip_dest == b"\x11\x22\x33"
+        assert npdu_bytes[0] == 0x01  # NPDU version
+        assert apdu in npdu_bytes
+
+    def test_send_broadcast_with_bip6(self):
+        """Broadcast via BIP6 transport."""
+        transport = FakeBIP6Transport()
+        layer = NetworkLayer(transport)
+        dest = BACnetAddress(network=0xFFFF)  # global broadcast
+        layer.send(b"\x10\x08", dest, expecting_reply=False)
+        assert len(transport.sent_broadcast) == 1
+        assert len(transport.sent_unicast) == 0
+
+    def test_receive_with_3byte_vmac(self):
+        """Receive APDU from 3-byte VMAC source."""
+        transport = FakeBIP6Transport()
+        layer = NetworkLayer(transport)
+        received = []
+        layer.on_receive(lambda data, source: received.append((data, source)))
+
+        apdu_payload = b"\x10\x08"
+        npdu = b"\x01\x00" + apdu_payload
+        source_vmac = b"\x11\x22\x33"
+        transport.inject_receive(npdu, source_vmac)
+
+        assert len(received) == 1
+        data, src = received[0]
+        assert data == apdu_payload
+        assert isinstance(src, BACnetAddress)
+        assert src.mac_address == source_vmac
+
+    def test_router_cache_with_3byte_vmac(self):
+        """Router cache works with 3-byte VMAC router addresses."""
+        transport = FakeBIP6Transport()
+        layer = NetworkLayer(transport)
+
+        router_vmac = b"\xdd\xee\xff"
+        data = _build_i_am_router_npdu(networks=(42,))
+        transport.inject_receive(data, router_vmac)
+
+        assert layer.get_router_for_network(42) == router_vmac
+
+    def test_remote_send_via_cached_3byte_router(self):
+        """Remote send via cached 3-byte VMAC router."""
+        transport = FakeBIP6Transport()
+        layer = NetworkLayer(transport)
+
+        router_vmac = b"\xdd\xee\xff"
+        data = _build_i_am_router_npdu(networks=(42,))
+        transport.inject_receive(data, router_vmac)
+        transport.sent_unicast.clear()
+
+        dest = BACnetAddress(network=42, mac_address=b"\x01")
+        layer.send(b"\x10\x08", dest, expecting_reply=True)
+
+        assert len(transport.sent_unicast) == 1
+        _, bip_dest = transport.sent_unicast[0]
+        assert bip_dest == router_vmac

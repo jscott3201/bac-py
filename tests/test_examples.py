@@ -193,4 +193,4 @@ class TestExampleCompleteness:
         )
 
     def test_example_count(self) -> None:
-        assert len(ALL_EXAMPLES) >= 21, f"Expected at least 21 examples, found {len(ALL_EXAMPLES)}"
+        assert len(ALL_EXAMPLES) >= 22, f"Expected at least 22 examples, found {len(ALL_EXAMPLES)}"

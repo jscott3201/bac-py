@@ -2021,7 +2021,7 @@ class BACnetClient:
         if transport is None:
             msg = "Transport not available (application not started or in router mode)"
             raise RuntimeError(msg)
-        return transport
+        return transport  # type: ignore[return-value]
 
     async def read_bdt(
         self,

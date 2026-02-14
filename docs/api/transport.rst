@@ -40,6 +40,18 @@ BACnet/IPv6 Transport
 .. automodule:: bac_py.transport.bip6
    :members:
 
+BACnet/IPv6 BBMD
+-----------------
+
+.. automodule:: bac_py.transport.bbmd6
+   :members:
+
+BACnet/IPv6 Foreign Device
+---------------------------
+
+.. automodule:: bac_py.transport.foreign_device6
+   :members:
+
 BACnet Ethernet
 ----------------
 

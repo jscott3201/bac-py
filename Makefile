@@ -4,6 +4,7 @@
        docker-test-events docker-test-sc docker-test-sc-stress docker-sc-stress \
        docker-test-router-stress docker-router-stress \
        docker-test-bbmd-stress docker-bbmd-stress \
+       docker-test-ipv6 \
        docker-demo docker-demo-auto docker-clean
 
 lint:
@@ -79,6 +80,10 @@ docker-test-sc-stress: docker-build
 	$(COMPOSE) --profile sc-stress up --abort-on-container-exit --exit-code-from test-sc-stress
 	$(COMPOSE) --profile sc-stress down -v
 
+docker-test-ipv6: docker-build
+	$(COMPOSE) --profile ipv6 up --abort-on-container-exit --exit-code-from test-ipv6
+	$(COMPOSE) --profile ipv6 down -v
+
 docker-test: docker-build
 	$(MAKE) docker-test-client
 	$(MAKE) docker-test-bbmd
@@ -88,6 +93,7 @@ docker-test: docker-build
 	$(MAKE) docker-test-cov-advanced
 	$(MAKE) docker-test-events
 	$(MAKE) docker-test-sc
+	$(MAKE) docker-test-ipv6
 
 docker-stress: docker-build
 	$(COMPOSE) --profile stress-runner up --abort-on-container-exit --exit-code-from stress-runner

@@ -12,7 +12,9 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from bac_py.network.address import BIP6Address
+from bac_py.transport.bbmd6 import BBMD6Manager, BDT6Entry
 from bac_py.transport.bvll_ipv6 import decode_bvll6, encode_bvll6
+from bac_py.transport.foreign_device6 import ForeignDevice6Manager
 from bac_py.types.enums import Bvlc6Function, Bvlc6ResultCode
 
 if TYPE_CHECKING:
@@ -137,6 +139,8 @@ class BIP6Transport:
         self._local_address: BIP6Address | None = None
         self._pending_resolutions: dict[bytes, list[_PendingResolution]] = {}
         self._pending_bvlc: dict[tuple[Bvlc6Function, BIP6Address], asyncio.Future[bytes]] = {}
+        self._bbmd: BBMD6Manager | None = None
+        self._foreign_device: ForeignDevice6Manager | None = None
 
     async def start(self) -> None:
         """Bind UDP6 socket, generate VMAC, and join multicast group."""
@@ -188,7 +192,13 @@ class BIP6Transport:
         )
 
     async def stop(self) -> None:
-        """Leave multicast group and close UDP socket."""
+        """Stop BBMD/FD managers, leave multicast group, and close UDP socket."""
+        if self._foreign_device is not None:
+            await self._foreign_device.stop()
+            self._foreign_device = None
+        if self._bbmd is not None:
+            await self._bbmd.stop()
+            self._bbmd = None
         if self._transport is not None:
             # Try to leave multicast group
             try:
@@ -260,11 +270,20 @@ class BIP6Transport:
     def send_broadcast(self, npdu: bytes) -> None:
         """Send a local broadcast (Original-Broadcast-NPDU) to the multicast group.
 
+        If registered as a foreign device, uses Distribute-Broadcast-NPDU
+        instead per Annex U.  If a BBMD is attached, also forwards to BDT
+        peers and registered foreign devices.
+
         :param npdu: NPDU bytes to broadcast.
         """
         if self._transport is None:
             msg = "Transport not started"
             raise RuntimeError(msg)
+
+        # Foreign devices must use Distribute-Broadcast-NPDU
+        if self._foreign_device is not None and self._foreign_device.is_registered:
+            self._foreign_device.send_distribute_broadcast(npdu)
+            return
 
         bvll = encode_bvll6(
             Bvlc6Function.ORIGINAL_BROADCAST_NPDU,
@@ -278,6 +297,15 @@ class BIP6Transport:
             self._port,
         )
         self._transport.sendto(bvll, (self._multicast_address, self._port))
+
+        # If BBMD attached, also forward to peers and foreign devices
+        if self._bbmd is not None and self._local_address is not None:
+            self._bbmd.handle_bvlc(
+                Bvlc6Function.ORIGINAL_BROADCAST_NPDU,
+                npdu,
+                self._local_address,
+                source_vmac=self._vmac,
+            )
 
     @property
     def local_address(self) -> BIP6Address:
@@ -304,6 +332,112 @@ class BIP6Transport:
     def vmac_cache(self) -> VMACCache:
         """The VMAC resolution cache (for diagnostics)."""
         return self._vmac_cache
+
+    @property
+    def bbmd(self) -> BBMD6Manager | None:
+        """The attached BBMD6 manager, or ``None`` if not configured."""
+        return self._bbmd
+
+    async def attach_bbmd(self, bdt_entries: list[BDT6Entry] | None = None) -> BBMD6Manager:
+        """Attach an IPv6 BBMD manager to this transport.
+
+        Creates and starts a :class:`BBMD6Manager` integrated with this
+        transport.  The BBMD intercepts incoming BVLC6 messages before
+        they reach the normal receive path, and outgoing broadcasts are
+        also forwarded to BDT peers and foreign devices.
+
+        :param bdt_entries: Optional initial BDT entries.
+        :returns: The attached :class:`BBMD6Manager` instance.
+        :raises RuntimeError: If transport not started or BBMD already attached.
+        """
+        if self._transport is None:
+            msg = "Transport not started"
+            raise RuntimeError(msg)
+        if self._bbmd is not None:
+            msg = "BBMD already attached"
+            raise RuntimeError(msg)
+
+        self._bbmd = BBMD6Manager(
+            local_address=self.local_address,
+            local_vmac=self._vmac,
+            send_callback=self._send_raw,
+            local_broadcast_callback=self._bbmd_local_deliver,
+            multicast_send_callback=self._send_multicast,
+        )
+        if bdt_entries:
+            self._bbmd.set_bdt(bdt_entries)
+        await self._bbmd.start()
+        logger.info(
+            "BBMD6 attached to transport [%s]:%d",
+            self.local_address.host,
+            self.local_address.port,
+        )
+        return self._bbmd
+
+    @property
+    def foreign_device(self) -> ForeignDevice6Manager | None:
+        """The attached foreign device manager, or ``None``."""
+        return self._foreign_device
+
+    async def attach_foreign_device(
+        self,
+        bbmd_address: BIP6Address,
+        ttl: int,
+    ) -> ForeignDevice6Manager:
+        """Attach an IPv6 foreign device manager to this transport.
+
+        Creates and starts a :class:`ForeignDevice6Manager` that will
+        register with the specified BBMD and periodically re-register.
+
+        :param bbmd_address: Address of the BBMD to register with.
+        :param ttl: Time-to-Live for the registration in seconds.
+        :returns: The attached :class:`ForeignDevice6Manager` instance.
+        :raises RuntimeError: If transport not started or FD already attached.
+        """
+        if self._transport is None:
+            msg = "Transport not started"
+            raise RuntimeError(msg)
+        if self._foreign_device is not None:
+            msg = "Foreign device manager already attached"
+            raise RuntimeError(msg)
+
+        self._foreign_device = ForeignDevice6Manager(
+            bbmd_address=bbmd_address,
+            ttl=ttl,
+            send_callback=self._send_raw,
+            local_vmac=self._vmac,
+            local_address=self.local_address,
+        )
+        await self._foreign_device.start()
+        logger.info(
+            "IPv6 foreign device manager attached, registering with BBMD [%s]:%d",
+            bbmd_address.host,
+            bbmd_address.port,
+        )
+        return self._foreign_device
+
+    # ------------------------------------------------------------------
+    # BBMD / foreign device integration helpers
+    # ------------------------------------------------------------------
+
+    def _send_raw(self, data: bytes, destination: BIP6Address) -> None:
+        """Send raw BVLL6 data to a destination (callback for BBMD6/FD6)."""
+        if self._transport is not None:
+            self._transport.sendto(data, (destination.host, destination.port))
+
+    def _send_multicast(self, data: bytes) -> None:
+        """Send raw BVLL6 data to the multicast group (callback for BBMD6)."""
+        if self._transport is not None:
+            self._transport.sendto(data, (self._multicast_address, self._port))
+
+    def _bbmd_local_deliver(self, npdu: bytes, source_vmac: bytes) -> None:
+        """Deliver an NPDU to the local receive callback (BBMD6 callback).
+
+        Called by :class:`BBMD6Manager` when a Forwarded-NPDU or
+        Distribute-Broadcast-NPDU needs to be delivered locally.
+        """
+        if self._receive_callback is not None:
+            self._receive_callback(npdu, source_vmac)
 
     # ------------------------------------------------------------------
     # Address resolution
@@ -429,6 +563,27 @@ class BIP6Transport:
         if msg.source_vmac:
             self._vmac_cache.put(msg.source_vmac, sender)
 
+        # --- BBMD6 intercept ---
+        if self._bbmd is not None:
+            # For Forwarded-NPDU the BBMD expects the originating address
+            if msg.function == Bvlc6Function.FORWARDED_NPDU and msg.originating_address:
+                bbmd_source = msg.originating_address
+            else:
+                bbmd_source = sender
+
+            handled = self._bbmd.handle_bvlc(
+                msg.function, msg.data, bbmd_source, source_vmac=msg.source_vmac
+            )
+
+            if handled:
+                return
+
+            # BBMD returned False -- also needs normal delivery.
+            # For Forwarded-NPDU the BBMD already delivered via
+            # local_broadcast_callback so skip to prevent double delivery.
+            if msg.function == Bvlc6Function.FORWARDED_NPDU:
+                return
+
         match msg.function:
             case Bvlc6Function.ORIGINAL_UNICAST_NPDU:
                 if self._receive_callback and msg.source_vmac:
@@ -463,16 +618,24 @@ class BIP6Transport:
                     self._vmac_cache.put(msg.source_vmac, sender)
 
             case Bvlc6Function.BVLC_RESULT:
-                self._resolve_pending_bvlc(msg.function, msg.data, sender)
+                if not self._resolve_pending_bvlc(msg.function, msg.data, sender):
+                    self._handle_bvlc6_result(msg.data, sender)
 
             case Bvlc6Function.REGISTER_FOREIGN_DEVICE:
-                self._send_bvlc6_nak(Bvlc6ResultCode.REGISTER_FOREIGN_DEVICE_NAK, sender)
+                if self._bbmd is None:
+                    self._send_bvlc6_nak(Bvlc6ResultCode.REGISTER_FOREIGN_DEVICE_NAK, sender)
 
             case Bvlc6Function.DELETE_FOREIGN_DEVICE_TABLE_ENTRY:
-                self._send_bvlc6_nak(Bvlc6ResultCode.DELETE_FOREIGN_DEVICE_TABLE_ENTRY_NAK, sender)
+                if self._bbmd is None:
+                    self._send_bvlc6_nak(
+                        Bvlc6ResultCode.DELETE_FOREIGN_DEVICE_TABLE_ENTRY_NAK, sender
+                    )
 
             case Bvlc6Function.DISTRIBUTE_BROADCAST_NPDU:
-                self._send_bvlc6_nak(Bvlc6ResultCode.DISTRIBUTE_BROADCAST_TO_NETWORK_NAK, sender)
+                if self._bbmd is None:
+                    self._send_bvlc6_nak(
+                        Bvlc6ResultCode.DISTRIBUTE_BROADCAST_TO_NETWORK_NAK, sender
+                    )
 
             case _:
                 logger.debug(
@@ -489,10 +652,19 @@ class BIP6Transport:
             return True
         return False
 
+    def _handle_bvlc6_result(self, data: bytes, source: BIP6Address) -> None:
+        """Handle a BVLC6-Result not matched by a pending request.
+
+        Routes to the ForeignDevice6Manager if the sender matches
+        the expected BBMD address.
+        """
+        if self._foreign_device is not None and source == self._foreign_device.bbmd_address:
+            self._foreign_device.handle_bvlc_result(data)
+
     def _send_bvlc6_nak(self, result_code: Bvlc6ResultCode, destination: BIP6Address) -> None:
         """Send a BVLC6-Result NAK."""
         if self._transport is None:
             return
         payload = result_code.to_bytes(2, "big")
-        bvll = encode_bvll6(Bvlc6Function.BVLC_RESULT, payload)
+        bvll = encode_bvll6(Bvlc6Function.BVLC_RESULT, payload, source_vmac=self._vmac)
         self._transport.sendto(bvll, (destination.host, destination.port))

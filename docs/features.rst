@@ -284,13 +284,33 @@ to collect all object identifiers in a device's object hierarchy:
 BACnet/IPv6
 -----------
 
-Full BACnet/IPv6 transport per ASHRAE 135-2020 Annex U:
+Full BACnet/IPv6 transport per ASHRAE 135-2020 Annex U, fully integrated with
+:class:`~bac_py.client.Client` and :class:`~bac_py.app.application.BACnetApplication`:
 
-- **IPv6 BVLL** with all 13 function codes (type ``0x82``)
+- **IPv6 BVLL** with all 13 function codes (type ``0x82``), source VMAC on every message
 - **3-byte VMAC** virtual addressing with automatic address resolution
 - **IPv6 multicast** broadcasts (``ff02::bac0`` link-local, ``ff05::bac0`` site-local)
 - **Address resolution** protocol with TTL-based caching
-- Foreign device registration over IPv6
+- **IPv6 BBMD** (BBMD6Manager) with BDT/FDT forwarding and foreign device management
+- **IPv6 foreign device** registration with TTL-based re-registration
+- **Application-layer integration** --- use ``ipv6=True`` on ``Client`` or ``DeviceConfig``
+
+.. code-block:: python
+
+   from bac_py import Client
+
+   # Simple IPv6 client
+   async with Client(ipv6=True) as client:
+       devices = await client.discover(timeout=5.0)
+
+   # IPv6 foreign device
+   async with Client(
+       ipv6=True,
+       bbmd_address="[fd00::1]:47808",
+   ) as client:
+       devices = await client.discover(timeout=5.0)
+
+For advanced transport-level usage:
 
 .. code-block:: python
 

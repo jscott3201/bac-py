@@ -26,12 +26,13 @@ class TestConstants:
 
 class TestEncodeDecodeRoundTrip:
     def test_bvlc_result(self):
+        src = b"\x01\x02\x03"
         payload = b"\x00\x00"
-        encoded = encode_bvll6(Bvlc6Function.BVLC_RESULT, payload)
+        encoded = encode_bvll6(Bvlc6Function.BVLC_RESULT, payload, source_vmac=src)
         decoded = decode_bvll6(encoded)
         assert decoded.function == Bvlc6Function.BVLC_RESULT
         assert decoded.data == payload
-        assert decoded.source_vmac is None
+        assert decoded.source_vmac == src
         assert decoded.dest_vmac is None
 
     def test_original_unicast_npdu(self):
@@ -154,25 +155,33 @@ class TestEncodeDecodeRoundTrip:
         assert decoded.dest_vmac == dst
 
     def test_register_foreign_device(self):
+        src = b"\x0a\x0b\x0c"
         payload = b"\x00\x3c"  # TTL = 60 seconds
-        encoded = encode_bvll6(Bvlc6Function.REGISTER_FOREIGN_DEVICE, payload)
+        encoded = encode_bvll6(Bvlc6Function.REGISTER_FOREIGN_DEVICE, payload, source_vmac=src)
         decoded = decode_bvll6(encoded)
         assert decoded.function == Bvlc6Function.REGISTER_FOREIGN_DEVICE
         assert decoded.data == payload
+        assert decoded.source_vmac == src
 
     def test_delete_foreign_device_table_entry(self):
+        src = b"\x0a\x0b\x0c"
         payload = b"\x01\x02\x03\x04\x05\x06"
-        encoded = encode_bvll6(Bvlc6Function.DELETE_FOREIGN_DEVICE_TABLE_ENTRY, payload)
+        encoded = encode_bvll6(
+            Bvlc6Function.DELETE_FOREIGN_DEVICE_TABLE_ENTRY, payload, source_vmac=src
+        )
         decoded = decode_bvll6(encoded)
         assert decoded.function == Bvlc6Function.DELETE_FOREIGN_DEVICE_TABLE_ENTRY
         assert decoded.data == payload
+        assert decoded.source_vmac == src
 
     def test_distribute_broadcast_npdu(self):
+        src = b"\x0a\x0b\x0c"
         payload = b"\x01\x00\x10\x08\x00"
-        encoded = encode_bvll6(Bvlc6Function.DISTRIBUTE_BROADCAST_NPDU, payload)
+        encoded = encode_bvll6(Bvlc6Function.DISTRIBUTE_BROADCAST_NPDU, payload, source_vmac=src)
         decoded = decode_bvll6(encoded)
         assert decoded.function == Bvlc6Function.DISTRIBUTE_BROADCAST_NPDU
         assert decoded.data == payload
+        assert decoded.source_vmac == src
 
     def test_secure_bvll(self):
         payload = b"\x00\x01\x02\x03"
@@ -184,7 +193,7 @@ class TestEncodeDecodeRoundTrip:
 
 class TestEncodeFormat:
     def test_header_starts_with_bvlc6_type(self):
-        encoded = encode_bvll6(Bvlc6Function.BVLC_RESULT, b"\x00\x00")
+        encoded = encode_bvll6(Bvlc6Function.BVLC_RESULT, b"\x00\x00", source_vmac=b"\x01\x02\x03")
         assert encoded[0] == BVLC_TYPE_BACNET_IPV6
 
     def test_header_function_byte(self):
@@ -197,9 +206,10 @@ class TestEncodeFormat:
 
     def test_header_length_bvlc_result(self):
         payload = b"\x00\x00"
-        encoded = encode_bvll6(Bvlc6Function.BVLC_RESULT, payload)
+        encoded = encode_bvll6(Bvlc6Function.BVLC_RESULT, payload, source_vmac=b"\x01\x02\x03")
         length = (encoded[2] << 8) | encoded[3]
-        assert length == BVLL6_HEADER_LENGTH + len(payload)
+        # Header(4) + src_vmac(3) + payload(2)
+        assert length == BVLL6_HEADER_LENGTH + VMAC_LENGTH + len(payload)
 
     def test_header_length_unicast(self):
         payload = b"\x01\x02\x03"
@@ -262,10 +272,11 @@ class TestDecodeErrors:
 
     def test_decode_from_memoryview(self):
         payload = b"\x01\x02"
-        encoded = encode_bvll6(Bvlc6Function.BVLC_RESULT, payload)
+        encoded = encode_bvll6(Bvlc6Function.BVLC_RESULT, payload, source_vmac=b"\x01\x02\x03")
         decoded = decode_bvll6(memoryview(encoded))
         assert decoded.function == Bvlc6Function.BVLC_RESULT
         assert decoded.data == payload
+        assert decoded.source_vmac == b"\x01\x02\x03"
 
 
 class TestEncodeErrors:

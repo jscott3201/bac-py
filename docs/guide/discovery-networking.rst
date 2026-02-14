@@ -144,6 +144,67 @@ time:
    await client.register_as_foreign_device("192.168.1.1", ttl=60)
 
 
+.. _ipv6-transport:
+
+IPv6 Transport (Annex U)
+-------------------------
+
+bac-py supports BACnet/IPv6 per ASHRAE 135-2020 Annex U. Set ``ipv6=True``
+on the :class:`~bac_py.client.Client` or
+:class:`~bac_py.app.application.DeviceConfig` to use IPv6 multicast
+instead of IPv4 broadcast:
+
+.. code-block:: python
+
+   from bac_py import Client
+
+   async with Client(ipv6=True) as client:
+       devices = await client.discover(timeout=5.0)
+
+The default multicast group is ``ff02::bac0`` and the default interface is
+``::`` (all IPv6 interfaces). Both can be customized:
+
+.. code-block:: python
+
+   async with Client(
+       ipv6=True,
+       interface="fd00::1",
+       multicast_address="ff05::bac0",  # site-local scope
+   ) as client:
+       ...
+
+IPv6 foreign device registration works the same as IPv4, but uses
+bracket notation for the BBMD address:
+
+.. code-block:: python
+
+   async with Client(
+       ipv6=True,
+       bbmd_address="[fd00::1]:47808",
+       bbmd_ttl=60,
+   ) as client:
+       devices = await client.discover(timeout=5.0)
+
+For router-mode configurations, individual ports can use IPv6:
+
+.. code-block:: python
+
+   from bac_py.app.application import DeviceConfig, RouterConfig, RouterPortConfig
+
+   config = DeviceConfig(
+       instance_number=999,
+       router_config=RouterConfig(
+           ports=[
+               RouterPortConfig(port_id=0, network_number=1,
+                                interface="192.168.1.10", port=47808),
+               RouterPortConfig(port_id=1, network_number=2,
+                                ipv6=True, port=47808),
+           ],
+           application_port_id=0,
+       ),
+   )
+
+
 .. _router-discovery:
 
 Router Discovery

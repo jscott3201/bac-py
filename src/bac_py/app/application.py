@@ -31,6 +31,7 @@ from bac_py.services.base import ServiceRegistry
 from bac_py.services.cov import COVNotificationRequest
 from bac_py.services.errors import BACnetAbortError, BACnetError, BACnetRejectError
 from bac_py.transport.bip import BIPTransport
+from bac_py.transport.bip6 import BIP6Transport
 from bac_py.types.enums import (
     AbortReason,
     ConfirmedServiceChoice,
@@ -46,7 +47,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from bac_py.app.tsm import ServerTransaction
-    from bac_py.network.address import BACnetAddress, BIPAddress
+    from bac_py.network.address import BACnetAddress, BIP6Address, BIPAddress
     from bac_py.transport.bbmd import BDTEntry
 
 logger = logging.getLogger(__name__)
@@ -83,6 +84,12 @@ class RouterPortConfig:
     interface: str = "0.0.0.0"
     port: int = 0xBAC0
     bbmd_config: BBMDConfig | None = None
+    ipv6: bool = False
+    """Use BACnet/IPv6 (Annex U) transport for this port."""
+    multicast_address: str = ""
+    """IPv6 multicast group address. Defaults to ``ff02::bac0``."""
+    vmac: bytes | None = None
+    """3-byte VMAC for IPv6. Auto-generated if ``None``."""
 
 
 @dataclass
@@ -153,6 +160,17 @@ class DeviceConfig:
     services (1-20 characters, per Clause 16.1.3.1 and 16.4.3.4).
     When set, incoming requests must include a matching password."""
 
+    ipv6: bool = False
+    """Use BACnet/IPv6 (Annex U) transport instead of BACnet/IP (Annex J)."""
+
+    multicast_address: str = ""
+    """IPv6 multicast group address. Defaults to ``ff02::bac0`` when *ipv6*
+    is ``True``.  Ignored for IPv4 mode."""
+
+    vmac: bytes | None = None
+    """3-byte VMAC for IPv6 transport. Auto-generated if ``None``.
+    Ignored for IPv4 mode."""
+
     def __post_init__(self) -> None:
         """Fill version defaults from the bac-py package version."""
         if not self.firmware_revision or not self.application_software_version:
@@ -197,10 +215,10 @@ class BACnetApplication:
         :param config: Device and network parameters for this BACnet device.
         """
         self._config = config
-        self._transport: BIPTransport | None = None
+        self._transport: BIPTransport | BIP6Transport | None = None
         self._network: NetworkLayer | None = None
         self._router: NetworkRouter | None = None
-        self._transports: list[BIPTransport] = []
+        self._transports: list[BIPTransport | BIP6Transport] = []
         self._client_tsm: ClientTSM | None = None
         self._server_tsm: ServerTSM | None = None
         self._service_registry = ServiceRegistry()
@@ -362,11 +380,21 @@ class BACnetApplication:
 
     async def _start_non_router_mode(self) -> None:
         """Start in non-router (simple device) mode."""
-        self._transport = BIPTransport(
-            interface=self._config.interface,
-            port=self._config.port,
-            broadcast_address=self._config.broadcast_address,
-        )
+        if self._config.ipv6 or ":" in self._config.interface:
+            iface = self._config.interface if self._config.interface != "0.0.0.0" else "::"
+            mcast = self._config.multicast_address or "ff02::bac0"
+            self._transport = BIP6Transport(
+                interface=iface,
+                port=self._config.port,
+                multicast_address=mcast,
+                vmac=self._config.vmac,
+            )
+        else:
+            self._transport = BIPTransport(
+                interface=self._config.interface,
+                port=self._config.port,
+                broadcast_address=self._config.broadcast_address,
+            )
         self._network = NetworkLayer(self._transport)
         self._network.on_receive(self._on_apdu_received)
         await self._transport.start()
@@ -378,13 +406,24 @@ class BACnetApplication:
             raise RuntimeError(msg)
         ports: list[RouterPort] = []
         for pc in self._config.router_config.ports:
-            transport = BIPTransport(interface=pc.interface, port=pc.port)
+            transport: BIPTransport | BIP6Transport
+            if pc.ipv6 or ":" in pc.interface:
+                iface = pc.interface if pc.interface != "0.0.0.0" else "::"
+                mcast = pc.multicast_address or "ff02::bac0"
+                transport = BIP6Transport(
+                    interface=iface,
+                    port=pc.port,
+                    multicast_address=mcast,
+                    vmac=pc.vmac,
+                )
+            else:
+                transport = BIPTransport(interface=pc.interface, port=pc.port)
             await transport.start()
             self._transports.append(transport)
 
             # Attach BBMD if configured for this port
             if pc.bbmd_config is not None:
-                await transport.attach_bbmd(pc.bbmd_config.bdt_entries or None)
+                await transport.attach_bbmd(pc.bbmd_config.bdt_entries or None)  # type: ignore[arg-type]
 
             port = RouterPort(
                 port_id=pc.port_id,
@@ -521,6 +560,23 @@ class BACnetApplication:
             return _BIPAddress(host=host, port=int(port_str))
         return _BIPAddress(host=address, port=0xBAC0)
 
+    def _parse_bip6_address(self, address: str) -> BIP6Address:
+        """Parse a string to a BIP6Address.
+
+        Accepts ``"[host]:port"`` or ``"host"`` (default port 47808).
+        """
+        from bac_py.network.address import BIP6Address as _BIP6Address
+
+        if address.startswith("["):
+            # "[host]:port" format
+            bracket_end = address.index("]")
+            host = address[1:bracket_end]
+            rest = address[bracket_end + 1 :]
+            if rest.startswith(":"):
+                return _BIP6Address(host=host, port=int(rest[1:]))
+            return _BIP6Address(host=host, port=0xBAC0)
+        return _BIP6Address(host=address, port=0xBAC0)
+
     async def register_as_foreign_device(
         self,
         bbmd_address: str,
@@ -528,12 +584,12 @@ class BACnetApplication:
     ) -> None:
         """Register as a foreign device with a BBMD.
 
-        Attaches a :class:`~bac_py.transport.foreign_device.ForeignDeviceManager`
-        to the primary transport and begins periodic re-registration
-        at TTL/2 intervals.
+        Attaches a foreign device manager to the primary transport and
+        begins periodic re-registration at TTL/2 intervals.
 
-        :param bbmd_address: Address of the BBMD (e.g. ``"192.168.1.1"`` or
-            ``"192.168.1.1:47808"``).
+        :param bbmd_address: Address of the BBMD. For IPv4 use
+            ``"192.168.1.1"`` or ``"192.168.1.1:47808"``. For IPv6 use
+            ``"[fd00::1]:47808"`` or ``"fd00::1"``.
         :param ttl: Registration time-to-live in seconds.
         :raises RuntimeError: If already registered, application not started,
             or running in router mode.
@@ -548,8 +604,12 @@ class BACnetApplication:
             msg = "Already registered as a foreign device"
             raise RuntimeError(msg)
 
-        bip_addr = self._parse_bip_address(bbmd_address)
-        await self._transport.attach_foreign_device(bip_addr, ttl)
+        if isinstance(self._transport, BIP6Transport):
+            addr = self._parse_bip6_address(bbmd_address)
+            await self._transport.attach_foreign_device(addr, ttl)
+        else:
+            bip_addr = self._parse_bip_address(bbmd_address)
+            await self._transport.attach_foreign_device(bip_addr, ttl)
 
     async def deregister_foreign_device(self) -> None:
         """Deregister from the BBMD and stop re-registration.

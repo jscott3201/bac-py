@@ -902,3 +902,59 @@ class TestClientWhoIsRouterDelegation:
         client, mock = _make_protocol_mock_client()
         await client.who_is_router_to_network(network=100)
         mock.who_is_router_to_network.assert_called_once()
+
+
+class TestClientIPv6:
+    """Test Client IPv6 convenience parameters."""
+
+    def test_ipv6_flag_sets_config(self):
+        client = Client(ipv6=True)
+        assert client._config.ipv6 is True
+
+    def test_ipv6_default_interface_becomes_all_ipv6(self):
+        client = Client(ipv6=True)
+        assert client._config.interface == "::"
+
+    def test_ipv6_custom_interface_preserved(self):
+        client = Client(ipv6=True, interface="fd00::1")
+        assert client._config.interface == "fd00::1"
+
+    def test_ipv6_multicast_address(self):
+        client = Client(ipv6=True, multicast_address="ff02::1234")
+        assert client._config.multicast_address == "ff02::1234"
+
+    def test_ipv6_vmac(self):
+        vmac = b"\x01\x02\x03"
+        client = Client(ipv6=True, vmac=vmac)
+        assert client._config.vmac == vmac
+
+    def test_ipv6_false_keeps_ipv4_interface(self):
+        client = Client(ipv6=False)
+        assert client._config.interface == "0.0.0.0"
+        assert client._config.ipv6 is False
+
+    @patch("bac_py.client.BACnetApplication")
+    async def test_ipv6_client_creates_app_with_ipv6_config(self, mock_app_cls):
+        mock_app = MagicMock()
+        mock_app.start = AsyncMock()
+        mock_app.stop = AsyncMock()
+        mock_app_cls.return_value = mock_app
+
+        async with Client(ipv6=True):
+            # Verify the DeviceConfig passed to BACnetApplication
+            cfg = mock_app_cls.call_args[0][0]
+            assert cfg.ipv6 is True
+            assert cfg.interface == "::"
+
+    @patch("bac_py.client.BACnetApplication")
+    async def test_ipv6_client_bbmd_registration(self, mock_app_cls):
+        mock_app = MagicMock()
+        mock_app.start = AsyncMock()
+        mock_app.stop = AsyncMock()
+        mock_app.register_as_foreign_device = AsyncMock()
+        mock_app.deregister_foreign_device = AsyncMock()
+        mock_app.wait_for_registration = AsyncMock()
+        mock_app_cls.return_value = mock_app
+
+        async with Client(ipv6=True, bbmd_address="[fd00::1]:47808", bbmd_ttl=120):
+            mock_app.register_as_foreign_device.assert_called_once_with("[fd00::1]:47808", 120)

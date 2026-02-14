@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-02-14
+
+### Added
+
+- **Full BACnet/IPv6 (Annex U) integration** — IPv6 transport is now fully
+  wired into `Client` and `BACnetApplication`. Set `ipv6=True` to use IPv6
+  multicast discovery and communication:
+  - `Client(ipv6=True)` creates a `BIP6Transport` with `ff02::bac0` multicast
+  - `DeviceConfig(ipv6=True)` and `RouterPortConfig(ipv6=True)` for app-level config
+  - Mixed IPv4/IPv6 router ports in a single router configuration
+  - IPv6 foreign device registration via `bbmd_address="[fd00::1]:47808"`
+- **IPv6 BBMD manager** (`transport/bbmd6.py`): BDT/FDT management, broadcast
+  forwarding to peers and foreign devices, FDT expiry cleanup.  Mirrors the
+  IPv4 BBMD architecture adapted for Annex U (no broadcast mask, multicast
+  callbacks, source VMAC on all messages).
+- **IPv6 foreign device manager** (`transport/foreign_device6.py`): Registration,
+  re-registration loop at TTL/2, deregistration on stop, distribute-broadcast.
+- **BVLL6 spec compliance fix**: All 13 BVLL6 function codes now include
+  `source_vmac` per Annex U (previously 4 codes were missing it).
+- **NetworkLayer generalized** to accept any `TransportPort` (not just
+  `BIPTransport`), enabling IPv6 and future transport types.
+- **IPv6 example script** (`examples/ipv6_client_server.py`): Demonstrates
+  IPv6 client with multicast discovery and property reads.
+- **IPv6 Docker integration test** (Scenario 13, profile `ipv6`):
+  `server-ipv6` and `test-ipv6` containers on a `fd00:bac:1::/64` network.
+  New `make docker-test-ipv6` target.
+
 ## [1.3.11] - 2026-02-14
 
 ### Added

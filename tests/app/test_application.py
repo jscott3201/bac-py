@@ -2532,3 +2532,289 @@ class TestConfirmedRequestDispatchLine933:
         await app._handle_confirmed_request(pdu, source)
         # Should have sent a SimpleAck response
         app._network.send.assert_called_once()
+
+
+# --- IPv6 transport selection tests ---
+
+
+def _make_mock_bip6_transport():
+    """Create a mock BIP6Transport with required attributes."""
+    transport = MagicMock()
+    transport.start = AsyncMock()
+    transport.stop = AsyncMock()
+    transport.local_mac = b"\xaa\xbb\xcc"  # 3-byte VMAC
+    transport.max_npdu_length = 1440
+    transport.on_receive = MagicMock()
+    transport.foreign_device = None
+    transport.attach_foreign_device = AsyncMock()
+    transport.bbmd = None
+    return transport
+
+
+class TestDeviceConfigIPv6:
+    """Test DeviceConfig IPv6 fields."""
+
+    def test_ipv6_defaults(self):
+        cfg = DeviceConfig(instance_number=1)
+        assert cfg.ipv6 is False
+        assert cfg.multicast_address == ""
+        assert cfg.vmac is None
+
+    def test_ipv6_enabled(self):
+        cfg = DeviceConfig(instance_number=1, ipv6=True)
+        assert cfg.ipv6 is True
+
+    def test_ipv6_custom_multicast(self):
+        cfg = DeviceConfig(instance_number=1, ipv6=True, multicast_address="ff02::1234")
+        assert cfg.multicast_address == "ff02::1234"
+
+    def test_ipv6_custom_vmac(self):
+        vmac = b"\x01\x02\x03"
+        cfg = DeviceConfig(instance_number=1, ipv6=True, vmac=vmac)
+        assert cfg.vmac == vmac
+
+
+class TestRouterPortConfigIPv6:
+    """Test RouterPortConfig IPv6 fields."""
+
+    def test_ipv6_defaults(self):
+        cfg = RouterPortConfig(port_id=1, network_number=100)
+        assert cfg.ipv6 is False
+        assert cfg.multicast_address == ""
+        assert cfg.vmac is None
+
+    def test_ipv6_enabled(self):
+        cfg = RouterPortConfig(port_id=1, network_number=100, ipv6=True)
+        assert cfg.ipv6 is True
+
+    def test_ipv6_custom_values(self):
+        cfg = RouterPortConfig(
+            port_id=1,
+            network_number=100,
+            ipv6=True,
+            multicast_address="ff02::bac1",
+            vmac=b"\xaa\xbb\xcc",
+        )
+        assert cfg.multicast_address == "ff02::bac1"
+        assert cfg.vmac == b"\xaa\xbb\xcc"
+
+
+class TestIPv6TransportSelection:
+    """Test that IPv6 config creates BIP6Transport."""
+
+    async def test_non_router_ipv6_flag_creates_bip6(self):
+        """DeviceConfig(ipv6=True) should create BIP6Transport."""
+        cfg = DeviceConfig(instance_number=1, ipv6=True, port=0)
+        app = BACnetApplication(cfg)
+
+        mock_t = _make_mock_bip6_transport()
+
+        with patch("bac_py.app.application.BIP6Transport", return_value=mock_t) as cls:
+            await app.start()
+            try:
+                cls.assert_called_once()
+                call_kwargs = cls.call_args[1]
+                assert call_kwargs["interface"] == "::"
+                assert call_kwargs["multicast_address"] == "ff02::bac0"
+                assert app._transport is mock_t
+            finally:
+                await app.stop()
+
+    async def test_non_router_ipv6_interface_auto_detects(self):
+        """An IPv6 interface address (containing ':') selects BIP6Transport."""
+        cfg = DeviceConfig(instance_number=1, interface="fd00::1", port=0)
+        app = BACnetApplication(cfg)
+
+        mock_t = _make_mock_bip6_transport()
+
+        with patch("bac_py.app.application.BIP6Transport", return_value=mock_t) as cls:
+            await app.start()
+            try:
+                cls.assert_called_once()
+                call_kwargs = cls.call_args[1]
+                assert call_kwargs["interface"] == "fd00::1"
+            finally:
+                await app.stop()
+
+    async def test_non_router_ipv6_custom_multicast(self):
+        """Custom multicast address is passed through."""
+        cfg = DeviceConfig(instance_number=1, ipv6=True, multicast_address="ff02::1234", port=0)
+        app = BACnetApplication(cfg)
+
+        mock_t = _make_mock_bip6_transport()
+
+        with patch("bac_py.app.application.BIP6Transport", return_value=mock_t) as cls:
+            await app.start()
+            try:
+                call_kwargs = cls.call_args[1]
+                assert call_kwargs["multicast_address"] == "ff02::1234"
+            finally:
+                await app.stop()
+
+    async def test_non_router_ipv6_custom_vmac(self):
+        """Custom VMAC is passed through."""
+        vmac = b"\xdd\xee\xff"
+        cfg = DeviceConfig(instance_number=1, ipv6=True, vmac=vmac, port=0)
+        app = BACnetApplication(cfg)
+
+        mock_t = _make_mock_bip6_transport()
+
+        with patch("bac_py.app.application.BIP6Transport", return_value=mock_t) as cls:
+            await app.start()
+            try:
+                call_kwargs = cls.call_args[1]
+                assert call_kwargs["vmac"] == vmac
+            finally:
+                await app.stop()
+
+    async def test_non_router_ipv4_still_creates_bip(self):
+        """Default IPv4 config still creates BIPTransport."""
+        cfg = DeviceConfig(instance_number=1, port=0)
+        app = BACnetApplication(cfg)
+
+        mock_t = _make_mock_transport()
+
+        with patch("bac_py.app.application.BIPTransport", return_value=mock_t) as cls:
+            await app.start()
+            try:
+                cls.assert_called_once()
+                assert app._transport is mock_t
+            finally:
+                await app.stop()
+
+    async def test_router_ipv6_port_creates_bip6(self):
+        """Router port with ipv6=True creates BIP6Transport."""
+        router_cfg = DeviceConfig(
+            instance_number=1,
+            router_config=RouterConfig(
+                ports=[
+                    RouterPortConfig(port_id=1, network_number=100, ipv6=True, port=0),
+                ],
+                application_port_id=1,
+            ),
+        )
+        app = BACnetApplication(router_cfg)
+
+        mock_t = _make_mock_bip6_transport()
+
+        with (
+            patch("bac_py.app.application.BIP6Transport", return_value=mock_t) as bip6_cls,
+            patch("bac_py.app.application.NetworkRouter") as mock_router_cls,
+        ):
+            mock_router_instance = MagicMock()
+            mock_router_instance.start = AsyncMock()
+            mock_router_instance.stop = AsyncMock()
+            mock_router_cls.return_value = mock_router_instance
+
+            await app.start()
+            try:
+                bip6_cls.assert_called_once()
+                call_kwargs = bip6_cls.call_args[1]
+                assert call_kwargs["interface"] == "::"
+                assert call_kwargs["multicast_address"] == "ff02::bac0"
+            finally:
+                await app.stop()
+
+    async def test_router_mixed_ipv4_ipv6_ports(self):
+        """Router with one IPv4 and one IPv6 port creates correct transports."""
+        router_cfg = DeviceConfig(
+            instance_number=1,
+            router_config=RouterConfig(
+                ports=[
+                    RouterPortConfig(port_id=1, network_number=100, port=0),
+                    RouterPortConfig(port_id=2, network_number=200, ipv6=True, port=0),
+                ],
+                application_port_id=1,
+            ),
+        )
+        app = BACnetApplication(router_cfg)
+
+        mock_t_ipv4 = _make_mock_transport()
+        mock_t_ipv6 = _make_mock_bip6_transport()
+
+        with (
+            patch("bac_py.app.application.BIPTransport", return_value=mock_t_ipv4) as bip_cls,
+            patch("bac_py.app.application.BIP6Transport", return_value=mock_t_ipv6) as bip6_cls,
+            patch("bac_py.app.application.NetworkRouter") as mock_router_cls,
+        ):
+            mock_router_instance = MagicMock()
+            mock_router_instance.start = AsyncMock()
+            mock_router_instance.stop = AsyncMock()
+            mock_router_cls.return_value = mock_router_instance
+
+            await app.start()
+            try:
+                bip_cls.assert_called_once()
+                bip6_cls.assert_called_once()
+                assert len(app._transports) == 2
+            finally:
+                await app.stop()
+
+
+class TestParseBIP6Address:
+    """Test _parse_bip6_address helper."""
+
+    def test_bracketed_with_port(self):
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        addr = app._parse_bip6_address("[fd00::1]:47809")
+        assert addr.host == "fd00::1"
+        assert addr.port == 47809
+
+    def test_bracketed_without_port(self):
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        addr = app._parse_bip6_address("[fd00::1]")
+        assert addr.host == "fd00::1"
+        assert addr.port == 0xBAC0
+
+    def test_bare_address_default_port(self):
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+        addr = app._parse_bip6_address("fd00::1")
+        assert addr.host == "fd00::1"
+        assert addr.port == 0xBAC0
+
+
+class TestForeignDeviceIPv6:
+    """Test foreign device registration with BIP6Transport."""
+
+    async def test_register_with_bip6_transport(self):
+        """register_as_foreign_device with BIP6Transport parses IPv6 address."""
+        from bac_py.transport.bip6 import BIP6Transport
+
+        cfg = DeviceConfig(instance_number=1, ipv6=True, port=0)
+        app = BACnetApplication(cfg)
+
+        mock_t = _make_mock_bip6_transport()
+        mock_t.__class__ = BIP6Transport  # isinstance check
+
+        app._transport = mock_t
+        app._running = True
+
+        await app.register_as_foreign_device("[fd00::1]:47808", ttl=120)
+        mock_t.attach_foreign_device.assert_called_once()
+        call_args = mock_t.attach_foreign_device.call_args
+        addr = call_args[0][0]
+        assert addr.host == "fd00::1"
+        assert addr.port == 47808
+        assert call_args[0][1] == 120
+
+    async def test_register_not_started_raises(self):
+        cfg = DeviceConfig(instance_number=1, ipv6=True)
+        app = BACnetApplication(cfg)
+        with pytest.raises(RuntimeError, match="not started"):
+            await app.register_as_foreign_device("[fd00::1]:47808")
+
+    async def test_register_already_registered_raises(self):
+        from bac_py.transport.bip6 import BIP6Transport
+
+        cfg = DeviceConfig(instance_number=1, ipv6=True, port=0)
+        app = BACnetApplication(cfg)
+
+        mock_t = _make_mock_bip6_transport()
+        mock_t.__class__ = BIP6Transport
+        mock_t.foreign_device = MagicMock()  # Already registered
+
+        app._transport = mock_t
+        app._running = True
+
+        with pytest.raises(RuntimeError, match="Already registered"):
+            await app.register_as_foreign_device("[fd00::1]:47808")

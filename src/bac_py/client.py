@@ -132,6 +132,9 @@ class Client:
         port: int = 0xBAC0,
         bbmd_address: str | None = None,
         bbmd_ttl: int = 60,
+        ipv6: bool = False,
+        multicast_address: str = "",
+        vmac: bytes | None = None,
     ) -> None:
         """Create a BACnet client.
 
@@ -140,20 +143,30 @@ class Client:
         :param instance_number: Device instance number (used if *config*
             is not provided).
         :param interface: IP address to bind to (used if *config*
-            is not provided).
+            is not provided). Defaults to ``"::"`` when *ipv6* is ``True``.
         :param port: UDP port (used if *config* is not provided).
         :param bbmd_address: Optional BBMD address for foreign device
-            registration (e.g. ``"192.168.1.1"`` or
-            ``"192.168.1.1:47808"``). When set, the client
-            registers as a foreign device on startup.
+            registration (e.g. ``"192.168.1.1"`` or ``"[fd00::1]:47808"``).
+            When set, the client registers as a foreign device on startup.
         :param bbmd_ttl: Registration time-to-live in seconds
             (default 60). Only used when *bbmd_address* is set.
+        :param ipv6: Use BACnet/IPv6 (Annex U) transport.
+        :param multicast_address: IPv6 multicast group. Defaults to
+            ``ff02::bac0`` when *ipv6* is ``True``.
+        :param vmac: 3-byte VMAC for IPv6 transport. Auto-generated
+            if ``None``.
         """
         if config is None:
+            iface = interface
+            if ipv6 and iface == "0.0.0.0":
+                iface = "::"
             config = DeviceConfig(
                 instance_number=instance_number,
-                interface=interface,
+                interface=iface,
                 port=port,
+                ipv6=ipv6,
+                multicast_address=multicast_address,
+                vmac=vmac,
             )
         self._config = config
         self._bbmd_address = bbmd_address
