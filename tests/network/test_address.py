@@ -772,3 +772,47 @@ class TestParseAddressPortRange:
         """Invalid IPv6 address in brackets should raise ValueError."""
         with pytest.raises(ValueError, match="Invalid IPv6 address"):
             parse_address("[not-valid-ipv6]")
+
+
+# ---------------------------------------------------------------------------
+# Optimization: encode cache and instance cache
+# ---------------------------------------------------------------------------
+
+
+class TestBIPAddressEncodeCache:
+    """Verify BIPAddress.encode() caches its result on the frozen instance."""
+
+    def test_encode_returns_same_object(self):
+        addr = BIPAddress(host="192.168.1.1", port=47808)
+        first = addr.encode()
+        second = addr.encode()
+        assert first is second
+
+    def test_cached_encode_does_not_affect_equality(self):
+        a = BIPAddress(host="10.0.0.1", port=47808)
+        b = BIPAddress(host="10.0.0.1", port=47808)
+        a.encode()  # populate cache on a
+        assert a == b
+        assert hash(a) == hash(b)
+
+    def test_cached_encode_not_in_repr(self):
+        addr = BIPAddress(host="10.0.0.1", port=47808)
+        addr.encode()
+        assert "_encoded" not in repr(addr)
+
+
+class TestCachedBIPAddressFactory:
+    """Verify the LRU-cached BIPAddress factory returns identical objects."""
+
+    def test_decode_returns_cached_instance(self):
+        encoded = BIPAddress(host="192.168.1.100", port=47808).encode()
+        a = BIPAddress.decode(encoded)
+        b = BIPAddress.decode(encoded)
+        assert a is b
+
+    def test_different_addresses_are_distinct(self):
+        a_bytes = BIPAddress(host="10.0.0.1", port=47808).encode()
+        b_bytes = BIPAddress(host="10.0.0.2", port=47808).encode()
+        a = BIPAddress.decode(a_bytes)
+        b = BIPAddress.decode(b_bytes)
+        assert a is not b

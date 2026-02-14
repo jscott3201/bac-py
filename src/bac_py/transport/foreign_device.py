@@ -74,6 +74,10 @@ class ForeignDeviceManager:
         self._task: asyncio.Task[None] | None = None
         self._registered = asyncio.Event()
         self._last_result: BvlcResultCode | None = None
+        # Pre-compute registration BVLL (payload is always the same)
+        self._registration_bvll = encode_bvll(
+            BvlcFunction.REGISTER_FOREIGN_DEVICE, self._ttl.to_bytes(2, "big")
+        )
 
     @property
     def bbmd_address(self) -> BIPAddress:
@@ -172,9 +176,7 @@ class ForeignDeviceManager:
 
     def _send_registration(self) -> None:
         """Send a Register-Foreign-Device message to the BBMD."""
-        payload = self._ttl.to_bytes(2, "big")
-        bvll = encode_bvll(BvlcFunction.REGISTER_FOREIGN_DEVICE, payload)
-        self._send(bvll, self._bbmd_address)
+        self._send(self._registration_bvll, self._bbmd_address)
         logger.debug(
             "Sent Register-Foreign-Device to %s:%d (TTL=%ds)",
             self._bbmd_address.host,

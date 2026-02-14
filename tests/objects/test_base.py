@@ -476,3 +476,48 @@ class TestRegisterCallbackObjectNotInDatabase:
         # Second registration should NOT overwrite the notifier
         db.register_change_callback(av.object_identifier, PropertyIdentifier.DESCRIPTION, cb2)
         assert av._on_property_written is notifier  # same object, not replaced
+
+
+# ---------------------------------------------------------------------------
+# Optimization: StatusFlags normal-case singleton
+# ---------------------------------------------------------------------------
+
+
+class TestStatusFlagsSingleton:
+    """Verify _NORMAL_STATUS_FLAGS singleton is returned for the all-normal case."""
+
+    def test_singleton_identity(self):
+        from bac_py.types.constructed import _NORMAL_STATUS_FLAGS, StatusFlags
+
+        assert StatusFlags() == _NORMAL_STATUS_FLAGS
+
+    def test_get_status_flags_returns_singleton_when_normal(self):
+        """An object with all-normal status should return the shared singleton."""
+        from bac_py.objects.analog import AnalogInputObject
+        from bac_py.types.constructed import _NORMAL_STATUS_FLAGS
+
+        obj = AnalogInputObject(1)
+        result = obj._get_status_flags()
+        assert result is _NORMAL_STATUS_FLAGS
+
+    def test_get_status_flags_not_singleton_when_abnormal(self):
+        """An object with out_of_service=True should NOT return the singleton."""
+        from bac_py.objects.analog import AnalogInputObject
+        from bac_py.types.constructed import _NORMAL_STATUS_FLAGS
+
+        obj = AnalogInputObject(1)
+        obj.write_property(PropertyIdentifier.OUT_OF_SERVICE, True)
+        result = obj._get_status_flags()
+        assert result is not _NORMAL_STATUS_FLAGS
+        assert result.out_of_service is True
+
+
+class TestStandardPropertiesCache:
+    """Verify standard_properties() returns cached dict."""
+
+    def test_returns_same_dict(self):
+        from bac_py.objects.base import standard_properties
+
+        a = standard_properties()
+        b = standard_properties()
+        assert a is b

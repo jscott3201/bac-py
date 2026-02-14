@@ -76,22 +76,15 @@ async def main() -> None:
     async with contextlib.AsyncExitStack() as stack:
         pools: list[Any] = []
         for i in range(num_pools):
-            client = await stack.enter_async_context(
-                Client(instance_number=700 + i, port=0)
-            )
+            client = await stack.enter_async_context(Client(instance_number=700 + i, port=0))
             pools.append(client)
 
-        objlist_client = await stack.enter_async_context(
-            Client(instance_number=750, port=0)
-        )
-        route_check_client = await stack.enter_async_context(
-            Client(instance_number=751, port=0)
-        )
+        objlist_client = await stack.enter_async_context(Client(instance_number=750, port=0))
+        route_check_client = await stack.enter_async_context(Client(instance_number=751, port=0))
 
         # -- Discovery phase ---------------------------------------------------
         print(
-            f"  Discovering server instance {instance} on "
-            f"network {remote_network} ...",
+            f"  Discovering server instance {instance} on network {remote_network} ...",
             file=sys.stderr,
         )
         server = await discover_remote_server(
@@ -226,9 +219,7 @@ async def main() -> None:
                 "write_latency_ms": latency_dict(stats.write_latencies),
                 "rpm_latency_ms": latency_dict(stats.rpm_latencies),
                 "wpm_latency_ms": latency_dict(stats.wpm_latencies),
-                "route_check_latency_ms": latency_dict(
-                    stats.route_check_latencies
-                ),
+                "route_check_latency_ms": latency_dict(stats.route_check_latencies),
             },
         }
 

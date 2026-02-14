@@ -57,6 +57,9 @@ def _min_unsigned_bytes(value: int) -> int:
 
 # --- Unsigned Integer (Clause 20.2.4) ---
 
+# Pre-computed single-byte unsigned encodings for values 0-255.
+_UNSIGNED_1BYTE: tuple[bytes, ...] = tuple(bytes([i]) for i in range(256))
+
 
 def encode_unsigned(value: int) -> bytes:
     """Encode an unsigned integer using the minimum number of octets, big-endian.
@@ -70,10 +73,12 @@ def encode_unsigned(value: int) -> bytes:
     if value < 0:
         msg = f"Unsigned integer must be >= 0, got {value}"
         raise ValueError(msg)
+    if value <= 0xFF:
+        return _UNSIGNED_1BYTE[value]
     if value > 0xFFFFFFFF:
         msg = f"Unsigned integer exceeds 4-byte maximum (4294967295), got {value}"
         raise ValueError(msg)
-    n = _min_unsigned_bytes(value)
+    n = (value.bit_length() + 7) // 8
     return value.to_bytes(n, "big")
 
 
@@ -101,10 +106,12 @@ def encode_unsigned64(value: int) -> bytes:
     if value < 0:
         msg = f"Unsigned64 integer must be >= 0, got {value}"
         raise ValueError(msg)
+    if value <= 0xFF:
+        return _UNSIGNED_1BYTE[value]
     if value > 0xFFFFFFFFFFFFFFFF:
         msg = f"Unsigned64 integer exceeds 8-byte maximum, got {value}"
         raise ValueError(msg)
-    n = _min_unsigned_bytes(value)
+    n = (value.bit_length() + 7) // 8
     return value.to_bytes(n, "big")
 
 
@@ -420,6 +427,10 @@ def decode_object_identifier(data: memoryview | bytes) -> tuple[int, int]:
 # The tag encoding handles this; these functions handle the contents octet form.
 
 
+_BOOL_TRUE = b"\x01"
+_BOOL_FALSE = b"\x00"
+
+
 def encode_boolean(value: bool) -> bytes:
     """Encode a boolean value as a single contents octet.
 
@@ -429,7 +440,7 @@ def encode_boolean(value: bool) -> bytes:
     :param value: The boolean value to encode.
     :returns: A single byte (``0x01`` for ``True``, ``0x00`` for ``False``).
     """
-    return bytes([1 if value else 0])
+    return _BOOL_TRUE if value else _BOOL_FALSE
 
 
 def decode_boolean(data: memoryview | bytes) -> bool:

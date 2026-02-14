@@ -5,6 +5,42 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.4.1] - 2026-02-14
+
+### Changed
+
+- **Encoding hot-path optimization**: `encode_unsigned()` and `encode_unsigned64()`
+  now use a pre-computed 256-element lookup table for values 0-255, eliminating
+  `to_bytes()` allocation on the most common code path. `encode_boolean()` uses
+  pre-allocated `b"\x01"` / `b"\x00"` constants.
+- **Address encode caching**: `BIPAddress.encode()` and `BIP6Address.encode()`
+  now cache their result on the frozen dataclass instance, avoiding repeated
+  `inet_aton()`/`inet_pton()` + `struct.pack()` calls. `BIPAddress.decode()`
+  uses an LRU-cached factory to deduplicate instances for the same remote device.
+- **Transport receive-path optimization**: BIP and BIP6 transports now perform
+  a fast self-echo check using raw tuple/VMAC comparison before allocating
+  address objects, reducing per-packet overhead on broadcast-heavy networks.
+- **BBMD forwarding optimization**: BDT unicast-mask lookup is now O(1) via a
+  pre-computed dict. Peer list excludes self, eliminating per-forward self-skip
+  checks. Foreign device registration messages are pre-computed once in
+  `__init__` for both IPv4 and IPv6 managers.
+- **ObjectType vendor member caching**: `ObjectType._missing_()` now caches
+  vendor-proprietary pseudo-members (128-1023), matching the existing
+  `PropertyIdentifier` pattern. Repeated lookups return the same object.
+- **StatusFlags singleton**: A shared `_NORMAL_STATUS_FLAGS` instance is returned
+  for the common all-normal case, avoiding per-read allocation.
+- **`standard_properties()` caching**: The 5-entry base property dict is now
+  computed once and reused across all 40+ object class definitions.
+
+### Fixed
+
+- **PropertyIdentifier vendor cache unbounded growth**: The
+  `_PROPERTY_ID_VENDOR_CACHE` dict is now capped at 4096 entries. A misbehaving
+  device sending millions of unique vendor property IDs can no longer cause
+  unbounded memory growth.
+
 ## [1.4.0] - 2026-02-14
 
 ### Added

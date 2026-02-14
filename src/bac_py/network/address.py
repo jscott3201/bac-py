@@ -6,7 +6,7 @@ import logging
 import re
 import socket
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any
 
@@ -22,13 +22,19 @@ class BIPAddress:
 
     host: str
     port: int
+    _encoded: bytes | None = field(default=None, init=False, repr=False, compare=False, hash=False)
 
     def encode(self) -> bytes:
         """Encode this address to the 6-byte BACnet/IP wire format.
 
         :returns: A 6-byte ``bytes`` object (4 octets IP + 2 octets port, big-endian).
         """
-        return socket.inet_aton(self.host) + struct.pack("!H", self.port)
+        cached = self._encoded
+        if cached is not None:
+            return cached
+        result = socket.inet_aton(self.host) + struct.pack("!H", self.port)
+        object.__setattr__(self, "_encoded", result)
+        return result
 
     @classmethod
     def decode(cls, data: bytes | memoryview) -> BIPAddress:
@@ -39,7 +45,7 @@ class BIPAddress:
         """
         host = f"{data[0]}.{data[1]}.{data[2]}.{data[3]}"
         port = int.from_bytes(data[4:6], "big")
-        return cls(host=host, port=port)
+        return _cached_bip_address(host, port)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize this address to a JSON-friendly dictionary.
@@ -58,6 +64,12 @@ class BIPAddress:
         return cls(host=data["host"], port=data["port"])
 
 
+@lru_cache(maxsize=256)
+def _cached_bip_address(host: str, port: int) -> BIPAddress:
+    """Return a cached :class:`BIPAddress` instance for the given host and port."""
+    return BIPAddress(host=host, port=port)
+
+
 @dataclass(frozen=True, slots=True)
 class BIP6Address:
     """An 18-octet BACnet/IPv6 address: 16-byte IPv6 + 2-byte UDP port.
@@ -67,10 +79,16 @@ class BIP6Address:
 
     host: str
     port: int
+    _encoded: bytes | None = field(default=None, init=False, repr=False, compare=False, hash=False)
 
     def encode(self) -> bytes:
         """Encode to 18-byte wire format (16 octets IPv6 + 2 octets port, big-endian)."""
-        return socket.inet_pton(socket.AF_INET6, self.host) + self.port.to_bytes(2, "big")
+        cached = self._encoded
+        if cached is not None:
+            return cached
+        result = socket.inet_pton(socket.AF_INET6, self.host) + self.port.to_bytes(2, "big")
+        object.__setattr__(self, "_encoded", result)
+        return result
 
     @classmethod
     def decode(cls, data: bytes | memoryview) -> BIP6Address:

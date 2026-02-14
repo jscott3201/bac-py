@@ -1150,3 +1150,57 @@ class TestAccessCredentialDisable:
 
     def test_member_count(self) -> None:
         assert len(AccessCredentialDisable) == 4
+
+
+# ---------------------------------------------------------------------------
+# Optimization: vendor enum caching
+# ---------------------------------------------------------------------------
+
+
+class TestObjectTypeVendorCache:
+    """Verify ObjectType vendor member caching."""
+
+    def test_cached_identity(self):
+        """Same vendor value returns the same object."""
+        a = ObjectType(200)
+        b = ObjectType(200)
+        assert a is b
+
+    def test_cached_name(self):
+        member = ObjectType(500)
+        assert member.name == "VENDOR_500"
+        assert member.value == 500
+
+    def test_different_values_are_distinct(self):
+        a = ObjectType(200)
+        b = ObjectType(201)
+        assert a is not b
+
+    def test_standard_members_not_affected(self):
+        """Standard enum members should not go through caching."""
+        assert ObjectType(0) is ObjectType.ANALOG_INPUT
+
+
+class TestPropertyIdVendorCacheBounded:
+    """Verify PropertyIdentifier vendor cache is bounded at 4096."""
+
+    def test_cache_bound(self):
+        from bac_py.types.enums import _PROPERTY_ID_VENDOR_CACHE
+
+        _PROPERTY_ID_VENDOR_CACHE.clear()
+        # Fill cache to capacity
+        for i in range(4096):
+            PropertyIdentifier(512 + i)
+        assert len(_PROPERTY_ID_VENDOR_CACHE) <= 4096
+
+        # One more should trigger a clear + re-add (size = 1)
+        PropertyIdentifier(512 + 4096)
+        assert len(_PROPERTY_ID_VENDOR_CACHE) <= 4096
+
+    def test_values_still_resolve_after_eviction(self):
+        from bac_py.types.enums import _PROPERTY_ID_VENDOR_CACHE
+
+        _PROPERTY_ID_VENDOR_CACHE.clear()
+        member = PropertyIdentifier(9999)
+        assert member.name == "VENDOR_9999"
+        assert member.value == 9999

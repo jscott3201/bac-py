@@ -60,9 +60,7 @@ async def main() -> None:
     sustain_seconds = int(os.environ.get("SUSTAIN_SECONDS", "60"))
 
     per_pool = readers_per_pool + writers_per_pool + rpm_per_pool + wpm_per_pool
-    total_workers = (
-        num_pools * per_pool + objlist_workers + fdt_workers + bdt_workers
-    )
+    total_workers = num_pools * per_pool + objlist_workers + fdt_workers + bdt_workers
 
     print(
         f"BBMD Stress test: {num_pools} pools x "
@@ -99,9 +97,7 @@ async def main() -> None:
                 bbmd_ttl=120,
             )
         )
-        bbmd_client = await stack.enter_async_context(
-            Client(instance_number=651, port=0)
-        )
+        bbmd_client = await stack.enter_async_context(Client(instance_number=651, port=0))
 
         print("  All clients registered as foreign devices", file=sys.stderr)
 

@@ -53,6 +53,9 @@ class PropertyDefinition:
     """Default value assigned on object creation, or ``None``."""
 
 
+_STANDARD_PROPERTIES: dict[PropertyIdentifier, PropertyDefinition] | None = None
+
+
 def standard_properties() -> dict[PropertyIdentifier, PropertyDefinition]:
     """Return properties common to all BACnet objects (Clause 12.1).
 
@@ -61,38 +64,41 @@ def standard_properties() -> dict[PropertyIdentifier, PropertyDefinition]:
 
     :returns: Mapping of :class:`PropertyIdentifier` to :class:`PropertyDefinition`.
     """
-    return {
-        PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
-            PropertyIdentifier.OBJECT_IDENTIFIER,
-            ObjectIdentifier,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
-            PropertyIdentifier.OBJECT_NAME,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=True,
-        ),
-        PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
-            PropertyIdentifier.OBJECT_TYPE,
-            ObjectType,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-        PropertyIdentifier.DESCRIPTION: PropertyDefinition(
-            PropertyIdentifier.DESCRIPTION,
-            str,
-            PropertyAccess.READ_WRITE,
-            required=False,
-        ),
-        PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
-            PropertyIdentifier.PROPERTY_LIST,
-            list,
-            PropertyAccess.READ_ONLY,
-            required=True,
-        ),
-    }
+    global _STANDARD_PROPERTIES
+    if _STANDARD_PROPERTIES is None:
+        _STANDARD_PROPERTIES = {
+            PropertyIdentifier.OBJECT_IDENTIFIER: PropertyDefinition(
+                PropertyIdentifier.OBJECT_IDENTIFIER,
+                ObjectIdentifier,
+                PropertyAccess.READ_ONLY,
+                required=True,
+            ),
+            PropertyIdentifier.OBJECT_NAME: PropertyDefinition(
+                PropertyIdentifier.OBJECT_NAME,
+                str,
+                PropertyAccess.READ_WRITE,
+                required=True,
+            ),
+            PropertyIdentifier.OBJECT_TYPE: PropertyDefinition(
+                PropertyIdentifier.OBJECT_TYPE,
+                ObjectType,
+                PropertyAccess.READ_ONLY,
+                required=True,
+            ),
+            PropertyIdentifier.DESCRIPTION: PropertyDefinition(
+                PropertyIdentifier.DESCRIPTION,
+                str,
+                PropertyAccess.READ_WRITE,
+                required=False,
+            ),
+            PropertyIdentifier.PROPERTY_LIST: PropertyDefinition(
+                PropertyIdentifier.PROPERTY_LIST,
+                list,
+                PropertyAccess.READ_ONLY,
+                required=True,
+            ),
+        }
+    return _STANDARD_PROPERTIES
 
 
 def status_properties(
@@ -353,7 +359,9 @@ class BACnetObject:
 
     def _init_status_flags(self) -> None:
         """Initialize Status_Flags to a default :class:`StatusFlags` if not already set."""
-        self._set_default(PropertyIdentifier.STATUS_FLAGS, StatusFlags())
+        from bac_py.types.constructed import _NORMAL_STATUS_FLAGS
+
+        self._set_default(PropertyIdentifier.STATUS_FLAGS, _NORMAL_STATUS_FLAGS)
 
     def _set_default(self, prop_id: PropertyIdentifier, value: Any) -> None:
         """Set a property value only if it hasn't been set yet.
@@ -616,6 +624,11 @@ class BACnetObject:
         # OVERRIDDEN: preserve stored value (hardware override, not computable)
         stored = self._properties.get(PropertyIdentifier.STATUS_FLAGS)
         overridden = stored.overridden if isinstance(stored, StatusFlags) else False
+
+        if not (in_alarm or fault or overridden or out_of_service):
+            from bac_py.types.constructed import _NORMAL_STATUS_FLAGS
+
+            return _NORMAL_STATUS_FLAGS
 
         return StatusFlags(
             in_alarm=in_alarm,

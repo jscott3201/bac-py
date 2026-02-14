@@ -672,3 +672,57 @@ class TestDecodedValuesLimit:
         result = decode_all_application_values(data)
         assert len(result) == 100
         assert all(v is None for v in result)
+
+
+# ---------------------------------------------------------------------------
+# Optimization: pre-computed lookup tables
+# ---------------------------------------------------------------------------
+
+
+class TestUnsigned1ByteLookupTable:
+    """Verify _UNSIGNED_1BYTE lookup table matches to_bytes for 0-255."""
+
+    def test_all_256_values_match(self):
+        from bac_py.encoding.primitives import _UNSIGNED_1BYTE
+
+        for i in range(256):
+            assert _UNSIGNED_1BYTE[i] == i.to_bytes(1, "big")
+
+    def test_lookup_table_length(self):
+        from bac_py.encoding.primitives import _UNSIGNED_1BYTE
+
+        assert len(_UNSIGNED_1BYTE) == 256
+
+    def test_encode_unsigned_uses_fast_path(self):
+        """encode_unsigned(0..255) should return the pre-computed object."""
+        from bac_py.encoding.primitives import _UNSIGNED_1BYTE
+
+        for i in (0, 1, 127, 255):
+            assert encode_unsigned(i) is _UNSIGNED_1BYTE[i]
+
+    def test_encode_unsigned64_uses_fast_path(self):
+        """encode_unsigned64(0..255) should return the pre-computed object."""
+        from bac_py.encoding.primitives import _UNSIGNED_1BYTE, encode_unsigned64
+
+        for i in (0, 1, 127, 255):
+            assert encode_unsigned64(i) is _UNSIGNED_1BYTE[i]
+
+
+class TestBooleanConstants:
+    """Verify encode_boolean uses pre-computed constants."""
+
+    def test_true_returns_constant(self):
+        from bac_py.encoding.primitives import _BOOL_TRUE
+
+        assert encode_boolean(True) is _BOOL_TRUE
+
+    def test_false_returns_constant(self):
+        from bac_py.encoding.primitives import _BOOL_FALSE
+
+        assert encode_boolean(False) is _BOOL_FALSE
+
+    def test_constant_values(self):
+        from bac_py.encoding.primitives import _BOOL_FALSE, _BOOL_TRUE
+
+        assert _BOOL_TRUE == b"\x01"
+        assert _BOOL_FALSE == b"\x00"

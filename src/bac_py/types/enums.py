@@ -8,6 +8,9 @@ from enum import IntEnum
 logger = logging.getLogger(__name__)
 
 
+_OBJECT_TYPE_VENDOR_CACHE: dict[int, object] = {}
+
+
 class ObjectType(IntEnum):
     """BACnet object types (Clause 12).
 
@@ -19,9 +22,13 @@ class ObjectType(IntEnum):
     @classmethod
     def _missing_(cls, value: object) -> ObjectType | None:
         if isinstance(value, int) and 0 <= value <= 1023:
+            cached = _OBJECT_TYPE_VENDOR_CACHE.get(value)
+            if cached is not None:
+                return cached  # type: ignore[return-value]
             member = int.__new__(cls, value)
             member._name_ = f"VENDOR_{value}"
             member._value_ = value
+            _OBJECT_TYPE_VENDOR_CACHE[value] = member
             return member
         return None
 
@@ -111,6 +118,8 @@ class PropertyIdentifier(IntEnum):
             cached = _PROPERTY_ID_VENDOR_CACHE.get(value)
             if cached is not None:
                 return cached  # type: ignore[return-value]
+            if len(_PROPERTY_ID_VENDOR_CACHE) >= 4096:
+                _PROPERTY_ID_VENDOR_CACHE.clear()
             member = int.__new__(cls, value)
             member._name_ = f"VENDOR_{value}"
             member._value_ = value

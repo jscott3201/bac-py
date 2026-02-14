@@ -99,6 +99,9 @@ class StatusFlags:
         return f"StatusFlags({', '.join(flags) if flags else 'NORMAL'})"
 
 
+_NORMAL_STATUS_FLAGS = StatusFlags()
+
+
 @dataclass(frozen=True, slots=True)
 class BACnetDateTime:
     """BACnet DateTime -- ``SEQUENCE { date Date, time Time }`` (Clause 21).

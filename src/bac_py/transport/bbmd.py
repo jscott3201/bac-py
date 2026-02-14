@@ -182,6 +182,8 @@ class BBMDManager:
         self._fdt_cleanup_interval = fdt_cleanup_interval
         self._bdt: list[BDTEntry] = []
         self._bdt_forward_cache: list[BIPAddress] = []
+        self._bdt_unicast_mask: dict[BIPAddress, bool] = {}
+        self._bdt_peers: list[tuple[BDTEntry, BIPAddress]] = []
         self._fdt: dict[BIPAddress, FDTEntry] = {}
         self._cleanup_task: asyncio.Task[None] | None = None
 
@@ -230,6 +232,14 @@ class BBMDManager:
         ``_compute_forward_address`` on every broadcast forward.
         """
         self._bdt_forward_cache = [_compute_forward_address(entry) for entry in self._bdt]
+        self._bdt_unicast_mask = {
+            entry.address: entry.broadcast_mask == _ALL_ONES_MASK for entry in self._bdt
+        }
+        self._bdt_peers = [
+            (entry, dest)
+            for entry, dest in zip(self._bdt, self._bdt_forward_cache, strict=True)
+            if entry.address != self._local_address
+        ]
 
     async def start(self) -> None:
         """Start the FDT cleanup background task.
@@ -267,10 +277,7 @@ class BBMDManager:
         Returns ``True`` (assume unicast) if the address is not found
         in the BDT so that local re-broadcast is performed defensively.
         """
-        for entry in self._bdt:
-            if entry.address == addr:
-                return entry.broadcast_mask == _ALL_ONES_MASK
-        return True  # Unknown peer -- assume unicast for safety
+        return self._bdt_unicast_mask.get(addr, True)
 
     def handle_bvlc(
         self,
@@ -469,10 +476,8 @@ class BBMDManager:
             originating_address=forwarded_source,
         )
 
-        # Forward to BDT peers (except self and the originating source)
-        for entry, dest in zip(self._bdt, self._bdt_forward_cache, strict=True):
-            if entry.address == self._local_address:
-                continue
+        # Forward to BDT peers (self already excluded in _bdt_peers)
+        for _entry, dest in self._bdt_peers:
             # B2: Don't forward back to the originating source.
             if dest == originating_source:
                 continue

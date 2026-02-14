@@ -134,12 +134,8 @@ def spawn_bbmd_workers(
     )
 
     for _ in range(fdt_workers):
-        tasks.append(
-            asyncio.create_task(fdt_worker(bbmd_client, bbmd_address, stats, stop))
-        )
+        tasks.append(asyncio.create_task(fdt_worker(bbmd_client, bbmd_address, stats, stop)))
     for _ in range(bdt_workers):
-        tasks.append(
-            asyncio.create_task(bdt_worker(bbmd_client, bbmd_address, stats, stop))
-        )
+        tasks.append(asyncio.create_task(bdt_worker(bbmd_client, bbmd_address, stats, stop)))
 
     return tasks

@@ -7,7 +7,7 @@ import logging
 import socket
 from typing import TYPE_CHECKING
 
-from bac_py.network.address import BIPAddress
+from bac_py.network.address import BIPAddress, _cached_bip_address
 from bac_py.transport.bbmd import BDT_ENTRY_SIZE, FDT_ENTRY_SIZE, BBMDManager, BDTEntry, FDTEntry
 from bac_py.transport.bvll import decode_bvll, encode_bvll
 from bac_py.transport.foreign_device import ForeignDeviceManager
@@ -630,16 +630,16 @@ class BIPTransport:
             logger.warning("Dropped malformed BVLL from %s:%d", addr[0], addr[1])
             return
 
-        source = BIPAddress(host=addr[0], port=addr[1])
+        # Fast self-echo check before BIPAddress allocation
+        if self._local_address is not None and (
+            addr[0] == self._local_address.host and addr[1] == self._local_address.port
+        ):
+            return
+
+        source = _cached_bip_address(addr[0], addr[1])
         logger.debug(
             "BIP recv %d bytes from %s:%d func=%s", len(data), addr[0], addr[1], msg.function.name
         )
-
-        # F6: Drop datagrams from our own address.  This prevents
-        # processing our own broadcasts echoed back by the OS or
-        # wire re-broadcasts from the BBMD.
-        if self._local_address is not None and source == self._local_address:
-            return
 
         # --- BBMD intercept ---
         if self._bbmd is not None:

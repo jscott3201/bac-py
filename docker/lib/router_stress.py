@@ -87,10 +87,7 @@ async def discover_remote_server(
     )
     remote = next((d for d in devices if d.instance == expected_instance), None)
     if remote is None:
-        msg = (
-            f"Server instance {expected_instance} not found "
-            f"on network {remote_network}"
-        )
+        msg = f"Server instance {expected_instance} not found on network {remote_network}"
         raise RuntimeError(msg)
 
     result: str = remote.address_str
@@ -107,13 +104,9 @@ async def route_check_worker(
     while not stop.is_set():
         t0 = time.monotonic()
         try:
-            routers = await client.who_is_router_to_network(
-                network=remote_network, timeout=5.0
-            )
+            routers = await client.who_is_router_to_network(network=remote_network, timeout=5.0)
             if routers:
-                stats.route_check_latencies.append(
-                    (time.monotonic() - t0) * 1000.0
-                )
+                stats.route_check_latencies.append((time.monotonic() - t0) * 1000.0)
                 stats.route_discoveries += 1
         except Exception:
             stats.errors += 1
@@ -162,9 +155,7 @@ def spawn_router_workers(
 
     # Route health-check worker
     tasks.append(
-        asyncio.create_task(
-            route_check_worker(route_check_client, remote_network, stats, stop)
-        )
+        asyncio.create_task(route_check_worker(route_check_client, remote_network, stats, stop))
     )
 
     return tasks

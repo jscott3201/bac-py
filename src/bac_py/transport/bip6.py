@@ -550,6 +550,10 @@ class BIP6Transport:
             logger.warning("Dropped malformed BVLL6 from [%s]:%d", addr[0], addr[1])
             return
 
+        # Fast self-echo check before BIP6Address allocation
+        if msg.source_vmac and msg.source_vmac == self._vmac:
+            return
+
         sender = BIP6Address(host=addr[0], port=addr[1])
         logger.debug(
             "BIP6 recv %d bytes from [%s]:%d func=%s",
