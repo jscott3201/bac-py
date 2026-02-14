@@ -177,6 +177,10 @@ def decode_tag(buf: memoryview | bytes, offset: int) -> tuple[Tag, int]:
 
     # Extended tag number
     if tag_number == 0x0F:
+        if offset >= len(buf):
+            msg = "Tag decode: truncated extended tag number"
+            logger.warning(msg)
+            raise ValueError(msg)
         tag_number = buf[offset]
         offset += 1
 
@@ -191,18 +195,45 @@ def decode_tag(buf: memoryview | bytes, offset: int) -> tuple[Tag, int]:
         length = lvt
     else:
         # Extended length
+        if offset >= len(buf):
+            msg = "Tag decode: truncated extended length"
+            logger.warning(msg)
+            raise ValueError(msg)
         ext = buf[offset]
         offset += 1
         if ext <= 253:
             length = ext
         elif ext == 254:
+            if offset + 2 > len(buf):
+                msg = "Tag decode: truncated 2-byte extended length"
+                logger.warning(msg)
+                raise ValueError(msg)
             length = int.from_bytes(buf[offset : offset + 2], "big")
             offset += 2
         else:  # ext == 255
+            if offset + 4 > len(buf):
+                msg = "Tag decode: truncated 4-byte extended length"
+                logger.warning(msg)
+                raise ValueError(msg)
             length = int.from_bytes(buf[offset : offset + 4], "big")
             offset += 4
 
+    # Sanity check: reject absurdly large length fields that could cause
+    # memory exhaustion in downstream allocation. BACnet APDUs are at most
+    # ~64KB (segmented); 1MB is a generous upper bound.
+    if length > 1_048_576:
+        msg = (
+            f"Tag length ({length}) exceeds sanity limit (1048576 bytes): "
+            f"possible malformed or malicious packet"
+        )
+        logger.warning(msg)
+        raise ValueError(msg)
+
     return Tag(number=tag_number, cls=cls, length=length), offset
+
+
+_MAX_CONTEXT_NESTING_DEPTH = 32
+"""Maximum allowed nesting depth for context tags to prevent DoS from crafted packets."""
 
 
 def extract_context_value(
@@ -219,7 +250,8 @@ def extract_context_value(
     :param offset: Position immediately after the opening tag.
     :param tag_number: The context tag number of the enclosing pair.
     :returns: Tuple of (enclosed raw bytes, offset past the closing tag).
-    :raises ValueError: If the matching closing tag is not found.
+    :raises ValueError: If the matching closing tag is not found or
+        nesting depth exceeds :data:`_MAX_CONTEXT_NESTING_DEPTH`.
     """
     if isinstance(data, bytes):
         data = memoryview(data)
@@ -229,6 +261,13 @@ def extract_context_value(
         t, new_offset = decode_tag(data, offset)
         if t.is_opening:
             depth += 1
+            if depth > _MAX_CONTEXT_NESTING_DEPTH:
+                msg = (
+                    f"Context tag nesting depth exceeds maximum "
+                    f"({_MAX_CONTEXT_NESTING_DEPTH}): possible malformed packet"
+                )
+                logger.warning(msg)
+                raise ValueError(msg)
             offset = new_offset
         elif t.is_closing:
             depth -= 1

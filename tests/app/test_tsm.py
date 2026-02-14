@@ -2502,3 +2502,37 @@ class TestServerTSMTimeoutBranches:
         tsm._restart_segment_timeout(txn)
         assert txn.timeout_handle is not None
         assert txn.timeout_handle is not old_handle
+
+
+# ---------------------------------------------------------------------------
+# Memory: ServerTSM cached_response cleanup
+# ---------------------------------------------------------------------------
+
+
+class TestServerTSMCachedResponseCleanup:
+    """Verify cached_response byte buffers are released on transaction removal."""
+
+    async def test_abort_clears_cached_response(self):
+        """_abort_server_transaction should clear cached_response."""
+        net = FakeNetworkLayer()
+        tsm = ServerTSM(net)
+        pdu = _make_non_segmented_pdu()
+        result = tsm.receive_confirmed_request(pdu, PEER)
+        assert result is not None
+        txn, _data = result
+        txn.cached_response = b"\x00" * 10000  # Simulate large cached response
+        tsm._abort_server_transaction(txn, AbortReason.OTHER)
+        assert txn.cached_response is None
+
+    async def test_timeout_clears_cached_response(self):
+        """_on_timeout should clear cached_response."""
+        net = FakeNetworkLayer()
+        tsm = ServerTSM(net)
+        pdu = _make_non_segmented_pdu()
+        result = tsm.receive_confirmed_request(pdu, PEER)
+        assert result is not None
+        txn, _data = result
+        txn.cached_response = b"\x00" * 10000
+        key = (PEER, txn.invoke_id)
+        tsm._on_timeout(key)
+        assert txn.cached_response is None

@@ -3,6 +3,7 @@ import struct
 import pytest
 
 from bac_py.encoding.primitives import (
+    decode_all_application_values,
     decode_bit_string,
     decode_boolean,
     decode_character_string,
@@ -647,3 +648,27 @@ class TestUnsupportedValueType:
 
         with pytest.raises(TypeError, match="Cannot encode value of type"):
             encode_property_value(object())
+
+
+# ---------------------------------------------------------------------------
+# Security: decoded values limit
+# ---------------------------------------------------------------------------
+
+
+class TestDecodedValuesLimit:
+    """Crafted payloads with many tiny elements should be capped."""
+
+    def test_exceeds_limit_raises(self):
+        from bac_py.encoding.primitives import _MAX_DECODED_VALUES
+
+        # Each application-tagged Null is 1 byte (0x00)
+        data = b"\x00" * (_MAX_DECODED_VALUES + 1)
+        with pytest.raises(ValueError, match="Decoded value count exceeds maximum"):
+            decode_all_application_values(data)
+
+    def test_within_limit_succeeds(self):
+        # 100 Nulls — well within limit
+        data = b"\x00" * 100
+        result = decode_all_application_values(data)
+        assert len(result) == 100
+        assert all(v is None for v in result)

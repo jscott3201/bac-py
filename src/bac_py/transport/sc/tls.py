@@ -36,6 +36,16 @@ class SCTLSConfig:
     allow_plaintext: bool = False
     extra_ca_paths: list[str] = field(default_factory=list)
 
+    def __repr__(self) -> str:
+        """Redact private_key_path to prevent credential leak in logs/tracebacks."""
+        key_display = "'<REDACTED>'" if self.private_key_path else "None"
+        return (
+            f"SCTLSConfig(private_key_path={key_display}, "
+            f"certificate_path={self.certificate_path!r}, "
+            f"ca_certificates_path={self.ca_certificates_path!r}, "
+            f"allow_plaintext={self.allow_plaintext!r})"
+        )
+
 
 def build_client_ssl_context(config: SCTLSConfig) -> ssl.SSLContext | None:
     """Build a TLS 1.3 client context with mutual authentication.
@@ -44,15 +54,29 @@ def build_client_ssl_context(config: SCTLSConfig) -> ssl.SSLContext | None:
     certificate material is provided.
     """
     if config.allow_plaintext and not config.certificate_path:
-        logger.debug("SC TLS client context skipped: plaintext allowed, no certificate")
+        logger.warning(
+            "SC TLS disabled: allow_plaintext=True with no certificate. "
+            "BACnet/SC requires TLS 1.3 with mutual authentication in production "
+            "(ASHRAE 135-2020 Annex AB.7.4). Never use plaintext in production."
+        )
         return None
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
 
     if config.certificate_path and config.private_key_path:
-        logger.debug(f"SC TLS loading client cert: {config.certificate_path}")
+        logger.debug("SC TLS loading client cert: %s", config.certificate_path)
         ctx.load_cert_chain(config.certificate_path, config.private_key_path)
+    elif config.certificate_path and not config.private_key_path:
+        logger.warning(
+            "SC TLS certificate_path is set but private_key_path is missing — "
+            "mutual authentication will not work"
+        )
+    elif config.private_key_path and not config.certificate_path:
+        logger.warning(
+            "SC TLS private_key_path is set but certificate_path is missing — "
+            "mutual authentication will not work"
+        )
 
     _load_ca_certs(ctx, config)
     logger.info("SC TLS client context created: mutual_auth=True")
@@ -66,7 +90,11 @@ def build_server_ssl_context(config: SCTLSConfig) -> ssl.SSLContext | None:
     certificate material is provided.
     """
     if config.allow_plaintext and not config.certificate_path:
-        logger.debug("SC TLS server context skipped: plaintext allowed, no certificate")
+        logger.warning(
+            "SC TLS disabled: allow_plaintext=True with no certificate. "
+            "BACnet/SC requires TLS 1.3 with mutual authentication in production "
+            "(ASHRAE 135-2020 Annex AB.7.4). Never use plaintext in production."
+        )
         return None
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -74,8 +102,18 @@ def build_server_ssl_context(config: SCTLSConfig) -> ssl.SSLContext | None:
     ctx.verify_mode = ssl.CERT_REQUIRED
 
     if config.certificate_path and config.private_key_path:
-        logger.debug(f"SC TLS loading server cert: {config.certificate_path}")
+        logger.debug("SC TLS loading server cert: %s", config.certificate_path)
         ctx.load_cert_chain(config.certificate_path, config.private_key_path)
+    elif config.certificate_path and not config.private_key_path:
+        logger.warning(
+            "SC TLS certificate_path is set but private_key_path is missing — "
+            "mutual authentication will not work"
+        )
+    elif config.private_key_path and not config.certificate_path:
+        logger.warning(
+            "SC TLS private_key_path is set but certificate_path is missing — "
+            "mutual authentication will not work"
+        )
 
     _load_ca_certs(ctx, config)
     logger.info("SC TLS server context created: mutual_auth=True")
@@ -89,11 +127,17 @@ def _load_ca_certs(ctx: ssl.SSLContext, config: SCTLSConfig) -> None:
         paths.extend(config.ca_certificates_path.split(":"))
     paths.extend(config.extra_ca_paths)
 
+    if not paths:
+        logger.warning(
+            "SC TLS no CA certificates configured — peer certificate "
+            "verification will fail unless system CAs are trusted"
+        )
+
     for ca_path in paths:
         p = Path(ca_path.strip())
         if p.is_file():
-            logger.debug(f"SC TLS loading CA file: {p}")
+            logger.debug("SC TLS loading CA file: %s", p)
             ctx.load_verify_locations(cafile=str(p))
         elif p.is_dir():
-            logger.debug(f"SC TLS loading CA directory: {p}")
+            logger.debug("SC TLS loading CA directory: %s", p)
             ctx.load_verify_locations(capath=str(p))

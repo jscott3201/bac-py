@@ -2415,6 +2415,103 @@ class TestStopBranchPartials:
         app.stop.assert_called_once()
 
 
+class TestMemoryCleanupOnStop:
+    """Verify stop() clears caches and listeners to prevent memory leaks."""
+
+    async def test_stop_clears_unconfirmed_listeners(self):
+        """stop() should clear _unconfirmed_listeners."""
+        app = _make_started_app()
+        app._event_engine = None
+        app._cov_manager = None
+        app._dcc_timer = None
+        app._transport = MagicMock()
+        app._transport.stop = AsyncMock()
+
+        # Register some listeners
+        app._unconfirmed_listeners[8] = [lambda *a: None]
+        app._unconfirmed_listeners[1] = [lambda *a: None, lambda *a: None]
+        assert len(app._unconfirmed_listeners) == 2
+
+        await app.stop()
+        assert len(app._unconfirmed_listeners) == 0
+
+    async def test_stop_clears_device_info_cache(self):
+        """stop() should clear _device_info_cache."""
+        app = _make_started_app()
+        app._event_engine = None
+        app._cov_manager = None
+        app._dcc_timer = None
+        app._transport = MagicMock()
+        app._transport.stop = AsyncMock()
+
+        # Populate cache
+        source = BACnetAddress(mac_address=b"\xc0\xa8\x01\x01\xba\xc0")
+        app._device_info_cache[source] = DeviceInfo(max_apdu_length=480, segmentation_supported=0)
+        assert len(app._device_info_cache) == 1
+
+        await app.stop()
+        assert len(app._device_info_cache) == 0
+
+
+class TestDeviceInfoCacheEviction:
+    """Test FIFO eviction when device info cache exceeds 1000 entries."""
+
+    async def test_cache_evicts_oldest_entries_at_limit(self):
+        """When cache hits 1000 entries, oldest 100 are evicted."""
+        app = _make_started_app()
+
+        # Fill cache to exactly 1000 entries
+        for i in range(1000):
+            mac = i.to_bytes(4, "big") + b"\xba\xc0"
+            source = BACnetAddress(mac_address=mac)
+            app._device_info_cache[source] = DeviceInfo(
+                max_apdu_length=480, segmentation_supported=0
+            )
+        assert len(app._device_info_cache) == 1000
+
+        # Add one more via _handle_i_am_for_cache to trigger eviction
+        new_source = BACnetAddress(mac_address=b"\xff\xff\xff\xff\xba\xc0")
+        iam = IAmRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 9999),
+            max_apdu_length=1024,
+            segmentation_supported=Segmentation.BOTH,
+            vendor_id=42,
+        )
+        await app._handle_i_am_for_cache(UnconfirmedServiceChoice.I_AM, iam.encode(), new_source)
+
+        # Should have evicted 100 oldest, then added 1 = 901
+        assert len(app._device_info_cache) == 901
+        # The new entry should be present
+        assert app._device_info_cache.get(new_source) is not None
+        # The first entry (oldest) should be evicted
+        first_mac = (0).to_bytes(4, "big") + b"\xba\xc0"
+        first_source = BACnetAddress(mac_address=first_mac)
+        assert first_source not in app._device_info_cache
+
+    async def test_cache_under_limit_no_eviction(self):
+        """Under 1000 entries, no eviction occurs."""
+        app = _make_started_app()
+
+        for i in range(10):
+            mac = i.to_bytes(4, "big") + b"\xba\xc0"
+            source = BACnetAddress(mac_address=mac)
+            app._device_info_cache[source] = DeviceInfo(
+                max_apdu_length=480, segmentation_supported=0
+            )
+
+        new_source = BACnetAddress(mac_address=b"\xff\xff\xff\xff\xba\xc0")
+        iam = IAmRequest(
+            object_identifier=ObjectIdentifier(ObjectType.DEVICE, 9999),
+            max_apdu_length=1024,
+            segmentation_supported=Segmentation.BOTH,
+            vendor_id=42,
+        )
+        await app._handle_i_am_for_cache(UnconfirmedServiceChoice.I_AM, iam.encode(), new_source)
+
+        # All 11 entries should be present (10 + 1 new)
+        assert len(app._device_info_cache) == 11
+
+
 class TestConfirmedRequestDispatchLine933:
     """Test _handle_confirmed_request dispatches to _dispatch_request (line 933)."""
 

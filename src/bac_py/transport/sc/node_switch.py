@@ -102,6 +102,13 @@ class SCNodeSwitch:
         """Start the node switch, listening for inbound direct connections."""
         if not self._config.enable:
             return
+        if self._server_ssl_ctx is None:
+            logger.warning(
+                "SC Node Switch starting WITHOUT TLS on %s:%d — "
+                "direct connections will be unencrypted and unauthenticated",
+                self._config.bind_address,
+                self._config.bind_port,
+            )
         self._server = await asyncio.start_server(
             self._handle_inbound,
             self._config.bind_address,
@@ -160,10 +167,10 @@ class SCNodeSwitch:
             return False
         try:
             await conn.send_message(msg)
-            logger.debug(f"SC message sent via direct connection to {dest}")
+            logger.debug("SC message sent via direct connection to %s", dest)
             return True
         except (ConnectionError, OSError):
-            logger.debug(f"SC direct send failed to {dest}")
+            logger.debug("SC direct send failed to %s", dest)
             return False
 
     async def resolve_address(
@@ -215,10 +222,10 @@ class SCNodeSwitch:
         :returns: True if connected successfully.
         """
         if len(self._direct_connections) >= self._config.max_connections:
-            logger.debug(f"SC direct connection limit reached ({self._config.max_connections})")
+            logger.debug("SC direct connection limit reached (%d)", self._config.max_connections)
             return False
 
-        logger.debug(f"SC establishing direct connection to {dest} via {uris}")
+        logger.debug("SC establishing direct connection to %s via %s", dest, uris)
         for uri in uris:
             try:
                 ws = await SCWebSocket.connect(uri, self._client_ssl_ctx, SC_DIRECT_SUBPROTOCOL)

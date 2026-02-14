@@ -562,7 +562,7 @@ class TestEthernetTransportStart:
         assert transport._running is True
 
     async def test_start_darwin_without_mac_raises(self):
-        """start() on macOS without explicit MAC should raise OSError."""
+        """start() on macOS without explicit MAC should raise OSError and close fd."""
         transport = EthernetTransport("eth0")  # no mac_address
 
         with (
@@ -571,10 +571,14 @@ class TestEthernetTransportStart:
                 "bac_py.transport.ethernet._open_bpf_device",
                 return_value=7,
             ),
+            patch("os.close") as mock_os_close,
         ):
             mock_sys.platform = "darwin"
             with pytest.raises(OSError, match="MAC address auto-detection not supported"):
                 await transport.start()
+
+        # BPF fd should be cleaned up
+        mock_os_close.assert_called_once_with(7)
 
 
 # ---------------------------------------------------------------------------
@@ -887,3 +891,206 @@ class TestSendFrameUnsupportedSocket:
 
         # Should not raise -- the frame is silently dropped
         transport._send_frame(b"\x00" * 60)
+
+
+# ---------------------------------------------------------------------------
+# Max NPDU boundary tests
+# ---------------------------------------------------------------------------
+
+
+class TestNpduSizeValidation:
+    """NPDU size validation in send_unicast() and send_broadcast()."""
+
+    def _make_transport(self, mac: bytes = b"\xaa\xbb\xcc\xdd\xee\xff") -> EthernetTransport:
+        transport = EthernetTransport("eth0", mac_address=mac)
+        transport._local_mac_bytes = mac
+        transport._running = True
+        mock_sock = MagicMock()
+        mock_sock.fileno.return_value = 99
+        transport._socket = mock_sock
+        return transport
+
+    def test_send_unicast_max_size_npdu(self):
+        """send_unicast should accept a 1497-byte NPDU (max size)."""
+        transport = self._make_transport()
+        npdu = b"\xaa" * MAX_NPDU_LENGTH
+        dest = b"\x11\x22\x33\x44\x55\x66"
+        transport.send_unicast(npdu, dest)
+
+        transport._socket.send.assert_called_once()
+        frame = transport._socket.send.call_args[0][0]
+        # Verify frame structure: 14 header + 3 LLC + 1497 NPDU = 1514
+        assert len(frame) == ETHERNET_HEADER_SIZE + LLC_HEADER_SIZE + MAX_NPDU_LENGTH
+
+    def test_send_broadcast_max_size_npdu(self):
+        """send_broadcast should accept a 1497-byte NPDU (max size)."""
+        transport = self._make_transport()
+        npdu = b"\xaa" * MAX_NPDU_LENGTH
+        transport.send_broadcast(npdu)
+
+        transport._socket.send.assert_called_once()
+        frame = transport._socket.send.call_args[0][0]
+        assert len(frame) == ETHERNET_HEADER_SIZE + LLC_HEADER_SIZE + MAX_NPDU_LENGTH
+
+    def test_send_unicast_oversized_npdu_raises(self):
+        """send_unicast should reject NPDU exceeding 1497 bytes."""
+        transport = self._make_transport()
+        npdu = b"\xaa" * (MAX_NPDU_LENGTH + 1)
+        with pytest.raises(ValueError, match="NPDU too large"):
+            transport.send_unicast(npdu, b"\x00" * 6)
+
+    def test_send_broadcast_oversized_npdu_raises(self):
+        """send_broadcast should reject NPDU exceeding 1497 bytes."""
+        transport = self._make_transport()
+        npdu = b"\xaa" * (MAX_NPDU_LENGTH + 1)
+        with pytest.raises(ValueError, match="NPDU too large"):
+            transport.send_broadcast(npdu)
+
+
+# ---------------------------------------------------------------------------
+# Encode/decode max-size NPDU round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestMaxNpduRoundTrip:
+    """Round-trip encode/decode at the 1497-byte NPDU boundary."""
+
+    def test_max_npdu_round_trip(self):
+        """1497-byte NPDU should encode and decode correctly."""
+        src = b"\xaa\xbb\xcc\xdd\xee\xff"
+        dst = b"\x11\x22\x33\x44\x55\x66"
+        npdu = bytes(range(256)) * 5 + bytes(range(256))[: 1497 - 256 * 5]
+        assert len(npdu) == MAX_NPDU_LENGTH
+
+        frame = _encode_frame(dst, src, npdu)
+        result = _decode_frame(frame)
+        assert result is not None
+        decoded_npdu, decoded_src = result
+        assert decoded_npdu == npdu
+        assert decoded_src == src
+
+
+# ---------------------------------------------------------------------------
+# Callback exception handling
+# ---------------------------------------------------------------------------
+
+
+class TestCallbackExceptionHandling:
+    """_on_readable should survive callback exceptions."""
+
+    def _make_transport(self, mac: bytes = b"\xaa\xbb\xcc\xdd\xee\xff") -> EthernetTransport:
+        transport = EthernetTransport("eth0", mac_address=mac)
+        transport._local_mac_bytes = mac
+        transport._running = True
+        mock_sock = MagicMock()
+        mock_sock.fileno.return_value = 99
+        transport._socket = mock_sock
+        return transport
+
+    def test_callback_exception_does_not_propagate(self):
+        """If the callback raises, _on_readable should log and continue."""
+        mac = b"\xaa\xbb\xcc\xdd\xee\xff"
+        transport = self._make_transport(mac)
+
+        def bad_callback(npdu: bytes, src: bytes) -> None:
+            raise RuntimeError("callback exploded")
+
+        transport.on_receive(bad_callback)
+
+        # Build a valid frame from a different source
+        src = b"\x11\x22\x33\x44\x55\x66"
+        npdu = b"\x01\x02\x03"
+        frame = _encode_frame(mac, src, npdu)
+        transport._socket.recv.return_value = frame
+
+        # Should not raise
+        transport._on_readable()
+
+    def test_callback_exception_does_not_affect_subsequent_frames(self):
+        """After a callback exception, subsequent frames should still be delivered."""
+        mac = b"\xaa\xbb\xcc\xdd\xee\xff"
+        transport = self._make_transport(mac)
+
+        call_count = 0
+
+        def sometimes_bad(npdu: bytes, src: bytes) -> None:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise RuntimeError("first call fails")
+
+        transport.on_receive(sometimes_bad)
+
+        src = b"\x11\x22\x33\x44\x55\x66"
+        frame = _encode_frame(mac, src, b"\x01\x02\x03")
+        transport._socket.recv.return_value = frame
+
+        transport._on_readable()  # First call — callback raises
+        transport._on_readable()  # Second call — should succeed
+
+        assert call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# BPF fd leak on start() failure
+# ---------------------------------------------------------------------------
+
+
+class TestBpfFdLeakOnStartFailure:
+    """BPF fd should be closed if start() fails after _open_bpf_device()."""
+
+    async def test_darwin_no_mac_closes_bpf_fd(self):
+        """On macOS, if MAC is not provided, start() closes BPF fd and raises."""
+        transport = EthernetTransport("en0")  # no mac_address
+
+        with (
+            patch("bac_py.transport.ethernet.sys") as mock_sys,
+            patch("bac_py.transport.ethernet._open_bpf_device", return_value=42),
+            patch("os.close") as mock_os_close,
+        ):
+            mock_sys.platform = "darwin"
+            with pytest.raises(OSError, match="MAC address auto-detection not supported"):
+                await transport.start()
+
+        mock_os_close.assert_called_once_with(42)
+        # Socket should NOT have been assigned
+        assert transport._socket is None
+        assert transport._running is False
+
+
+# ---------------------------------------------------------------------------
+# stop() with unknown socket type logs warning
+# ---------------------------------------------------------------------------
+
+
+class TestStopUnknownSocketWarning:
+    """stop() should log a warning for unclosable socket types."""
+
+    async def test_stop_unknown_socket_logs_warning(self):
+        """stop() with socket that has no close() and is not int logs warning."""
+        mac = b"\xaa\xbb\xcc\xdd\xee\xff"
+        transport = EthernetTransport("eth0", mac_address=mac)
+        transport._running = True
+
+        class FakeSocket:
+            def fileno(self):
+                return 10
+
+        transport._socket = FakeSocket()
+
+        mock_loop = MagicMock()
+        with (
+            patch(
+                "bac_py.transport.ethernet.asyncio.get_running_loop",
+                return_value=mock_loop,
+            ),
+            patch("bac_py.transport.ethernet.logger") as mock_logger,
+        ):
+            await transport.stop()
+
+        # Verify warning was logged about resource leak
+        mock_logger.warning.assert_any_call(
+            "Cannot close socket of type %s on %s — possible resource leak",
+            "FakeSocket",
+            "eth0",
+        )

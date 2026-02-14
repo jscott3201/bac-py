@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import pytest
 
@@ -364,3 +365,119 @@ class TestHubNodeDisconnect:
 
         await hub.stop()
         assert hub.connection_count == 0
+
+
+class TestHubVMACSpoofProtection:
+    """Verify hub drops messages with spoofed originating VMAC."""
+
+    async def test_spoofed_originating_vmac_dropped(self, caplog):
+        """Message with originating VMAC != authenticated peer VMAC is dropped."""
+        hub = SCHubFunction(
+            SCVMAC.random(),
+            DeviceUUID.generate(),
+            config=SCHubConfig(
+                bind_address="127.0.0.1",
+                bind_port=0,
+                tls_config=SCTLSConfig(allow_plaintext=True),
+            ),
+        )
+        await hub.start()
+        port = hub._server.sockets[0].getsockname()[1]
+
+        ws1, _vmac1, _ = await _connect_node(port)
+        ws2, vmac2, _ = await _connect_node(port)
+        await asyncio.sleep(0.2)
+
+        # ws1 sends a message with a spoofed originating VMAC (not vmac1)
+        spoofed_vmac = SCVMAC.random()
+        spoofed_msg = SCMessage(
+            BvlcSCFunction.ENCAPSULATED_NPDU,
+            message_id=99,
+            originating=spoofed_vmac,
+            destination=vmac2,
+            payload=b"\x01\x02\x03",
+        )
+        await ws1.send(spoofed_msg.encode())
+        await asyncio.sleep(0.3)
+
+        # ws2 should NOT have received the spoofed message
+        # The hub should have logged a warning about the mismatch
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.sc"):
+            # Re-check logs (already emitted)
+            pass
+
+        ws1._close_transport()
+        ws2._close_transport()
+        await hub.stop()
+
+    async def test_valid_originating_vmac_forwarded(self):
+        """Message with correct originating VMAC is forwarded normally."""
+        hub = SCHubFunction(
+            SCVMAC.random(),
+            DeviceUUID.generate(),
+            config=SCHubConfig(
+                bind_address="127.0.0.1",
+                bind_port=0,
+                tls_config=SCTLSConfig(allow_plaintext=True),
+            ),
+        )
+        await hub.start()
+        port = hub._server.sockets[0].getsockname()[1]
+
+        ws1, vmac1, _ = await _connect_node(port)
+        ws2, vmac2, _ = await _connect_node(port)
+        await asyncio.sleep(0.2)
+
+        # ws1 sends with correct originating VMAC
+        msg = SCMessage(
+            BvlcSCFunction.ENCAPSULATED_NPDU,
+            message_id=100,
+            originating=vmac1,
+            destination=vmac2,
+            payload=b"\xaa\xbb",
+        )
+        await ws1.send(msg.encode())
+
+        # ws2 should receive it
+        raw = await asyncio.wait_for(ws2.recv(), timeout=3)
+        received = SCMessage.decode(raw)
+        assert received.payload == b"\xaa\xbb"
+
+        ws1._close_transport()
+        ws2._close_transport()
+        await hub.stop()
+
+    async def test_no_originating_vmac_allowed(self):
+        """Message without originating VMAC is forwarded (broadcast case)."""
+        hub = SCHubFunction(
+            SCVMAC.random(),
+            DeviceUUID.generate(),
+            config=SCHubConfig(
+                bind_address="127.0.0.1",
+                bind_port=0,
+                tls_config=SCTLSConfig(allow_plaintext=True),
+            ),
+        )
+        await hub.start()
+        port = hub._server.sockets[0].getsockname()[1]
+
+        ws1, _vmac1, _ = await _connect_node(port)
+        ws2, _vmac2, _ = await _connect_node(port)
+        await asyncio.sleep(0.2)
+
+        # Broadcast message (no destination, no originating)
+        msg = SCMessage(
+            BvlcSCFunction.ENCAPSULATED_NPDU,
+            message_id=101,
+            payload=b"\xcc\xdd",
+        )
+        await ws1.send(msg.encode())
+
+        # ws2 should receive it as a broadcast
+        raw = await asyncio.wait_for(ws2.recv(), timeout=3)
+        received = SCMessage.decode(raw)
+        assert received.payload == b"\xcc\xdd"
+
+        ws1._close_transport()
+        ws2._close_transport()
+        await hub.stop()

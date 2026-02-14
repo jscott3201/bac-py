@@ -1,6 +1,9 @@
+import struct
+
 import pytest
 
 from bac_py.encoding.tags import (
+    _MAX_CONTEXT_NESTING_DEPTH,
     Tag,
     TagClass,
     decode_tag,
@@ -354,3 +357,56 @@ class TestExtractContextValue:
         value, end_offset = extract_context_value(buf, offset, 3)
         assert value == level1
         assert end_offset == len(buf)
+
+
+# ---------------------------------------------------------------------------
+# Security: nesting depth limit
+# ---------------------------------------------------------------------------
+
+
+class TestContextNestingDepthLimit:
+    def test_excessive_nesting_raises(self):
+        """Deeply nested opening tags should raise ValueError."""
+        depth = _MAX_CONTEXT_NESTING_DEPTH + 2
+        buf = bytearray()
+        for _ in range(depth):
+            buf.extend(encode_opening_tag(0))
+        for _ in range(depth):
+            buf.extend(encode_closing_tag(0))
+        _, offset = decode_tag(bytes(buf), 0)
+        with pytest.raises(ValueError, match="nesting depth exceeds maximum"):
+            extract_context_value(bytes(buf), offset, 0)
+
+    def test_valid_nesting_within_limit(self):
+        """Nesting at exactly the limit should work."""
+        # Build nesting depth of 3 (1 outer + 2 inner) — well within limit
+        inner = encode_opening_tag(1) + encode_closing_tag(1)
+        buf = encode_opening_tag(0) + inner + encode_closing_tag(0)
+        _, offset = decode_tag(buf, 0)
+        value, _ = extract_context_value(buf, offset, 0)
+        assert value == inner
+
+
+# ---------------------------------------------------------------------------
+# Security: tag length sanity limit
+# ---------------------------------------------------------------------------
+
+
+class TestTagLengthSanityLimit:
+    def test_oversized_tag_length_raises(self):
+        """Tag with length > 1MB should raise ValueError."""
+        # Craft a tag header claiming 2MB of content:
+        # tag_number=2, APPLICATION, extended length with 4-byte size
+        # Initial byte: (2 << 4) | (0 << 3) | 5 = 0x25
+        # Extended length: 255 (4-byte marker), then 0x00200000 (2MB)
+        header = bytes([0x25, 255]) + struct.pack(">I", 2_000_000)
+        with pytest.raises(ValueError, match="exceeds sanity limit"):
+            decode_tag(header, 0)
+
+    def test_valid_large_tag_within_limit(self):
+        """Tag with length < 1MB should decode fine."""
+        # 500KB — within limit
+        header = bytes([0x25, 255]) + struct.pack(">I", 500_000)
+        tag, _offset = decode_tag(header, 0)
+        assert tag.length == 500_000
+        assert tag.number == 2

@@ -438,6 +438,9 @@ class BACnetApplication:
         elif self._transport:
             await self._transport.stop()
 
+        # Clear caches and listener registrations to release references
+        self._unconfirmed_listeners.clear()
+        self._device_info_cache.clear()
         self._running = False
         logger.info("BACnetApplication stopped")
 
@@ -659,6 +662,11 @@ class BACnetApplication:
             from bac_py.services.who_is import IAmRequest
 
             iam = IAmRequest.decode(data)
+            # Evict oldest entries if cache exceeds limit to prevent unbounded growth
+            if len(self._device_info_cache) >= 1000:
+                # Remove first 100 entries (FIFO order preserved in Python 3.7+ dicts)
+                for evict_key in list(self._device_info_cache)[:100]:
+                    del self._device_info_cache[evict_key]
             self._device_info_cache[source] = DeviceInfo(
                 max_apdu_length=iam.max_apdu_length,
                 segmentation_supported=int(iam.segmentation_supported),
@@ -693,7 +701,7 @@ class BACnetApplication:
             msg = "Application not started"
             raise RuntimeError(msg)
 
-        logger.debug(f"sending confirmed request service={service_choice} to {destination}")
+        logger.debug("sending confirmed request service=%s to %s", service_choice, destination)
 
         # Constrain APDU size to peer capability if cached (Clause 19.4)
         max_apdu_override: int | None = None
@@ -963,7 +971,7 @@ class BACnetApplication:
         if network is None:
             return
 
-        logger.debug(f"dispatching confirmed service {service_choice} from {source}")
+        logger.debug("dispatching confirmed service %s from %s", service_choice, source)
 
         # DCC enforcement: when DISABLE, only allow DCC and ReinitializeDevice
         if (
@@ -1016,7 +1024,7 @@ class BACnetApplication:
             )
         except BACnetRejectError as e:
             if e.reason == RejectReason.UNRECOGNIZED_SERVICE:
-                logger.warning(f"no handler for confirmed service {service_choice}")
+                logger.warning("no handler for confirmed service %s", service_choice)
             response_pdu = RejectPDU(
                 invoke_id=txn.invoke_id,
                 reject_reason=e.reason,
@@ -1040,7 +1048,7 @@ class BACnetApplication:
                 reject_reason=RejectReason.INVALID_PARAMETER_DATA_TYPE,
             )
         except Exception as exc:
-            logger.error(f"handler error for service {service_choice}: {exc}", exc_info=True)
+            logger.error("handler error for service %s: %s", service_choice, exc, exc_info=True)
             response_pdu = AbortPDU(
                 sent_by_server=True,
                 invoke_id=txn.invoke_id,
@@ -1079,7 +1087,7 @@ class BACnetApplication:
             )
             return
 
-        logger.debug(f"dispatching unconfirmed service {pdu.service_choice} from {source}")
+        logger.debug("dispatching unconfirmed service %s from %s", pdu.service_choice, source)
 
         # Dispatch to permanent handlers
         await self._service_registry.dispatch_unconfirmed(

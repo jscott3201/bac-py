@@ -5622,6 +5622,37 @@ class TestPasswordValidationDirect:
         with pytest.raises(BACnetError):
             handlers._validate_password("some_password")
 
+    async def test_correct_password_passes(self):
+        """Correct password should not raise."""
+        app, _db, _device, handlers = _make_app_and_handlers()
+        app.config.password = "correcthorse"
+        handlers._validate_password("correcthorse")  # should not raise
+
+    async def test_none_password_when_none_configured_passes(self):
+        """None password when device has no password should not raise."""
+        app, _db, _device, handlers = _make_app_and_handlers()
+        app.config.password = None
+        handlers._validate_password(None)  # should not raise
+
+    async def test_none_password_when_configured_raises(self):
+        """None password when device has a password should raise."""
+        app, _db, _device, handlers = _make_app_and_handlers()
+        app.config.password = "secret"
+        with pytest.raises(BACnetError):
+            handlers._validate_password(None)
+
+    async def test_password_uses_constant_time_comparison(self):
+        """Verify hmac.compare_digest is used (constant-time)."""
+        import hmac
+        from unittest.mock import patch
+
+        app, _db, _device, handlers = _make_app_and_handlers()
+        app.config.password = "secret123"
+
+        with patch.object(hmac, "compare_digest", return_value=True) as mock_cmp:
+            handlers._validate_password("secret123")
+            mock_cmp.assert_called_once()
+
 
 class TestCreateObjectNoIdentifier:
     """Test create_object raises on missing identifiers (line 1194)."""

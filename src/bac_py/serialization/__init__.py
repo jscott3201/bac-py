@@ -61,7 +61,7 @@ def serialize(obj: Any, format: str = "json", **kwargs: Any) -> bytes:
     """
     serializer = get_serializer(format, **kwargs)
     data = obj.to_dict() if hasattr(obj, "to_dict") else obj
-    logger.debug(f"serialize: {type(obj).__name__}")
+    logger.debug("serialize: %s", type(obj).__name__)
     return serializer.encode(data)
 
 
@@ -73,5 +73,5 @@ def deserialize(raw: bytes, format: str = "json") -> dict[str, Any]:
     :returns: Deserialized dict.
     """
     serializer = get_serializer(format)
-    logger.debug(f"deserialize: {format}")
+    logger.debug("deserialize: %s", format)
     return serializer.decode(raw)

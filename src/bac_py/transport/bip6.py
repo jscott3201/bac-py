@@ -201,6 +201,15 @@ class BIP6Transport:
             self._transport.close()
             self._transport = None
             self._protocol = None
+            # Cancel any pending BVLC request futures
+            for future in self._pending_bvlc.values():
+                if not future.done():
+                    future.cancel()
+            self._pending_bvlc.clear()
+            # Discard any pending address resolution queues
+            self._pending_resolutions.clear()
+            # Clear VMAC cache to release stale entries
+            self._vmac_cache._entries.clear()
             logger.info("BIP6Transport stopped")
 
     def on_receive(self, callback: Callable[[bytes, bytes], None]) -> None:
@@ -225,8 +234,14 @@ class BIP6Transport:
         dest_addr = self._vmac_cache.get(mac_address)
         if dest_addr is None:
             # Queue for address resolution
-            logger.debug(f"BIP6 VMAC {mac_address.hex()} not in cache, queuing for resolution")
+            logger.debug("BIP6 VMAC %s not in cache, queuing for resolution", mac_address.hex())
             pending = self._pending_resolutions.setdefault(mac_address, [])
+            if len(pending) >= 16:
+                logger.warning(
+                    "Pending resolution queue full for VMAC %s, dropping oldest",
+                    mac_address.hex(),
+                )
+                pending.pop(0)
             pending.append(_PendingResolution(npdu=npdu))
             self._send_address_resolution(mac_address)
             return
@@ -237,7 +252,9 @@ class BIP6Transport:
             source_vmac=self._vmac,
             dest_vmac=mac_address,
         )
-        logger.debug(f"BIP6 send unicast {len(npdu)} bytes to [{dest_addr.host}]:{dest_addr.port}")
+        logger.debug(
+            "BIP6 send unicast %d bytes to [%s]:%d", len(npdu), dest_addr.host, dest_addr.port
+        )
         self._transport.sendto(bvll, (dest_addr.host, dest_addr.port))
 
     def send_broadcast(self, npdu: bytes) -> None:
@@ -255,7 +272,10 @@ class BIP6Transport:
             source_vmac=self._vmac,
         )
         logger.debug(
-            f"BIP6 send broadcast {len(npdu)} bytes to [{self._multicast_address}]:{self._port}"
+            "BIP6 send broadcast %d bytes to [%s]:%d",
+            len(npdu),
+            self._multicast_address,
+            self._port,
         )
         self._transport.sendto(bvll, (self._multicast_address, self._port))
 
@@ -338,7 +358,10 @@ class BIP6Transport:
     ) -> None:
         """Process an Address-Resolution-ACK: update cache and flush pending NPDUs."""
         logger.debug(
-            f"BIP6 address resolution ACK: VMAC {source_vmac.hex()} -> [{sender.host}]:{sender.port}"
+            "BIP6 address resolution ACK: VMAC %s -> [%s]:%d",
+            source_vmac.hex(),
+            sender.host,
+            sender.port,
         )
         self._vmac_cache.put(source_vmac, sender)
         self._flush_pending(source_vmac, sender)
@@ -363,7 +386,11 @@ class BIP6Transport:
     def _flush_pending(self, vmac: bytes, address: BIP6Address) -> None:
         """Send any NPDUs queued while waiting for address resolution."""
         pending = self._pending_resolutions.pop(vmac, [])
+        now = time.monotonic()
         for item in pending:
+            # Drop stale entries older than 30 seconds
+            if now - item.created > 30.0:
+                continue
             bvll = encode_bvll6(
                 Bvlc6Function.ORIGINAL_UNICAST_NPDU,
                 item.npdu,
@@ -391,7 +418,11 @@ class BIP6Transport:
 
         sender = BIP6Address(host=addr[0], port=addr[1])
         logger.debug(
-            f"BIP6 recv {len(data)} bytes from [{addr[0]}]:{addr[1]} func={msg.function.name}"
+            "BIP6 recv %d bytes from [%s]:%d func=%s",
+            len(data),
+            addr[0],
+            addr[1],
+            msg.function.name,
         )
 
         # Update resolution cache for any message with a source VMAC

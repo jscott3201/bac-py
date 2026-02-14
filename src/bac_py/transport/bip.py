@@ -213,6 +213,11 @@ class BIPTransport:
         if self._bbmd is not None:
             await self._bbmd.stop()
             self._bbmd = None
+        # Cancel any pending BVLC request futures
+        for future in self._pending_bvlc.values():
+            if not future.done():
+                future.cancel()
+        self._pending_bvlc.clear()
         if self._transport:
             # Leave multicast group if joined
             if self._multicast_enabled:
@@ -251,7 +256,7 @@ class BIPTransport:
         destination = BIPAddress.decode(mac_address)
         bvll = encode_bvll(BvlcFunction.ORIGINAL_UNICAST_NPDU, npdu)
         logger.debug(
-            f"BIP send unicast {len(npdu)} bytes to {destination.host}:{destination.port}"
+            "BIP send unicast %d bytes to %s:%d", len(npdu), destination.host, destination.port
         )
         self._transport.sendto(bvll, (destination.host, destination.port))
 
@@ -276,7 +281,7 @@ class BIPTransport:
             return
 
         bvll = encode_bvll(BvlcFunction.ORIGINAL_BROADCAST_NPDU, npdu)
-        logger.debug(f"BIP send broadcast {len(npdu)} bytes")
+        logger.debug("BIP send broadcast %d bytes", len(npdu))
         if self._multicast_enabled:
             # Send to multicast group per Annex J.8
             self._transport.sendto(bvll, (self._multicast_address, self._port))
@@ -567,6 +572,8 @@ class BIPTransport:
             return await asyncio.wait_for(future, timeout=timeout)
         finally:
             self._pending_bvlc.pop(key, None)
+            if not future.done():
+                future.cancel()
 
     # ------------------------------------------------------------------
     # BBMD / foreign device integration helpers
@@ -622,7 +629,7 @@ class BIPTransport:
 
         source = BIPAddress(host=addr[0], port=addr[1])
         logger.debug(
-            f"BIP recv {len(data)} bytes from {addr[0]}:{addr[1]} func={msg.function.name}"
+            "BIP recv %d bytes from %s:%d func=%s", len(data), addr[0], addr[1], msg.function.name
         )
 
         # F6: Drop datagrams from our own address.  This prevents

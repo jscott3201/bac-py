@@ -76,6 +76,13 @@ class SCHubFunction:
     async def start(self) -> None:
         """Start the hub function WebSocket server."""
         ssl_ctx = build_server_ssl_context(self._config.tls_config)
+        if ssl_ctx is None:
+            logger.warning(
+                "SC Hub Function starting WITHOUT TLS on %s:%d — "
+                "client connections will be unencrypted and unauthenticated",
+                self._config.bind_address,
+                self._config.bind_port,
+            )
         self._server = await asyncio.start_server(
             self._handle_client,
             self._config.bind_address,
@@ -197,11 +204,22 @@ class SCHubFunction:
         if source.peer_vmac is None:
             return
 
+        # Validate originating VMAC matches the authenticated peer identity
+        # to prevent VMAC spoofing attacks (Annex AB.6.2).
+        if msg.originating and msg.originating != source.peer_vmac:
+            logger.warning(
+                "SC hub dropping message: originating VMAC %s does not match "
+                "authenticated peer %s",
+                msg.originating,
+                source.peer_vmac,
+            )
+            return
+
         if msg.destination and not msg.destination.is_broadcast:
-            logger.debug(f"SC hub routing unicast from {source.peer_vmac} to {msg.destination}")
+            logger.debug("SC hub routing unicast from %s to %s", source.peer_vmac, msg.destination)
             await self._unicast(msg, source.peer_vmac)
         else:
-            logger.debug(f"SC hub routing broadcast from {source.peer_vmac}")
+            logger.debug("SC hub routing broadcast from %s", source.peer_vmac)
             await self._broadcast(msg, source.peer_vmac)
 
     async def _unicast(self, msg: SCMessage, exclude: SCVMAC) -> None:

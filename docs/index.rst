@@ -30,6 +30,7 @@ capabilities, see :doc:`features`.
 
    getting-started
    features
+   changelog
 
 .. toctree::
    :caption: User Guide
@@ -42,6 +43,7 @@ capabilities, see :doc:`features`.
    guide/device-management
    guide/secure-connect
    guide/debugging-logging
+   guide/security
    guide/examples
 
 .. toctree::

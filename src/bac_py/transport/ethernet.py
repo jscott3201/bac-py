@@ -215,13 +215,20 @@ class EthernetTransport:
             if self._local_mac_bytes is None:
                 self._local_mac_bytes = _get_mac_address(self._interface)
         elif sys.platform == "darwin":
-            self._socket = _open_bpf_device()
-            if self._local_mac_bytes is None:
-                msg = (
-                    "MAC address auto-detection not supported on macOS; "
-                    "provide mac_address explicitly"
-                )
-                raise OSError(msg)
+            fd = _open_bpf_device()
+            try:
+                if self._local_mac_bytes is None:
+                    msg = (
+                        "MAC address auto-detection not supported on macOS; "
+                        "provide mac_address explicitly"
+                    )
+                    raise OSError(msg)
+            except BaseException:
+                import os
+
+                os.close(fd)
+                raise
+            self._socket = fd
         else:
             msg = (
                 f"BACnet Ethernet transport is not supported on {sys.platform}. "
@@ -229,6 +236,8 @@ class EthernetTransport:
             )
             raise NotImplementedError(msg)
 
+        # Set running before registering the reader so _on_readable sees
+        # the correct state if it fires immediately.
         self._running = True
 
         # Register the socket fd for async reading
@@ -248,7 +257,7 @@ class EthernetTransport:
         self._running = False
 
         loop = asyncio.get_running_loop()
-        with contextlib.suppress(Exception):
+        with contextlib.suppress(OSError, ValueError):
             loop.remove_reader(self._get_fd())
 
         if self._socket is not None:
@@ -259,6 +268,12 @@ class EthernetTransport:
                 import os
 
                 os.close(self._socket)
+            else:
+                logger.warning(
+                    "Cannot close socket of type %s on %s — possible resource leak",
+                    type(self._socket).__name__,
+                    self._interface,
+                )
             self._socket = None
 
         logger.info("EthernetTransport stopped on %s", self._interface)
@@ -276,12 +291,16 @@ class EthernetTransport:
 
         :param npdu: NPDU bytes to send.
         :param mac_address: 6-byte destination Ethernet MAC address.
+        :raises ValueError: If *npdu* exceeds :data:`MAX_NPDU_LENGTH`.
         """
         if self._local_mac_bytes is None:
             msg = "Transport not started"
             raise RuntimeError(msg)
+        if len(npdu) > MAX_NPDU_LENGTH:
+            msg = f"NPDU too large: {len(npdu)} bytes exceeds maximum {MAX_NPDU_LENGTH}"
+            raise ValueError(msg)
         logger.debug(
-            f"ethernet send {len(npdu)} bytes to {':'.join(f'{b:02x}' for b in mac_address)}"
+            "ethernet send %d bytes to %s", len(npdu), ":".join(f"{b:02x}" for b in mac_address)
         )
         frame = _encode_frame(mac_address, self._local_mac_bytes, npdu)
         self._send_frame(frame)
@@ -290,11 +309,15 @@ class EthernetTransport:
         """Send an NPDU as a local broadcast.
 
         :param npdu: NPDU bytes to broadcast.
+        :raises ValueError: If *npdu* exceeds :data:`MAX_NPDU_LENGTH`.
         """
         if self._local_mac_bytes is None:
             msg = "Transport not started"
             raise RuntimeError(msg)
-        logger.debug(f"ethernet send broadcast {len(npdu)} bytes")
+        if len(npdu) > MAX_NPDU_LENGTH:
+            msg = f"NPDU too large: {len(npdu)} bytes exceeds maximum {MAX_NPDU_LENGTH}"
+            raise ValueError(msg)
+        logger.debug("ethernet send broadcast %d bytes", len(npdu))
         frame = _encode_frame(ETHERNET_BROADCAST, self._local_mac_bytes, npdu)
         self._send_frame(frame)
 
@@ -368,12 +391,19 @@ class EthernetTransport:
                 return
 
             logger.debug(
-                f"ethernet recv {len(npdu)} bytes from {':'.join(f'{b:02x}' for b in src_mac)}"
+                "ethernet recv %d bytes from %s", len(npdu), ":".join(f"{b:02x}" for b in src_mac)
             )
 
             if self._receive_callback is not None:
-                self._receive_callback(npdu, src_mac)
+                try:
+                    self._receive_callback(npdu, src_mac)
+                except Exception:
+                    logger.warning(
+                        "Callback error processing frame from %s",
+                        ":".join(f"{b:02x}" for b in src_mac),
+                        exc_info=True,
+                    )
 
-        except OSError:
+        except Exception:
             if self._running:
                 logger.warning("Error receiving on %s", self._interface, exc_info=True)

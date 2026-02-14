@@ -109,8 +109,8 @@ async def run() -> None:
         vendor_name="bac-py",
         vendor_identifier=0,
         model_name="bac-py-thermostat",
-        firmware_revision="1.2.0",
-        application_software_version="1.2.0",
+        firmware_revision="1.3.8",
+        application_software_version="1.3.8",
     )
     app.object_db.add(device)
 

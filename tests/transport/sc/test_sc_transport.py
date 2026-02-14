@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 from bac_py.transport.sc import SCTransport, SCTransportConfig
 from bac_py.transport.sc.hub_function import SCHubConfig, SCHubFunction
@@ -296,3 +297,68 @@ class TestTransportPortProtocol:
 
         transport = SCTransport(SCTransportConfig())
         assert isinstance(transport, TransportPort)
+
+
+# ---------------------------------------------------------------------------
+# Security: plaintext warnings on start
+# ---------------------------------------------------------------------------
+
+
+class TestSCTransportMemoryCleanup:
+    """Verify SCTransport.stop() cleans up send tasks."""
+
+    async def test_stop_clears_send_tasks(self):
+        """stop() should cancel and clear all pending send tasks."""
+        transport = SCTransport(SCTransportConfig())
+        await transport.start()
+
+        # Inject dummy send tasks
+        dummy1 = asyncio.ensure_future(asyncio.sleep(999))
+        dummy2 = asyncio.ensure_future(asyncio.sleep(999))
+        transport._send_tasks.add(dummy1)
+        transport._send_tasks.add(dummy2)
+        assert len(transport._send_tasks) == 2
+
+        await transport.stop()
+        assert len(transport._send_tasks) == 0
+        assert dummy1.cancelled()
+        assert dummy2.cancelled()
+
+    async def test_stop_handles_already_done_tasks(self):
+        """stop() handles tasks that completed before stop."""
+        transport = SCTransport(SCTransportConfig())
+        await transport.start()
+
+        # Create a task that finishes immediately
+        done_task = asyncio.ensure_future(asyncio.sleep(0))
+        await asyncio.sleep(0.05)  # Let it complete
+        transport._send_tasks.add(done_task)
+
+        await transport.stop()
+        assert len(transport._send_tasks) == 0
+
+
+class TestSCTransportPlaintextWarnings:
+    async def test_start_plaintext_warns(self, caplog):
+        """SCTransport.start() with allow_plaintext=True logs WARNING."""
+        transport = SCTransport(SCTransportConfig(tls_config=SCTLSConfig(allow_plaintext=True)))
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.sc"):
+            await transport.start()
+            await transport.stop()
+        assert any("WITHOUT TLS" in m for m in caplog.messages)
+
+    async def test_hub_function_plaintext_warns(self, caplog):
+        """Hub function start without TLS logs WARNING."""
+        hub = SCHubFunction(
+            SCVMAC.random(),
+            DeviceUUID.generate(),
+            config=SCHubConfig(
+                bind_address="127.0.0.1",
+                bind_port=0,
+                tls_config=SCTLSConfig(allow_plaintext=True),
+            ),
+        )
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.sc"):
+            await hub.start()
+        assert any("WITHOUT TLS" in m for m in caplog.messages)
+        await hub.stop()

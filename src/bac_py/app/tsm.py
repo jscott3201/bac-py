@@ -164,7 +164,7 @@ class ClientTSM:
         txn._effective_max_apdu = effective_max_apdu  # type: ignore[attr-defined]
         key = (destination, invoke_id)
         self._transactions[key] = txn
-        logger.debug(f"TSM transaction created invoke_id={invoke_id}")
+        logger.debug("TSM transaction created invoke_id=%s", invoke_id)
 
         try:
             max_payload = compute_max_segment_payload(effective_max_apdu, "confirmed_request")
@@ -191,7 +191,7 @@ class ClientTSM:
             if txn.state != ClientTransactionState.AWAIT_CONFIRMATION:
                 return
             self._cancel_timeout(txn)
-            logger.debug(f"TSM transaction completed invoke_id={invoke_id}")
+            logger.debug("TSM transaction completed invoke_id=%s", invoke_id)
             txn.future.set_result(b"")
 
     def handle_complex_ack(
@@ -208,7 +208,7 @@ class ClientTSM:
             if txn.state != ClientTransactionState.AWAIT_CONFIRMATION:
                 return
             self._cancel_timeout(txn)
-            logger.debug(f"TSM transaction completed invoke_id={invoke_id}")
+            logger.debug("TSM transaction completed invoke_id=%s", invoke_id)
             txn.future.set_result(data)
 
     def handle_error(
@@ -490,7 +490,7 @@ class ClientTSM:
             return
         if txn.retry_count < self._retries:
             txn.retry_count += 1
-            logger.debug(f"TSM retry invoke_id={txn.invoke_id} attempt={txn.retry_count}")
+            logger.debug("TSM retry invoke_id=%s attempt=%s", txn.invoke_id, txn.retry_count)
             # Retry using the same method as the original request.
             # If the request data exceeds the max segment payload it
             # must be re-sent as a segmented request.
@@ -861,6 +861,7 @@ class ServerTSM:
         self._network.send(encode_apdu(abort), txn.source, expecting_reply=False)
         key = (txn.source, txn.invoke_id)
         self._cancel_timeout(txn)
+        txn.cached_response = None  # Release large byte buffer
         self._transactions.pop(key, None)
 
     def _start_timeout(self, txn: ServerTransaction) -> None:
@@ -911,7 +912,9 @@ class ServerTSM:
 
     def _on_timeout(self, key: tuple[BACnetAddress, int]) -> None:
         """Remove transaction on timeout."""
-        self._transactions.pop(key, None)
+        txn = self._transactions.pop(key, None)
+        if txn is not None:
+            txn.cached_response = None  # Release large byte buffer
 
     def _on_server_segment_timeout(self, key: tuple[BACnetAddress, int]) -> None:
         """Handle segment timeout during segmented server transactions."""

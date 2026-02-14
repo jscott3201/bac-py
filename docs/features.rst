@@ -602,7 +602,7 @@ sockets between separate application instances running in containers. The
 infrastructure lives under ``docker/`` and uses Docker Compose with isolated
 bridge networks to simulate realistic BACnet/IP topologies.
 
-Eight scenarios are provided:
+Nine scenarios are provided:
 
 - **Client/Server** -- ReadProperty, WriteProperty, ReadPropertyMultiple,
   WritePropertyMultiple, Who-Is discovery, and object list enumeration over
@@ -624,11 +624,13 @@ Eight scenarios are provided:
 - **Events** -- Alarm reporting triggered by out-of-range writes,
   GetAlarmSummary, GetEventInformation, AcknowledgeAlarm, and
   GetEnrollmentSummary queries.
+- **Secure Connect** -- BACnet/SC hub function and hub connector with TLS,
+  VMAC addressing, and BVLC-SC message exchange over WebSocket connections.
 - **Demo** -- Interactive demonstration of client/server capabilities
   including reads, writes, discovery, and COV subscriptions.
 
 Run with ``make docker-test`` (all scenarios) or individual targets like
-``make docker-test-client``. See :ref:`docker-testing-example` for details.
+``make docker-test-client``, ``make docker-test-sc``, etc.
 
 
 .. _structured-logging:

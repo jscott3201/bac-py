@@ -351,7 +351,9 @@ def _encode_confirmed_request(pdu: ConfirmedRequestPDU) -> bytes:
     :returns: Encoded PDU bytes.
     """
     logger.debug(
-        f"encode confirmed request service={pdu.service_choice} invoke_id={pdu.invoke_id}"
+        "encode confirmed request service=%d invoke_id=%d",
+        pdu.service_choice,
+        pdu.invoke_id,
     )
     buf = bytearray()
     # Byte 0: PDU type + flags
@@ -496,7 +498,7 @@ def decode_apdu(data: memoryview | bytes) -> APDU:
         data = memoryview(data)
 
     pdu_type = PduType((data[0] >> 4) & 0x0F)
-    logger.debug(f"decode APDU type={pdu_type}")
+    logger.debug("decode APDU type=%s", pdu_type)
 
     match pdu_type:
         case PduType.CONFIRMED_REQUEST:

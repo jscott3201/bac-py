@@ -218,7 +218,7 @@ class NetworkLayer:
         if entry is None:
             return None
         if time.monotonic() - entry.last_seen > self._cache_ttl:
-            logger.debug(f"Router cache entry for network {dnet} expired, evicting")
+            logger.debug("Router cache entry for network %d expired, evicting", dnet)
             del self._router_cache[dnet]
             return None
         return entry.router_mac
@@ -265,7 +265,7 @@ class NetworkLayer:
 
         if self._receive_callback:
             logger.debug(
-                f"Dispatching APDU ({len(npdu.apdu)} bytes) to application from {src_addr}"
+                "Dispatching APDU (%d bytes) to application from %s", len(npdu.apdu), src_addr
             )
             self._receive_callback(npdu.apdu, src_addr)
 
@@ -295,7 +295,7 @@ class NetworkLayer:
             )
             return
 
-        logger.debug(f"Handling network message type {npdu.message_type}: {type(msg).__name__}")
+        logger.debug("Handling network message type %s: %s", npdu.message_type, type(msg).__name__)
 
         if isinstance(msg, IAmRouterToNetwork):
             self._handle_i_am_router(msg, source_mac)
@@ -318,7 +318,7 @@ class NetworkLayer:
             try:
                 listener(msg, source_mac)
             except Exception:
-                logger.debug("Error in network message listener", exc_info=True)
+                logger.warning("Error in network message listener", exc_info=True)
 
     def _handle_i_am_router(
         self,
@@ -367,11 +367,7 @@ class NetworkLayer:
             now = time.monotonic()
             if now - existing.last_seen <= self._cache_ttl:
                 # Fresh entry exists — just refresh the timestamp
-                self._router_cache[snet] = RouterCacheEntry(
-                    network=snet,
-                    router_mac=existing.router_mac,
-                    last_seen=now,
-                )
+                existing.last_seen = now
                 return
         # No entry or stale — learn from source
         self._router_cache[snet] = RouterCacheEntry(
@@ -440,13 +436,13 @@ class NetworkLayer:
         router_mac = self.get_router_for_network(destination.network)
         if router_mac is not None:
             logger.debug(
-                f"Sending to network {destination.network} via cached router {router_mac.hex()}"
+                "Sending to network %d via cached router %s", destination.network, router_mac.hex()
             )
             self._transport.send_unicast(npdu_bytes, router_mac)
         else:
             # Cache miss: broadcast NPDU (a router will pick it up)
             logger.warning(
-                f"No cached router for network {destination.network}, broadcasting NPDU"
+                "No cached router for network %d, broadcasting NPDU", destination.network
             )
             self._transport.send_broadcast(npdu_bytes)
             # Also issue Who-Is-Router-To-Network to populate cache

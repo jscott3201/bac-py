@@ -1,3 +1,4 @@
+import logging
 import ssl
 import tempfile
 from pathlib import Path
@@ -112,3 +113,92 @@ class TestCACertLoading:
         cfg = SCTLSConfig(extra_ca_paths=["/nonexistent/ca.pem"])
         ctx = build_client_ssl_context(cfg)
         assert ctx is not None
+
+
+# ---------------------------------------------------------------------------
+# Security: SCTLSConfig repr redacts private_key_path
+# ---------------------------------------------------------------------------
+
+
+class TestSCTLSConfigRepr:
+    def test_repr_redacts_private_key_path(self):
+        """Private key path must never appear in repr (logs, tracebacks)."""
+        cfg = SCTLSConfig(
+            private_key_path="/secret/path/to/device.key",
+            certificate_path="/path/to/cert.pem",
+            ca_certificates_path="/path/to/ca.pem",
+        )
+        r = repr(cfg)
+        assert "/secret/path/to/device.key" not in r
+        assert "<REDACTED>" in r
+        assert "/path/to/cert.pem" in r
+        assert "/path/to/ca.pem" in r
+
+    def test_repr_no_key_shows_none(self):
+        """When no private_key_path is set, repr shows None."""
+        cfg = SCTLSConfig()
+        r = repr(cfg)
+        assert "private_key_path=None" in r
+        assert "<REDACTED>" not in r
+
+    def test_str_also_redacts(self):
+        """str() uses repr, so it should also be safe."""
+        cfg = SCTLSConfig(private_key_path="/secret/key.pem")
+        assert "/secret/key.pem" not in str(cfg)
+
+
+# ---------------------------------------------------------------------------
+# Security: plaintext warnings
+# ---------------------------------------------------------------------------
+
+
+class TestPlaintextWarnings:
+    def test_client_plaintext_warns(self, caplog):
+        """Building a client context with allow_plaintext=True should log WARNING."""
+        cfg = SCTLSConfig(allow_plaintext=True)
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.sc.tls"):
+            build_client_ssl_context(cfg)
+        assert any("TLS disabled" in m for m in caplog.messages)
+        assert any("plaintext" in m.lower() for m in caplog.messages)
+
+    def test_server_plaintext_warns(self, caplog):
+        """Building a server context with allow_plaintext=True should log WARNING."""
+        cfg = SCTLSConfig(allow_plaintext=True)
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.sc.tls"):
+            build_server_ssl_context(cfg)
+        assert any("TLS disabled" in m for m in caplog.messages)
+
+    def test_client_cert_without_key_warns(self, caplog):
+        """certificate_path without private_key_path should log WARNING."""
+        cfg = SCTLSConfig(certificate_path="/path/to/cert.pem")
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.sc.tls"):
+            build_client_ssl_context(cfg)
+        assert any("private_key_path is missing" in m for m in caplog.messages)
+
+    def test_client_key_without_cert_warns(self, caplog):
+        """private_key_path without certificate_path should log WARNING."""
+        cfg = SCTLSConfig(private_key_path="/path/to/key.pem")
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.sc.tls"):
+            build_client_ssl_context(cfg)
+        assert any("certificate_path is missing" in m for m in caplog.messages)
+
+    def test_server_cert_without_key_warns(self, caplog):
+        """Server: certificate_path without private_key_path should log WARNING."""
+        cfg = SCTLSConfig(certificate_path="/path/to/cert.pem")
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.sc.tls"):
+            build_server_ssl_context(cfg)
+        assert any("private_key_path is missing" in m for m in caplog.messages)
+
+    def test_server_key_without_cert_warns(self, caplog):
+        """Server: private_key_path without certificate_path should log WARNING."""
+        cfg = SCTLSConfig(private_key_path="/path/to/key.pem")
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.sc.tls"):
+            build_server_ssl_context(cfg)
+        assert any("certificate_path is missing" in m for m in caplog.messages)
+
+    def test_no_ca_certs_warns(self, caplog):
+        """No CA certificates configured should log WARNING."""
+        cfg = SCTLSConfig()
+        with caplog.at_level(logging.WARNING, logger="bac_py.transport.sc.tls"):
+            build_client_ssl_context(cfg)
+        assert any("no ca certificates" in m.lower() for m in caplog.messages)

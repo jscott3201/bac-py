@@ -671,6 +671,11 @@ class EventEngine:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._task
             self._task = None
+        # Cancel pending confirmed notification tasks to release memory
+        for task in self._pending_confirmed_tasks:
+            if not task.done():
+                task.cancel()
+        self._pending_confirmed_tasks.clear()
         self._contexts.clear()
 
     # --- Main loop ---
@@ -702,7 +707,7 @@ class EventEngine:
 
     def _evaluate_enrollment(self, enrollment: BACnetObject, now: float) -> None:
         """Evaluate a single EventEnrollment object."""
-        logger.debug(f"evaluating EventEnrollment for {enrollment.object_identifier}")
+        logger.debug("evaluating EventEnrollment for %s", enrollment.object_identifier)
         # Check event_detection_enable
         detection_enable = self._read_prop(enrollment, PropertyIdentifier.EVENT_DETECTION_ENABLE)
         if detection_enable is False:
@@ -793,7 +798,7 @@ class EventEngine:
 
     def _evaluate_intrinsic(self, obj: BACnetObject, now: float) -> None:
         """Evaluate an intrinsic-reporting object."""
-        logger.debug(f"evaluating intrinsic reporting for {obj.object_identifier}")
+        logger.debug("evaluating intrinsic reporting for %s", obj.object_identifier)
         # Check event_detection_enable if present
         detection_enable = obj._properties.get(PropertyIdentifier.EVENT_DETECTION_ENABLE)
         if detection_enable is False:
@@ -1135,7 +1140,7 @@ class EventEngine:
             from_state=transition.from_state,
         )
 
-        logger.debug(f"sending event notification for {enrollment.object_identifier}")
+        logger.debug("sending event notification for %s", enrollment.object_identifier)
         self._route_notification(notification, notification_class_num, transition.to_state)
 
         # Update event_time_stamps on the enrollment
@@ -1171,7 +1176,7 @@ class EventEngine:
             from_state=transition.from_state,
         )
 
-        logger.debug(f"sending event notification for {obj.object_identifier}")
+        logger.debug("sending event notification for %s", obj.object_identifier)
         self._route_notification(notification, notification_class_num, transition.to_state)
 
         # Update event_state on the object itself

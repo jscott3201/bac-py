@@ -105,6 +105,11 @@ class SCHubConnector:
 
     async def start(self) -> None:
         """Start the hub connector, begin connection attempts."""
+        if self._ssl_ctx is None:
+            logger.warning(
+                "SC hub connector starting WITHOUT TLS — hub communication "
+                "will be unencrypted and unauthenticated"
+            )
         logger.info("SC hub connector starting")
         self._running = True
         self._connect_task = asyncio.ensure_future(self._connect_loop())
@@ -181,7 +186,7 @@ class SCHubConnector:
 
                 # Both failed — backoff and retry
                 logger.warning(
-                    f"SC hub connection failed, retrying in {self._reconnect_delay:.1f}s"
+                    "SC hub connection failed, retrying in %.1fs", self._reconnect_delay
                 )
                 self._increase_backoff()
                 await asyncio.sleep(self._reconnect_delay)
@@ -225,9 +230,11 @@ class SCHubConnector:
 
         if vmac_collision:
             logger.warning("VMAC collision connecting to %s", uri)
+            await conn._go_idle()  # Clean up connection resources
             return False
 
         if conn.state != SCConnectionState.CONNECTED:
+            await conn._go_idle()  # Clean up connection resources
             return False
 
         conn.on_disconnected = self._on_disconnected

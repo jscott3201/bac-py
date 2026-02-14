@@ -728,13 +728,23 @@ def decode_application_value(data: bytes | memoryview) -> object:
         msg = f"Expected application tag, got context tag {tag.number}"
         raise ValueError(msg)
 
-    content = data[offset : offset + tag.length]
-
     match tag.number:
         case 0:  # Null
             return None
         case 1:  # Boolean - value is in the tag L/V/T field (Clause 20.2.3)
             return tag.is_boolean_true
+
+    # Bounds check (after Boolean/Null which don't use content bytes)
+    if offset + tag.length > len(data):
+        msg = (
+            f"Application tag content truncated: tag claims {tag.length} bytes "
+            f"at offset {offset}, but only {len(data) - offset} bytes remain"
+        )
+        logger.warning(msg)
+        raise ValueError(msg)
+    content = data[offset : offset + tag.length]
+
+    match tag.number:
         case 2:  # Unsigned
             return decode_unsigned(content)
         case 3:  # Signed
@@ -763,6 +773,10 @@ def decode_application_value(data: bytes | memoryview) -> object:
             raise ValueError(msg)
 
 
+_MAX_DECODED_VALUES = 10_000
+"""Maximum number of decoded application-tagged values to prevent memory exhaustion."""
+
+
 def decode_all_application_values(data: bytes | memoryview) -> list[object]:
     """Decode all application-tagged values from concatenated bytes.
 
@@ -771,7 +785,8 @@ def decode_all_application_values(data: bytes | memoryview) -> list[object]:
 
     :param data: Concatenated application-tagged encoded bytes.
     :returns: List of decoded Python values.
-    :raises ValueError: If a non-application tag is encountered.
+    :raises ValueError: If a non-application tag is encountered or the
+        number of decoded values exceeds :data:`_MAX_DECODED_VALUES`.
     """
     from bac_py.encoding.tags import decode_tag
 
@@ -781,6 +796,14 @@ def decode_all_application_values(data: bytes | memoryview) -> list[object]:
     results: list[object] = []
     offset = 0
     while offset < len(data):
+        if len(results) >= _MAX_DECODED_VALUES:
+            msg = (
+                f"Decoded value count exceeds maximum ({_MAX_DECODED_VALUES}): "
+                f"possible malformed or malicious payload"
+            )
+            logger.warning(msg)
+            raise ValueError(msg)
+
         tag, tag_end = decode_tag(data, offset)
         if tag.cls != TagClass.APPLICATION:
             msg = f"Expected application tag at offset {offset}, got context tag {tag.number}"

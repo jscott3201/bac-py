@@ -907,3 +907,25 @@ class TestOnConnectionLost:
 
         assert transport._transport is None
         assert transport._protocol is None
+
+
+class TestVMACCacheCleanupOnStop:
+    """Verify stop() clears the VMAC cache to release memory."""
+
+    async def test_stop_clears_vmac_cache(self):
+        """stop() should clear all VMAC cache entries."""
+        from bac_py.network.address import BIP6Address
+
+        transport = BIP6Transport(vmac=b"\xaa\xbb\xcc")
+        # Populate cache with some entries
+        addr = BIP6Address(host="::1", port=0xBAC0)
+        transport._vmac_cache.put(b"\x01\x02\x03", addr)
+        transport._vmac_cache.put(b"\x04\x05\x06", addr)
+        assert len(transport._vmac_cache._entries) == 2
+
+        # Mock transport so stop() doesn't fail on network I/O
+        transport._transport = MagicMock()
+        transport._transport.close = MagicMock()
+
+        await transport.stop()
+        assert len(transport._vmac_cache._entries) == 0

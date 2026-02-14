@@ -1,4 +1,5 @@
 import asyncio
+import logging
 
 import pytest
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
@@ -221,6 +222,65 @@ class TestSCWebSocketConnectionErrors:
             assert not client_ws.is_open
 
             await server_ws.close()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+
+class TestWebSocketFrameSizeLimit:
+    """Verify max_frame_size enforcement in recv()."""
+
+    async def test_oversized_frame_dropped(self, caplog):
+        """Frames exceeding max_frame_size are silently dropped."""
+        server, port, accepted = await _start_ws_server()
+        try:
+            client_ws = await SCWebSocket.connect(
+                f"ws://127.0.0.1:{port}",
+                ssl_ctx=None,
+                subprotocol=SC_HUB_SUBPROTOCOL,
+            )
+            server_ws = await asyncio.wait_for(accepted, timeout=5)
+
+            # Set a small frame size limit on the server side
+            server_ws._max_frame_size = 10
+
+            # Send oversized then valid message — recv() should skip the big one
+            await client_ws.send(b"\x00" * 50)  # over limit
+            await asyncio.sleep(0.05)
+            await client_ws.send(b"\x04\x05\x06")  # within limit
+
+            with caplog.at_level(logging.WARNING, logger="bac_py.transport.sc"):
+                data = await asyncio.wait_for(server_ws.recv(), timeout=5)
+            assert data == b"\x04\x05\x06"
+            assert any("too large" in m for m in caplog.messages)
+
+            client_ws._close_transport()
+            server_ws._close_transport()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    async def test_no_frame_size_limit_accepts_all(self):
+        """With max_frame_size=0 (default), all frames pass through."""
+        server, port, accepted = await _start_ws_server()
+        try:
+            client_ws = await SCWebSocket.connect(
+                f"ws://127.0.0.1:{port}",
+                ssl_ctx=None,
+                subprotocol=SC_HUB_SUBPROTOCOL,
+            )
+            server_ws = await asyncio.wait_for(accepted, timeout=5)
+
+            assert server_ws._max_frame_size == 0  # Default
+
+            # Large frame should be accepted
+            large = b"\xaa" * 5000
+            await client_ws.send(large)
+            data = await asyncio.wait_for(server_ws.recv(), timeout=5)
+            assert data == large
+
+            client_ws._close_transport()
+            server_ws._close_transport()
         finally:
             server.close()
             await server.wait_closed()

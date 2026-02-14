@@ -355,10 +355,10 @@ def _parse_address_str(addr: str) -> BACnetAddress:
         mac = bytes(int(x, 16) for x in mac_str.split(":"))
         if network is not None:
             result = remote_station(network, mac)
-            logger.debug(f"parse_address: {addr!r} -> Ethernet MAC on network {network}")
+            logger.debug("parse_address: %r -> Ethernet MAC on network %d", addr, network)
             return result
         result = BACnetAddress(mac_address=mac)
-        logger.debug(f"parse_address: {addr!r} -> local Ethernet MAC")
+        logger.debug("parse_address: %r -> local Ethernet MAC", addr)
         return result
 
     # Try IPv6 bracket notation first
@@ -369,22 +369,22 @@ def _parse_address_str(addr: str) -> BACnetAddress:
         port = int(port_str) if port_str else _DEFAULT_PORT
         if not (0 <= port <= 65535):
             msg = f"Port number out of range: {port}"
-            logger.warning(f"parse_address: {addr!r} -> {msg}")
+            logger.warning("parse_address: %r -> %s", addr, msg)
             raise ValueError(msg)
         # Validate IPv6 address
         try:
             socket.inet_pton(socket.AF_INET6, ipv6)
         except OSError:
             msg = f"Invalid IPv6 address: {ipv6!r}"
-            logger.warning(f"parse_address: {addr!r} -> {msg}")
+            logger.warning("parse_address: %r -> %s", addr, msg)
             raise ValueError(msg) from None
         mac = BIP6Address(host=ipv6, port=port).encode()
         if network is not None:
             result = remote_station(network, mac)
-            logger.debug(f"parse_address: {addr!r} -> IPv6 on network {network}")
+            logger.debug("parse_address: %r -> IPv6 on network %d", addr, network)
             return result
         result = BACnetAddress(mac_address=mac)
-        logger.debug(f"parse_address: {addr!r} -> local IPv6")
+        logger.debug("parse_address: %r -> local IPv6", addr)
         return result
 
     m = _ADDR_RE.match(addr)
@@ -414,7 +414,7 @@ def _parse_address_str(addr: str) -> BACnetAddress:
     if mh:
         network = int(mh.group(1))
         mac = bytes.fromhex(mh.group(2))
-        logger.debug(f"parse_address: {addr!r} -> remote hex MAC on network {network}")
+        logger.debug("parse_address: %r -> remote hex MAC on network %d", addr, network)
         return remote_station(network, mac)
 
     msg = (
@@ -423,5 +423,5 @@ def _parse_address_str(addr: str) -> BACnetAddress:
         "'2:192.168.1.100', '[::1]:47808', 'AA:BB:CC:DD:EE:FF', "
         "'4352:01' (network:hex_mac), or '*'"
     )
-    logger.warning(f"parse_address: failed to parse {addr!r}")
+    logger.warning("parse_address: failed to parse %r", addr)
     raise ValueError(msg)

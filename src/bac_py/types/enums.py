@@ -115,7 +115,7 @@ class PropertyIdentifier(IntEnum):
             member._name_ = f"VENDOR_{value}"
             member._value_ = value
             _PROPERTY_ID_VENDOR_CACHE[value] = member
-            logger.debug(f"vendor-proprietary PropertyIdentifier({value})")
+            logger.debug("vendor-proprietary PropertyIdentifier(%s)", value)
             return member
         return None
 

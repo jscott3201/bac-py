@@ -6,7 +6,7 @@ Reading and Writing Properties
 ==============================
 
 All examples below use the convenience :class:`~bac_py.client.Client` API. For
-protocol-level examples, see :ref:`protocol-level-api`.
+protocol-level examples, see :ref:`two-api-levels`.
 
 
 .. _reading-properties:

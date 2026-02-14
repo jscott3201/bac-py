@@ -487,7 +487,7 @@ class NetworkRouter:
         for port in self._routing_table.get_all_ports():
             port.transport.on_receive(partial(self._on_port_receive, port.port_id))
             await port.transport.start()
-            logger.info(f"Router port {port.port_id} started on network {port.network_number}")
+            logger.info("Router port %d started on network %d", port.port_id, port.network_number)
 
         # Startup broadcasts per Clause 6.6.2.
         for port in self._routing_table.get_all_ports():
@@ -514,7 +514,7 @@ class NetworkRouter:
                 entry.busy_timeout_handle = None
         for port in self._routing_table.get_all_ports():
             await port.transport.stop()
-            logger.info(f"Router port {port.port_id} stopped on network {port.network_number}")
+            logger.info("Router port %d stopped on network %d", port.port_id, port.network_number)
 
     # -- Properties ---------------------------------------------------------
 
@@ -663,13 +663,15 @@ class NetworkRouter:
 
         if entry.next_router_mac is None:
             logger.debug(
-                f"Forwarding to directly-connected network {dnet} on port {dest_port.port_id}"
+                "Forwarding to directly-connected network %d on port %d", dnet, dest_port.port_id
             )
             self._deliver_to_directly_connected(arrival_port_id, npdu, source_mac, dest_port)
         else:
             logger.debug(
-                f"Forwarding to network {dnet} via next-hop router "
-                f"{entry.next_router_mac.hex()} on port {dest_port.port_id}"
+                "Forwarding to network %d via next-hop router %s on port %d",
+                dnet,
+                entry.next_router_mac.hex(),
+                dest_port.port_id,
             )
             self._forward_via_next_hop(arrival_port_id, npdu, source_mac, dest_port, entry)
 
@@ -685,7 +687,8 @@ class NetworkRouter:
         Strips DNET/DLEN/DADR and hop count from the NPCI.
         Injects SNET/SADR if not already present.
         """
-        assert npdu.destination is not None
+        if npdu.destination is None:
+            return
 
         source = self._inject_source(arrival_port_id, npdu, source_mac)
 
@@ -728,7 +731,8 @@ class NetworkRouter:
         forwarded = self._prepare_forwarded_npdu(arrival_port_id, npdu, source_mac)
         if forwarded is None:
             return
-        assert entry.next_router_mac is not None
+        if entry.next_router_mac is None:
+            return
         dest_port.transport.send_unicast(encode_npdu(forwarded), entry.next_router_mac)
 
     # -- NPDU manipulation helpers ------------------------------------------
@@ -963,8 +967,10 @@ class NetworkRouter:
         for dnet in msg.networks:
             self._routing_table.update_route(dnet, port_id=port_id, next_router_mac=source_mac)
         logger.debug(
-            f"Route table updated: networks {msg.networks} via port {port_id} "
-            f"next-hop {source_mac.hex()}"
+            "Route table updated: networks %s via port %d next-hop %s",
+            msg.networks,
+            port_id,
+            source_mac.hex(),
         )
         # Re-broadcast on all other ports per Clause 6.6.3.3.
         self._broadcast_network_message_all_except(
@@ -986,7 +992,7 @@ class NetworkRouter:
         and relays the reject toward the original DADR destination.
         """
         logger.warning(
-            f"Received Reject-Message-To-Network: network {msg.network}, reason {msg.reason!r}"
+            "Received Reject-Message-To-Network: network %d, reason %r", msg.network, msg.reason
         )
         if msg.reason == RejectMessageReason.NOT_DIRECTLY_CONNECTED:
             self._routing_table.mark_unreachable(msg.network)
@@ -1082,7 +1088,7 @@ class NetworkRouter:
         """
         if len(msg.ports) == 0:
             # Query: return full routing table.
-            logger.debug(f"Initialize-Routing-Table query from port {port_id}")
+            logger.debug("Initialize-Routing-Table query from port %d", port_id)
             reply_ports: list[RoutingTablePort] = []
             for entry in self._routing_table.get_all_entries():
                 reply_ports.append(
@@ -1101,7 +1107,9 @@ class NetworkRouter:
         else:
             # Update: modify routing table per provided entries.
             logger.debug(
-                f"Initialize-Routing-Table update with {len(msg.ports)} entries on port {port_id}"
+                "Initialize-Routing-Table update with %d entries on port %d",
+                len(msg.ports),
+                port_id,
             )
             for port_entry in msg.ports:
                 if port_entry.port_id == 0:
@@ -1185,7 +1193,9 @@ class NetworkRouter:
         port = self._routing_table.get_port(port_id)
         if port is not None and not port.network_number_configured and msg.configured:
             logger.info(
-                f"Learned network number {msg.network} for port {port_id} from Network-Number-Is"
+                "Learned network number %d for port %d from Network-Number-Is",
+                msg.network,
+                port_id,
             )
             self._routing_table.update_port_network_number(port_id, msg.network)
 
@@ -1303,7 +1313,9 @@ class NetworkRouter:
             )
             encoded = encode_npdu(reject_npdu)
             # Route via the port that can reach SNET.
-            assert npdu.source.network is not None  # guaranteed for routed NPDUs
+            if npdu.source.network is None:
+                self._send_reject(arrival_port_id, source_mac, reason, dnet)
+                return
             result = self._routing_table.get_port_for_network(npdu.source.network)
             if result is not None:
                 out_port, entry = result

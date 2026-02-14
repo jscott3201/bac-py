@@ -4,4 +4,4 @@ import bac_py
 
 
 def test_version() -> None:
-    assert bac_py.__version__ == "1.3.7"
+    assert bac_py.__version__ == "1.3.8"

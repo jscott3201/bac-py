@@ -232,7 +232,7 @@ class ScheduleEngine:
     ) -> None:
         """Update present_value and write to targets on change."""
         oid = sched.object_identifier
-        logger.debug(f"schedule {oid} evaluated: value={value}")
+        logger.debug("schedule %s evaluated: value=%s", oid, value)
         prev = self._last_values.get(oid, _SENTINEL)
 
         # Always update present_value

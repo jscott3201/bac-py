@@ -235,7 +235,7 @@ class DeviceObject(BACnetObject):
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
-        logger.debug(f"DeviceObject created: instance={instance_number}")
+        logger.debug("DeviceObject created: instance=%s", instance_number)
         # Initialize empty services/object-types supported if not provided
         self._set_default(
             PropertyIdentifier.PROTOCOL_SERVICES_SUPPORTED,

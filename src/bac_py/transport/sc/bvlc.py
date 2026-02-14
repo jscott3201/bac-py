@@ -135,7 +135,7 @@ class SCMessage:
 
     def encode(self) -> bytes:
         """Encode this message to wire bytes."""
-        logger.debug(f"BVLC-SC encode: {self.function.name}")
+        logger.debug("BVLC-SC encode: %s", self.function.name)
         flags = SCControlFlag.NONE
         if self.originating is not None:
             flags |= SCControlFlag.ORIGINATING_VMAC
@@ -177,11 +177,11 @@ class SCMessage:
                 f"BVLC-SC message too short: need at least "
                 f"{SC_HEADER_MIN_LENGTH} bytes, got {len(data)}"
             )
-            logger.warning(f"BVLC-SC malformed message: {msg}")
+            logger.warning("BVLC-SC malformed message: %s", msg)
             raise ValueError(msg)
 
         function = BvlcSCFunction(data[0])
-        logger.debug(f"BVLC-SC decode: {function.name}")
+        logger.debug("BVLC-SC decode: %s", function.name)
         flags = SCControlFlag(data[1] & 0x0F)
         (message_id,) = struct.unpack_from("!H", data, 2)
         offset = SC_HEADER_MIN_LENGTH
@@ -190,7 +190,7 @@ class SCMessage:
         if flags & SCControlFlag.ORIGINATING_VMAC:
             if offset + VMAC_LENGTH > len(data):
                 msg = "Truncated: missing Originating Virtual Address"
-                logger.warning(f"BVLC-SC malformed message: {msg}")
+                logger.warning("BVLC-SC malformed message: %s", msg)
                 raise ValueError(msg)
             originating = SCVMAC(bytes(data[offset : offset + VMAC_LENGTH]))
             offset += VMAC_LENGTH
@@ -199,7 +199,7 @@ class SCMessage:
         if flags & SCControlFlag.DESTINATION_VMAC:
             if offset + VMAC_LENGTH > len(data):
                 msg = "Truncated: missing Destination Virtual Address"
-                logger.warning(f"BVLC-SC malformed message: {msg}")
+                logger.warning("BVLC-SC malformed message: %s", msg)
                 raise ValueError(msg)
             destination = SCVMAC(bytes(data[offset : offset + VMAC_LENGTH]))
             offset += VMAC_LENGTH

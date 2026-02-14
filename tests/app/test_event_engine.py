@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -64,6 +65,20 @@ class TestEventEngineLifecycle:
         app = _make_app()
         engine = EventEngine(app, scan_interval=0.01)
         await engine.stop()  # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_stop_clears_pending_confirmed_tasks(self):
+        """Stop should cancel and clear _pending_confirmed_tasks."""
+        app = _make_app()
+        engine = EventEngine(app, scan_interval=0.01)
+        await engine.start()
+        # Simulate pending tasks
+        dummy_task = asyncio.create_task(asyncio.sleep(999))
+        engine._pending_confirmed_tasks.add(dummy_task)
+        assert len(engine._pending_confirmed_tasks) == 1
+        await engine.stop()
+        assert len(engine._pending_confirmed_tasks) == 0
+        assert dummy_task.cancelling() or dummy_task.cancelled()
 
     @pytest.mark.asyncio
     async def test_double_start(self):

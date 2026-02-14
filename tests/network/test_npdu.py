@@ -515,3 +515,62 @@ class TestDecodeSourceValidation:
         """Unsupported protocol version should raise ValueError."""
         with pytest.raises(ValueError, match="Unsupported BACnet protocol version"):
             decode_npdu(b"\x02\x00")
+
+
+# ---------------------------------------------------------------------------
+# Security: bounds validation on DLEN, SLEN, vendor_id
+# ---------------------------------------------------------------------------
+
+
+class TestNpduBoundsValidation:
+    def test_dlen_exceeds_buffer_raises(self):
+        """DLEN claiming more bytes than available should raise ValueError."""
+        # Version=1, control=0x20 (has dest), DNET=0x000A, DLEN=10, but only 2 bytes follow
+        raw = bytes([0x01, 0x20, 0x00, 0x0A, 10, 0xAA, 0xBB])
+        with pytest.raises(ValueError, match="destination address truncated"):
+            decode_npdu(raw)
+
+    def test_slen_exceeds_buffer_raises(self):
+        """SLEN claiming more bytes than available should raise ValueError."""
+        # Version=1, control=0x08 (has source), SNET=0x0005, SLEN=6, but only 1 byte follows
+        raw = bytes([0x01, 0x08, 0x00, 0x05, 6, 0xAA])
+        with pytest.raises(ValueError, match="source address truncated"):
+            decode_npdu(raw)
+
+    def test_vendor_id_truncated_raises(self):
+        """Proprietary message type with insufficient bytes for vendor_id should raise."""
+        # Version=1, control=0x80 (network msg), msg_type=0x80 (proprietary), but no vendor ID
+        raw = bytes([0x01, 0x80, 0x80])
+        with pytest.raises(ValueError, match="too short for proprietary vendor ID"):
+            decode_npdu(raw)
+
+    def test_valid_dlen_within_buffer(self):
+        """Valid DLEN that fits in buffer should decode fine."""
+        dest = BACnetAddress(network=10, mac_address=b"\x01\x02")
+        npdu = NPDU(destination=dest, apdu=b"\xaa")
+        encoded = encode_npdu(npdu)
+        decoded = decode_npdu(encoded)
+        assert decoded.destination is not None
+        assert decoded.destination.mac_address == b"\x01\x02"
+
+    def test_valid_slen_within_buffer(self):
+        """Valid SLEN that fits in buffer should decode fine."""
+        src = BACnetAddress(network=5, mac_address=b"\x01")
+        npdu = NPDU(source=src, apdu=b"\xbb")
+        encoded = encode_npdu(npdu)
+        decoded = decode_npdu(encoded)
+        assert decoded.source is not None
+        assert decoded.source.mac_address == b"\x01"
+
+    def test_valid_proprietary_vendor_id(self):
+        """Proprietary network message with valid vendor_id should decode."""
+        npdu = NPDU(
+            is_network_message=True,
+            message_type=0x80,
+            vendor_id=42,
+            network_message_data=b"\x01\x02",
+        )
+        encoded = encode_npdu(npdu)
+        decoded = decode_npdu(encoded)
+        assert decoded.vendor_id == 42
+        assert decoded.network_message_data == b"\x01\x02"

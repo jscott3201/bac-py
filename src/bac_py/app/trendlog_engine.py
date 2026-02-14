@@ -308,5 +308,5 @@ class TrendLogEngine:
             log_datum=value,
             status_flags=status_flags,
         )
-        logger.debug(f"trend sample {tl.object_identifier}: value={value}")
+        logger.debug("trend sample %s: value=%s", tl.object_identifier, value)
         tl.append_record(record)

@@ -8,6 +8,7 @@ work with the local ObjectDatabase and DeviceObject.
 from __future__ import annotations
 
 import contextlib
+import hmac
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -404,7 +405,7 @@ class DefaultServerHandlers:
 
         obj = self._db.get(obj_id)
         if obj is None:
-            logger.warning(f"read_property: unknown object {obj_id} from {source}")
+            logger.warning("read_property: unknown object %s from %s", obj_id, source)
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
 
         # May raise BACnetError for unknown/unsupported properties
@@ -448,7 +449,7 @@ class DefaultServerHandlers:
 
         obj = self._db.get(obj_id)
         if obj is None:
-            logger.warning(f"write_property: unknown object {obj_id} from {source}")
+            logger.warning("write_property: unknown object %s from %s", obj_id, source)
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
 
         # Decode raw application-tagged bytes to native Python types
@@ -500,16 +501,16 @@ class DefaultServerHandlers:
         """
         request = SubscribeCOVRequest.decode(data)
         obj_id = self._resolve_object_id(request.monitored_object_identifier)
-        logger.debug(f"handling subscribe_cov {obj_id} from {source}")
+        logger.debug("handling subscribe_cov %s from %s", obj_id, source)
 
         obj = self._db.get(obj_id)
         if obj is None:
-            logger.warning(f"subscribe_cov: unknown object {obj_id} from {source}")
+            logger.warning("subscribe_cov: unknown object %s from %s", obj_id, source)
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
 
         cov_manager = self._app.cov_manager
         if cov_manager is None:
-            logger.warning(f"subscribe_cov: COV not supported, denied request from {source}")
+            logger.warning("subscribe_cov: COV not supported, denied request from %s", source)
             raise BACnetError(ErrorClass.SERVICES, ErrorCode.SERVICE_REQUEST_DENIED)
 
         # Per Clause 13.14.1.1.4: if Lifetime is present then
@@ -533,10 +534,10 @@ class DefaultServerHandlers:
         """Handle SubscribeCOVProperty-Request per Clause 13.15."""
         request = SubscribeCOVPropertyRequest.decode(data)
         obj_id = self._resolve_object_id(request.monitored_object_identifier)
-        logger.debug(f"handling subscribe_cov_property {obj_id} from {source}")
+        logger.debug("handling subscribe_cov_property %s from %s", obj_id, source)
         obj = self._db.get(obj_id)
         if obj is None:
-            logger.warning(f"subscribe_cov_property: unknown object {obj_id} from {source}")
+            logger.warning("subscribe_cov_property: unknown object %s from %s", obj_id, source)
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
         cov_manager = self._app.cov_manager
         if cov_manager is None:
@@ -555,7 +556,7 @@ class DefaultServerHandlers:
     ) -> bytes | None:
         """Handle SubscribeCOVPropertyMultiple-Request per Clause 13.16."""
         request = SubscribeCOVPropertyMultipleRequest.decode(data)
-        logger.debug(f"handling subscribe_cov_property_multiple from {source}")
+        logger.debug("handling subscribe_cov_property_multiple from %s", source)
         cov_manager = self._app.cov_manager
         if cov_manager is None:
             logger.warning(
@@ -830,7 +831,9 @@ class DefaultServerHandlers:
             obj_id = self._resolve_object_id(spec.object_identifier)
             obj = self._db.get(obj_id)
             if obj is None:
-                logger.warning(f"write_property_multiple: unknown object {obj_id} from {source}")
+                logger.warning(
+                    "write_property_multiple: unknown object %s from %s", obj_id, source
+                )
                 raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
             for pv in spec.list_of_properties:
                 prop_def = obj.PROPERTY_DEFINITIONS.get(pv.property_identifier)
@@ -897,7 +900,7 @@ class DefaultServerHandlers:
         )
         obj = self._db.get(obj_id)
         if obj is None:
-            logger.warning(f"read_range: unknown object {obj_id} from {source}")
+            logger.warning("read_range: unknown object %s from %s", obj_id, source)
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
 
         value = self._read_object_property(
@@ -960,11 +963,17 @@ class DefaultServerHandlers:
     def _validate_password(self, request_password: str | None) -> None:
         """Validate a request password against the configured device password.
 
+        Uses constant-time comparison (``hmac.compare_digest``) to prevent
+        timing-based password extraction attacks.
+
         :raises BACnetError: If the password does not match or is unexpected.
         """
         config_password = self._app.config.password
         if config_password is not None:
-            if request_password != config_password:
+            if request_password is None or not hmac.compare_digest(
+                request_password.encode("utf-8"),
+                config_password.encode("utf-8"),
+            ):
                 logger.warning("password validation failed: incorrect password")
                 raise BACnetError(ErrorClass.SECURITY, ErrorCode.PASSWORD_FAILURE)
         elif request_password is not None:
@@ -1154,14 +1163,16 @@ class DefaultServerHandlers:
         """
         request = AtomicReadFileRequest.decode(data)
         obj_id = self._resolve_object_id(request.file_identifier)
-        logger.debug(f"handling atomic_read_file {obj_id} from {source}")
+        logger.debug("handling atomic_read_file %s from %s", obj_id, source)
 
         obj = self._db.get(obj_id)
         if obj is None:
-            logger.warning(f"atomic_read_file: unknown object {obj_id} from {source}")
+            logger.warning("atomic_read_file: unknown object %s from %s", obj_id, source)
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
         if not isinstance(obj, FileObject):
-            logger.warning(f"atomic_read_file: object {obj_id} is not a FileObject from {source}")
+            logger.warning(
+                "atomic_read_file: object %s is not a FileObject from %s", obj_id, source
+            )
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.INCONSISTENT_OBJECT_TYPE)
 
         if isinstance(request.access_method, StreamReadAccess):
@@ -1205,14 +1216,16 @@ class DefaultServerHandlers:
         """
         request = AtomicWriteFileRequest.decode(data)
         obj_id = self._resolve_object_id(request.file_identifier)
-        logger.debug(f"handling atomic_write_file {obj_id} from {source}")
+        logger.debug("handling atomic_write_file %s from %s", obj_id, source)
 
         obj = self._db.get(obj_id)
         if obj is None:
-            logger.warning(f"atomic_write_file: unknown object {obj_id} from {source}")
+            logger.warning("atomic_write_file: unknown object %s from %s", obj_id, source)
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
         if not isinstance(obj, FileObject):
-            logger.warning(f"atomic_write_file: object {obj_id} is not a FileObject from {source}")
+            logger.warning(
+                "atomic_write_file: object %s is not a FileObject from %s", obj_id, source
+            )
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.INCONSISTENT_OBJECT_TYPE)
 
         if isinstance(request.access_method, StreamWriteAccess):
@@ -1264,7 +1277,7 @@ class DefaultServerHandlers:
             else:
                 instance = 1
         else:
-            logger.warning(f"create_object: missing required parameter from {source}")
+            logger.warning("create_object: missing required parameter from %s", source)
             raise BACnetError(ErrorClass.SERVICES, ErrorCode.MISSING_REQUIRED_PARAMETER)
 
         kwargs: dict[str, Any] = {}
@@ -1298,7 +1311,7 @@ class DefaultServerHandlers:
         """
         request = DeleteObjectRequest.decode(data)
         obj_id = self._resolve_object_id(request.object_identifier)
-        logger.debug(f"handling delete_object {obj_id} from {source}")
+        logger.debug("handling delete_object %s from %s", obj_id, source)
         self._db.remove(obj_id)
 
         cov_manager = self._app.cov_manager
@@ -1337,7 +1350,7 @@ class DefaultServerHandlers:
 
         obj = self._db.get(obj_id)
         if obj is None:
-            logger.warning(f"add_list_element: unknown object {obj_id} from {source}")
+            logger.warning("add_list_element: unknown object %s from %s", obj_id, source)
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
 
         prop_def = obj.PROPERTY_DEFINITIONS.get(request.property_identifier)
@@ -1398,7 +1411,7 @@ class DefaultServerHandlers:
 
         obj = self._db.get(obj_id)
         if obj is None:
-            logger.warning(f"remove_list_element: unknown object {obj_id} from {source}")
+            logger.warning("remove_list_element: unknown object %s from %s", obj_id, source)
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
 
         prop_def = obj.PROPERTY_DEFINITIONS.get(request.property_identifier)
@@ -1525,7 +1538,7 @@ class DefaultServerHandlers:
         :returns: Encoded GetAlarmSummary-ACK service data.
         """
         GetAlarmSummaryRequest.decode(data)
-        logger.debug(f"handling get_alarm_summary from {source}")
+        logger.debug("handling get_alarm_summary from %s", source)
 
         summaries: list[AlarmSummary] = []
         for obj in self._db.values():
@@ -1578,7 +1591,7 @@ class DefaultServerHandlers:
         :returns: Encoded GetEnrollmentSummary-ACK service data.
         """
         request = GetEnrollmentSummaryRequest.decode(data)
-        logger.debug(f"handling get_enrollment_summary from {source}")
+        logger.debug("handling get_enrollment_summary from %s", source)
 
         summaries: list[EnrollmentSummary] = []
         for obj in self._db.get_objects_of_type(ObjectType.EVENT_ENROLLMENT):
@@ -1658,7 +1671,7 @@ class DefaultServerHandlers:
         :returns: Encoded GetEventInformation-ACK service data.
         """
         request = GetEventInformationRequest.decode(data)
-        logger.debug(f"handling get_event_information from {source}")
+        logger.debug("handling get_event_information from %s", source)
 
         default_timestamps = (
             BACnetTimeStamp(choice=1, value=0),
@@ -1970,7 +1983,7 @@ class DefaultServerHandlers:
         # Check VT class support
         vt_classes = self._device._properties.get(PropertyIdentifier.VT_CLASSES_SUPPORTED, [])
         if vt_classes and request.vt_class not in vt_classes:
-            logger.warning(f"vt_open: unknown VT class {request.vt_class.name} from {source}")
+            logger.warning("vt_open: unknown VT class %s from %s", request.vt_class.name, source)
             raise BACnetError(ErrorClass.VT, ErrorCode.UNKNOWN_VT_CLASS)
 
         # Allocate a session — use a simple counter on the app
@@ -2004,7 +2017,7 @@ class DefaultServerHandlers:
         sessions = getattr(self._app, "_vt_sessions", {})
         for session_id in request.list_of_remote_vt_session_identifiers:
             if session_id not in sessions:
-                logger.warning(f"vt_close: unknown VT session {session_id} from {source}")
+                logger.warning("vt_close: unknown VT session %s from %s", session_id, source)
                 raise BACnetError(ErrorClass.VT, ErrorCode.UNKNOWN_VT_SESSION)
             del sessions[session_id]
         logger.info(
@@ -2060,7 +2073,7 @@ class DefaultServerHandlers:
         from bac_py.objects.audit_log import AuditLogObject
 
         request = AuditLogQueryRequest.decode(data)
-        logger.debug(f"handling audit_log_query {request.audit_log} from {source}")
+        logger.debug("handling audit_log_query %s from %s", request.audit_log, source)
 
         obj = self._db.get(request.audit_log)
         if obj is None or not isinstance(obj, AuditLogObject):

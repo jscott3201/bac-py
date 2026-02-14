@@ -95,7 +95,7 @@ class AuditManager:
                 target_comment=target_comment,
             )
 
-            logger.debug(f"audit record: {operation} on {target_object}")
+            logger.debug("audit record: %s on %s", operation, target_object)
             self._append_to_logs(notification)
 
     def _find_reporters(self, target_oid: ObjectIdentifier | None) -> list[AuditReporterObject]:

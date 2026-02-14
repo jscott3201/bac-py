@@ -672,11 +672,10 @@ class TestMalformedDataHandling:
         tag, _ = decode_tag(proper_data, 0)
         assert tag.length == 256
 
-        # Truncated: only 1 of the 2 length bytes present
+        # Truncated: only 1 of the 2 length bytes present — now raises ValueError
         truncated = bytes([0x05, 254, 0x01])
-        tag_trunc, _ = decode_tag(truncated, 0)
-        # The truncated parse produces a wrong length value
-        assert tag_trunc.length != 256
+        with pytest.raises(ValueError, match="truncated"):
+            decode_tag(truncated, 0)
 
     def test_truncated_four_byte_extended_length(self):
         """Extended length 255 marker expects 4 more bytes.
@@ -689,11 +688,10 @@ class TestMalformedDataHandling:
         tag, _ = decode_tag(proper_data, 0)
         assert tag.length == 65536
 
-        # Truncated: only 2 of the 4 length bytes present
+        # Truncated: only 2 of the 4 length bytes present — now raises ValueError
         truncated = bytes([0x05, 255, 0x00, 0x01])
-        tag_trunc, _ = decode_tag(truncated, 0)
-        # The truncated parse produces a wrong length value
-        assert tag_trunc.length != 65536
+        with pytest.raises(ValueError, match="truncated"):
+            decode_tag(truncated, 0)
 
     def test_tag_length_exceeds_remaining_data(self):
         """Tag says 4 bytes of content, but buffer is shorter.
@@ -750,3 +748,86 @@ class TestMalformedDataHandling:
         """decode_character_string should work with memoryview input."""
         data = memoryview(b"\x00hello")
         assert decode_character_string(data) == "hello"
+
+
+class TestTagDecodeBoundsChecks:
+    """Verify bounds checks added to decode_tag for truncated data."""
+
+    def test_truncated_extended_tag_number(self):
+        """Extended tag number (0x0F) with no following byte raises ValueError."""
+        # Initial octet: tag=0x0F (extended), app, lvt=0
+        buf = bytes([0xF0])
+        with pytest.raises(ValueError, match="truncated extended tag number"):
+            decode_tag(buf, 0)
+
+    def test_truncated_extended_length_marker(self):
+        """lvt=5 (extended length) with no following byte raises ValueError."""
+        # Initial octet: tag=0, app, lvt=5
+        buf = bytes([0x05])
+        with pytest.raises(ValueError, match="truncated extended length"):
+            decode_tag(buf, 0)
+
+    def test_valid_extended_tag_number(self):
+        """Extended tag number with enough data decodes correctly."""
+        # tag=0x0F (extended), app, lvt=0, then ext tag=20
+        buf = bytes([0xF0, 20])
+        tag, offset = decode_tag(buf, 0)
+        assert tag.number == 20
+        assert offset == 2
+
+    def test_valid_extended_length_254(self):
+        """Extended length with 254 marker and 2 bytes decodes correctly."""
+        # tag=0, app, lvt=5, ext=254, length=0x0100 (256)
+        buf = bytes([0x05, 254, 0x01, 0x00])
+        tag, _offset = decode_tag(buf, 0)
+        assert tag.length == 256
+
+    def test_valid_extended_length_255(self):
+        """Extended length with 255 marker and 4 bytes decodes correctly."""
+        # tag=0, app, lvt=5, ext=255, length=0x00010000 (65536)
+        buf = bytes([0x05, 255, 0x00, 0x01, 0x00, 0x00])
+        tag, _offset = decode_tag(buf, 0)
+        assert tag.length == 65536
+
+
+class TestApplicationValueBoundsCheck:
+    """Verify content bounds check in decode_application_value."""
+
+    def test_truncated_unsigned_content(self):
+        """Unsigned tag claiming 2 bytes but only 1 present raises ValueError."""
+        from bac_py.encoding.primitives import decode_application_value
+
+        tag_bytes = encode_tag(2, TagClass.APPLICATION, 2)
+        data = tag_bytes + b"\x01"
+        with pytest.raises(ValueError, match="truncated"):
+            decode_application_value(data)
+
+    def test_truncated_real_content(self):
+        """Real tag claiming 4 bytes but only 2 present raises ValueError."""
+        from bac_py.encoding.primitives import decode_application_value
+
+        tag_bytes = encode_tag(4, TagClass.APPLICATION, 4)
+        data = tag_bytes + b"\x00\x00"
+        with pytest.raises(ValueError, match="truncated"):
+            decode_application_value(data)
+
+    def test_boolean_true_not_affected_by_bounds_check(self):
+        """Boolean tags store value in tag header, not content — no truncation issue."""
+        from bac_py.encoding.primitives import decode_application_value
+
+        encoded = encode_application_boolean(True)
+        assert decode_application_value(encoded) is True
+
+    def test_boolean_false_not_affected_by_bounds_check(self):
+        """Boolean False also stores value in tag header."""
+        from bac_py.encoding.primitives import decode_application_value
+
+        encoded = encode_application_boolean(False)
+        assert decode_application_value(encoded) is False
+
+    def test_null_not_affected_by_bounds_check(self):
+        """Null tags have zero-length content — no truncation issue."""
+        from bac_py.encoding.primitives import decode_application_value
+
+        encoded = encode_application_null()
+        assert decode_application_value(encoded) is None

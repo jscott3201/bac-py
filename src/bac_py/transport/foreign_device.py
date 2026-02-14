@@ -205,7 +205,7 @@ class ForeignDeviceManager:
         while True:
             try:
                 self._send_registration()
-            except Exception:
-                logger.exception("Error in foreign device registration loop")
+            except OSError:
+                logger.warning("Failed to send foreign device registration", exc_info=True)
             # Re-register at half the TTL to avoid expiry
             await asyncio.sleep(self._ttl / 2)

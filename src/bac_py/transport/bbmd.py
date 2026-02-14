@@ -240,8 +240,11 @@ class BBMDManager:
         await asyncio.to_thread(self._load_bdt_backup)
         self._cleanup_task = asyncio.create_task(self._fdt_cleanup_loop())
         logger.info(
-            f"BBMDManager started on {self._local_address.host}:{self._local_address.port} "
-            f"(BDT={len(self._bdt)} entries, FD registration={'enabled' if self._accept_fd_registrations else 'disabled'})"
+            "BBMDManager started on %s:%d (BDT=%d entries, FD registration=%s)",
+            self._local_address.host,
+            self._local_address.port,
+            len(self._bdt),
+            "enabled" if self._accept_fd_registrations else "disabled",
         )
 
     async def stop(self) -> None:
@@ -356,7 +359,10 @@ class BBMDManager:
         foreign devices.
         """
         logger.debug(
-            f"Original-Broadcast from {source.host}:{source.port}, forwarding {len(npdu)} bytes"
+            "Original-Broadcast from %s:%d, forwarding %d bytes",
+            source.host,
+            source.port,
+            len(npdu),
         )
         self._forward_to_peers_and_fds(npdu, source)
 
@@ -416,7 +422,7 @@ class BBMDManager:
         from that foreign device: forwards to all BDT peers and all
         registered foreign devices (except the sender), and broadcasts locally.
         """
-        logger.debug(f"Distribute-Broadcast-To-Network from {source.host}:{source.port}")
+        logger.debug("Distribute-Broadcast-To-Network from %s:%d", source.host, source.port)
         # Verify the source is a registered foreign device
         if source not in self._fdt:
             result = _encode_bvlc_result(BvlcResultCode.DISTRIBUTE_BROADCAST_TO_NETWORK_NAK)
@@ -540,11 +546,9 @@ class BBMDManager:
         Responds with Read-BDT-Ack containing all BDT entries.
         Per J.2.4, an empty BDT is signified by a list of length zero.
         """
-        logger.debug(f"Read-BDT request from {source.host}:{source.port}")
-        payload = bytearray()
-        for entry in self._bdt:
-            payload.extend(entry.encode())
-        ack = encode_bvll(BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK, bytes(payload))
+        logger.debug("Read-BDT request from %s:%d", source.host, source.port)
+        payload = b"".join(entry.encode() for entry in self._bdt)
+        ack = encode_bvll(BvlcFunction.READ_BROADCAST_DISTRIBUTION_TABLE_ACK, payload)
         self._send(ack, source)
 
     def _handle_write_bdt(self, data: bytes, source: BIPAddress) -> None:
@@ -584,13 +588,14 @@ class BBMDManager:
         Responds with Read-FDT-Ack containing all FDT entries.
         Per J.2.8, an empty FDT is signified by a list of length zero.
         """
-        logger.debug(f"Read-FDT request from {source.host}:{source.port}")
-        payload = bytearray()
+        logger.debug("Read-FDT request from %s:%d", source.host, source.port)
+        parts: list[bytes] = []
         for fd in self._fdt.values():
-            payload.extend(fd.address.encode())
-            payload.extend(fd.ttl.to_bytes(2, "big"))
-            payload.extend(fd.remaining.to_bytes(2, "big"))
-        ack = encode_bvll(BvlcFunction.READ_FOREIGN_DEVICE_TABLE_ACK, bytes(payload))
+            parts.append(
+                fd.address.encode() + fd.ttl.to_bytes(2, "big") + fd.remaining.to_bytes(2, "big")
+            )
+        payload = b"".join(parts)
+        ack = encode_bvll(BvlcFunction.READ_FOREIGN_DEVICE_TABLE_ACK, payload)
         self._send(ack, source)
 
     def _handle_delete_fdt_entry(self, data: bytes, source: BIPAddress) -> None:
@@ -621,7 +626,7 @@ class BBMDManager:
             try:
                 self._purge_expired_fdt_entries()
             except Exception:
-                logger.exception("Error in FDT cleanup loop")
+                logger.warning("Error in FDT cleanup loop", exc_info=True)
 
     def _purge_expired_fdt_entries(self) -> None:
         """Remove FDT entries whose TTL + grace period has elapsed."""

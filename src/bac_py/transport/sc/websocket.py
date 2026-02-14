@@ -52,10 +52,13 @@ class SCWebSocket:
         reader: StreamReader,
         writer: StreamWriter,
         protocol: ClientProtocol | ServerProtocol,
+        *,
+        max_frame_size: int = 0,
     ) -> None:
         self._reader = reader
         self._writer = writer
         self._protocol = protocol
+        self._max_frame_size = max_frame_size
 
     # -- Client factory --
 
@@ -78,7 +81,16 @@ class SCWebSocket:
         port = parsed.port or default_port
         use_ssl = ssl_ctx if parsed.scheme == "wss" else None
 
-        logger.debug(f"SC WebSocket connecting to {host}:{port}")
+        if use_ssl is None:
+            logger.warning(
+                "SC WebSocket connecting WITHOUT TLS to %s:%d — "
+                "traffic is unencrypted and unauthenticated. "
+                "BACnet/SC requires TLS 1.3 in production (Annex AB.7.4).",
+                host,
+                port,
+            )
+        else:
+            logger.debug("SC WebSocket connecting (TLS) to %s:%d", host, port)
         reader, writer = await asyncio.open_connection(host, port, ssl=use_ssl)
 
         ws_uri = parse_uri(uri)
@@ -113,7 +125,7 @@ class SCWebSocket:
                 writer.write(outgoing)
                 await writer.drain()
 
-        logger.debug(f"SC WebSocket client connected to {host}:{port}")
+        logger.debug("SC WebSocket client connected to %s:%d", host, port)
         return cls(reader, writer, protocol)
 
     # -- Server factory --
@@ -171,7 +183,7 @@ class SCWebSocket:
 
     async def send(self, data: bytes) -> None:
         """Send a binary WebSocket frame."""
-        logger.debug(f"SC WebSocket send: {len(data)} bytes")
+        logger.debug("SC WebSocket send: %d bytes", len(data))
         self._protocol.send_binary(data)
         outgoing = _drain_to_send(self._protocol)
         if outgoing:
@@ -189,7 +201,14 @@ class SCWebSocket:
             for event in events:
                 if isinstance(event, Frame):
                     if event.opcode == Opcode.BINARY:
-                        logger.debug(f"SC WebSocket recv: {len(event.data)} bytes")
+                        if self._max_frame_size and len(event.data) > self._max_frame_size:
+                            logger.warning(
+                                "SC WebSocket frame too large: %d bytes (max %d), dropping",
+                                len(event.data),
+                                self._max_frame_size,
+                            )
+                            continue
+                        logger.debug("SC WebSocket recv: %d bytes", len(event.data))
                         return bytes(event.data)
                     if event.opcode == Opcode.CLOSE:
                         rcvd = Close.parse(event.data) if event.data else None

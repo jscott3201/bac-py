@@ -356,7 +356,7 @@ class SegmentReceiver:
 
             if self.is_complete:
                 self._window_start_idx = self._expected_idx
-                logger.info(f"segmented transfer complete: segments={len(self._segments)}")
+                logger.info("segmented transfer complete: segments=%s", len(self._segments))
                 return (SegmentAction.COMPLETE, seq_num)
 
             # ACK at window boundary: when contiguous reception fills the window
@@ -370,10 +370,10 @@ class SegmentReceiver:
         if duplicate_in_window(
             seq_num, expected_seq, self.actual_window_size, self.proposed_window_size
         ):
-            logger.warning(f"duplicate segment: seq={seq_num}")
+            logger.warning("duplicate segment: seq=%s", seq_num)
             return (SegmentAction.RESEND_LAST_ACK, self._last_ack_seq)
 
-        logger.warning(f"out-of-window segment: seq={seq_num}, expected={expected_seq}")
+        logger.warning("out-of-window segment: seq=%s, expected=%s", seq_num, expected_seq)
         return (SegmentAction.ABORT, -1)
 
     @property

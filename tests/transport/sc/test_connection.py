@@ -479,6 +479,70 @@ class TestSendMessage:
             await conn.send_message(msg)
 
 
+class TestConnectionCallbackCleanup:
+    """Verify _go_idle() clears callbacks to break reference cycles."""
+
+    async def test_go_idle_clears_callbacks(self):
+        """_go_idle() should set all 4 callbacks to None."""
+        server, client_ws, server_ws = await _start_ws_pair()
+        try:
+            conn = SCConnection(SCVMAC.random(), DeviceUUID.generate())
+            connected_event = asyncio.Event()
+            disconnected_event = asyncio.Event()
+            conn.on_connected = connected_event.set
+            conn.on_disconnected = disconnected_event.set
+            conn.on_message = lambda msg: None
+            conn.on_vmac_collision = lambda: None
+
+            # Accept a connection
+            accept_task = asyncio.ensure_future(conn.accept(server_ws))
+            req_payload = ConnectRequestPayload(
+                SCVMAC.random(), DeviceUUID.generate(), 1600, 1497
+            ).encode()
+            await client_ws.send(
+                SCMessage(
+                    BvlcSCFunction.CONNECT_REQUEST, message_id=1, payload=req_payload
+                ).encode()
+            )
+            await asyncio.wait_for(client_ws.recv(), timeout=5)
+            await asyncio.wait_for(accept_task, timeout=5)
+            await asyncio.wait_for(connected_event.wait(), timeout=5)
+
+            assert conn.state == SCConnectionState.CONNECTED
+            # Callbacks should be set before disconnect
+            assert conn.on_message is not None
+
+            await conn.disconnect()
+            await asyncio.wait_for(disconnected_event.wait(), timeout=5)
+
+            # After _go_idle(), all callbacks should be None
+            assert conn.on_connected is None
+            assert conn.on_disconnected is None
+            assert conn.on_message is None
+            assert conn.on_vmac_collision is None
+        finally:
+            await client_ws.close()
+            server.close()
+            await server.wait_closed()
+
+    async def test_go_idle_clears_callbacks_on_error(self):
+        """_go_idle() clears callbacks even on connection failure."""
+        conn = SCConnection(SCVMAC.random(), DeviceUUID.generate())
+        conn.on_connected = lambda: None
+        conn.on_disconnected = lambda: None
+        conn.on_message = lambda msg: None
+        conn.on_vmac_collision = lambda: None
+
+        # Force to non-IDLE so _go_idle doesn't short-circuit
+        conn._state = SCConnectionState.AWAITING_ACCEPT
+        await conn._go_idle()
+
+        assert conn.on_connected is None
+        assert conn.on_disconnected is None
+        assert conn.on_message is None
+        assert conn.on_vmac_collision is None
+
+
 class TestConnectionProperties:
     def test_initial_state(self):
         conn = SCConnection(SCVMAC.random(), DeviceUUID.generate())

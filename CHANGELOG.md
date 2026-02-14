@@ -5,6 +5,122 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.8] - 2026-02-14
+
+### Fixed
+
+- **BIP future race condition (`bip.py`)**: Explicitly cancel pending BVLC request
+  futures on timeout in `_bvlc_request()` to prevent late responses from setting
+  results on garbage-collected futures. Also cancel all pending futures during
+  `stop()` to prevent dangling references.
+- **BIP6 memory leak (`bip6.py`)**: Capped pending address resolution queues at 16
+  entries per VMAC to prevent unbounded growth when resolution never completes.
+  Added 30-second TTL eviction to discard stale queued NPDUs in `_flush_pending()`.
+- **BIP6 dangling futures (`bip6.py`)**: Cancel all pending BVLC futures and clear
+  pending resolution queues during `stop()`.
+- **Ethernet exception handler (`ethernet.py`)**: Broadened `_on_readable()` exception
+  catch from `OSError` to `Exception` to prevent unexpected parsing errors or
+  callback exceptions from crashing the event loop reader.
+- **Router assertion safety (`router.py`)**: Replaced three `assert` statements in
+  `_deliver_to_directly_connected()`, `_forward_via_next_hop()`, and
+  `_send_reject_toward_source()` with explicit guard checks that degrade gracefully
+  when Python runs with `-O` optimization flag.
+- **NPDU decode bounds checking (`npdu.py`)**: Added explicit bounds checks before
+  reading DNET/DLEN, SNET/SLEN, hop count, and message type fields in
+  `decode_npdu()` to raise `ValueError` instead of `IndexError` on truncated data.
+- **Tag decode bounds checking (`tags.py`)**: Added bounds validation before reading
+  extended tag numbers, 1/2/4-byte extended length fields. Truncated packets now
+  raise `ValueError` with descriptive messages instead of `IndexError`.
+- **Tag length allocation cap (`tags.py`)**: Reject tag lengths exceeding 1 MB
+  (1,048,576 bytes) to prevent memory exhaustion from malformed or malicious packets.
+- **Context nesting depth limit (`tags.py`)**: Cap context tag nesting at 32 levels
+  in `extract_context_value()` to prevent stack exhaustion from crafted payloads.
+- **Application value content bounds check (`primitives.py`)**: Added bounds
+  validation in `decode_application_value()` after decoding tag metadata but before
+  reading content bytes.
+- **Decoded value count cap (`primitives.py`)**: `decode_all_application_values()`
+  now limits to 10,000 values to prevent memory exhaustion from crafted payloads.
+- **Constant-time password comparison (`server.py`)**: `_validate_password()` now
+  uses `hmac.compare_digest()` instead of `==` to prevent timing-based password
+  extraction attacks.
+- **SC VMAC origin validation (`hub_function.py`)**: Hub function now validates that
+  the originating VMAC in received messages matches the authenticated peer's VMAC
+  to prevent VMAC spoofing in hub-routed traffic (Annex AB.6.2).
+- **SC TLS credential redaction (`tls.py`)**: `SCTLSConfig.__repr__()` now redacts
+  `private_key_path` as `'<REDACTED>'` to prevent credential leaks in logs and
+  tracebacks.
+- **SC TLS configuration validation (`tls.py`)**: Added warnings for mismatched
+  `certificate_path`/`private_key_path` configuration and missing CA certificates.
+- **SC WebSocket frame size limit (`websocket.py`)**: Added `max_frame_size`
+  parameter propagated from connection setup; oversized frames are logged at
+  WARNING and dropped to prevent memory exhaustion.
+- **SC plaintext warnings**: Upgraded plaintext-mode log messages from DEBUG to
+  WARNING across `tls.py`, `__init__.py`, `hub_connector.py`, `hub_function.py`,
+  `node_switch.py`, and `websocket.py` with references to ASHRAE 135-2020
+  Annex AB.7.4.
+
+### Changed
+
+- **Lazy logging across entire codebase**: Converted all f-string
+  `logger.debug()`/`logger.warning()`/`logger.info()` calls to lazy `%s`/`%d`
+  formatting across the full stack: `app/` (client, server, application, tsm,
+  event_engine, cov, audit, schedule_engine, trendlog_engine), `encoding/`
+  (apdu), `objects/` (base, device), `segmentation/` (manager), `serialization/`,
+  `types/` (enums), `transport/` (bip, bip6, bbmd, ethernet, npdu, layer, router,
+  address), and `transport/sc/` (all modules). This avoids string interpolation
+  overhead when the log level is disabled.
+- **Device info cache eviction (`application.py`)**: Capped `_device_info_cache`
+  at 1,000 entries with FIFO eviction (removes oldest 100 when limit reached) to
+  prevent unbounded growth from I-Am responses.
+- **Application stop cleanup (`application.py`)**: Clear unconfirmed listeners and
+  device info cache during `stop()` to release references.
+- **Event engine stop cleanup (`event_engine.py`)**: Cancel pending confirmed
+  notification tasks during `stop()` to release memory.
+- **Server TSM buffer release (`tsm.py`)**: Clear `cached_response` on server
+  transaction abort and timeout to release large byte buffers promptly.
+- **SC transport stop cleanup (`__init__.py`)**: Cancel and clean up pending send
+  tasks during `stop()` to prevent dangling references.
+- **SC connection callback cleanup (`connection.py`)**: Clear `on_connected`,
+  `on_disconnected`, `on_message`, and `on_vmac_collision` callbacks in `_go_idle()`
+  to break reference cycles between connection, hub function, and node switch objects.
+- **SC hub connector resource cleanup (`hub_connector.py`)**: Call `_go_idle()` on
+  failed connections (VMAC collision or non-connected state) to clean up resources.
+- **BBMD byte operations (`bbmd.py`)**: Replaced `bytearray` + `extend()` loops in
+  `_handle_read_bdt()` and `_handle_read_fdt()` with `b"".join()` for fewer
+  intermediate allocations.
+- **Router cache optimization (`layer.py`)**: In `_learn_router_from_source()`,
+  update `last_seen` timestamp in-place on fresh cache entries instead of creating
+  a new `RouterCacheEntry` object.
+- **Foreign device exception narrowing (`foreign_device.py`)**: Narrowed
+  `_registration_loop()` exception catch from bare `Exception` to `OSError`.
+- **Ethernet stop() cleanup (`ethernet.py`)**: Narrowed `contextlib.suppress(Exception)`
+  to `contextlib.suppress(OSError, ValueError)` in `stop()`.
+- Docker firmware/application version strings updated from `"1.2.0"` to `"1.3.8"`.
+
+### Added
+
+- **Security and memory safety documentation** -- New `docs/guide/security.rst`
+  covering protocol safety (ASN.1/BER bounds checking, allocation caps, nesting
+  depth limits), transport security (TLS 1.3, VMAC validation, frame size limits,
+  credential redaction), logging safety (lazy formatting), memory safety (frozen
+  dataclasses, bounded buffers, constant-time comparisons), dependency posture,
+  and a production checklist.
+- ~1,000 new test lines covering security hardening: tag decode bounds, allocation
+  caps, nesting depth, application value truncation, decoded value count limit,
+  constant-time password comparison, SC VMAC origin validation, SC frame size
+  limits, SC TLS credential redaction, SC plaintext warnings, NPDU truncation,
+  Ethernet exception handling, and device info cache eviction.
+
+### Documentation
+
+- Added `guide/security` to the User Guide toctree in `docs/index.rst`.
+- Trimmed `docs/guide/device-management.rst` -- removed JSON Serialization, Docker
+  Integration Testing, and Protocol-Level API sections that were duplicated in
+  `features.rst` and `getting-started.rst`.
+- Updated `docs/features.rst` Docker section: added SC scenario, updated count
+  from eight to nine, added `docker-test-sc` target reference.
+- Fixed cross-references after removing `protocol-level-api` label.
+
 ## [1.3.7] - 2026-02-14
 
 ### Fixed
