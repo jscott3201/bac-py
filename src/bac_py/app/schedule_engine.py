@@ -69,6 +69,7 @@ class ScheduleEngine:
         """Start the periodic evaluation loop."""
         if self._task is not None:
             return
+        logger.info("ScheduleEngine started")
         self._task = asyncio.create_task(self._run_loop())
 
     async def stop(self) -> None:
@@ -79,6 +80,7 @@ class ScheduleEngine:
                 await self._task
             self._task = None
         self._last_values.clear()
+        logger.info("ScheduleEngine stopped")
 
     # --- Main loop ---
 
@@ -230,6 +232,7 @@ class ScheduleEngine:
     ) -> None:
         """Update present_value and write to targets on change."""
         oid = sched.object_identifier
+        logger.debug(f"schedule {oid} evaluated: value={value}")
         prev = self._last_values.get(oid, _SENTINEL)
 
         # Always update present_value

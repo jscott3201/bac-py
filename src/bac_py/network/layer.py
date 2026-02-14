@@ -218,6 +218,7 @@ class NetworkLayer:
         if entry is None:
             return None
         if time.monotonic() - entry.last_seen > self._cache_ttl:
+            logger.debug(f"Router cache entry for network {dnet} expired, evicting")
             del self._router_cache[dnet]
             return None
         return entry.router_mac
@@ -263,6 +264,9 @@ class NetworkLayer:
             )
 
         if self._receive_callback:
+            logger.debug(
+                f"Dispatching APDU ({len(npdu.apdu)} bytes) to application from {src_addr}"
+            )
             self._receive_callback(npdu.apdu, src_addr)
 
     # ------------------------------------------------------------------
@@ -290,6 +294,8 @@ class NetworkLayer:
                 npdu.message_type,
             )
             return
+
+        logger.debug(f"Handling network message type {npdu.message_type}: {type(msg).__name__}")
 
         if isinstance(msg, IAmRouterToNetwork):
             self._handle_i_am_router(msg, source_mac)
@@ -433,9 +439,15 @@ class NetworkLayer:
             raise ValueError(msg)
         router_mac = self.get_router_for_network(destination.network)
         if router_mac is not None:
+            logger.debug(
+                f"Sending to network {destination.network} via cached router {router_mac.hex()}"
+            )
             self._transport.send_unicast(npdu_bytes, router_mac)
         else:
             # Cache miss: broadcast NPDU (a router will pick it up)
+            logger.warning(
+                f"No cached router for network {destination.network}, broadcasting NPDU"
+            )
             self._transport.send_broadcast(npdu_bytes)
             # Also issue Who-Is-Router-To-Network to populate cache
             self._send_who_is_router(destination.network)

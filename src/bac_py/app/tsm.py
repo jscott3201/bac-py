@@ -118,6 +118,7 @@ class ClientTSM:
             self._next_invoke_id = (self._next_invoke_id + 1) & 0xFF
             if (destination, iid) not in self._transactions:
                 return iid
+        logger.warning("TSM invoke IDs exhausted")
         msg = "No available invoke IDs for this peer"
         raise RuntimeError(msg)
 
@@ -163,6 +164,7 @@ class ClientTSM:
         txn._effective_max_apdu = effective_max_apdu  # type: ignore[attr-defined]
         key = (destination, invoke_id)
         self._transactions[key] = txn
+        logger.debug(f"TSM transaction created invoke_id={invoke_id}")
 
         try:
             max_payload = compute_max_segment_payload(effective_max_apdu, "confirmed_request")
@@ -189,6 +191,7 @@ class ClientTSM:
             if txn.state != ClientTransactionState.AWAIT_CONFIRMATION:
                 return
             self._cancel_timeout(txn)
+            logger.debug(f"TSM transaction completed invoke_id={invoke_id}")
             txn.future.set_result(b"")
 
     def handle_complex_ack(
@@ -205,6 +208,7 @@ class ClientTSM:
             if txn.state != ClientTransactionState.AWAIT_CONFIRMATION:
                 return
             self._cancel_timeout(txn)
+            logger.debug(f"TSM transaction completed invoke_id={invoke_id}")
             txn.future.set_result(data)
 
     def handle_error(
@@ -486,12 +490,7 @@ class ClientTSM:
             return
         if txn.retry_count < self._retries:
             txn.retry_count += 1
-            logger.debug(
-                "Retrying invoke_id=%d (attempt %d/%d)",
-                txn.invoke_id,
-                txn.retry_count,
-                self._retries,
-            )
+            logger.debug(f"TSM retry invoke_id={txn.invoke_id} attempt={txn.retry_count}")
             # Retry using the same method as the original request.
             # If the request data exceeds the max segment payload it
             # must be re-sent as a segmented request.
@@ -502,6 +501,9 @@ class ClientTSM:
             else:
                 self._send_confirmed_request(txn, effective)
         else:
+            logger.debug(
+                f"TSM transaction timeout invoke_id={txn.invoke_id} retries={txn.retry_count}"
+            )
             txn.future.set_exception(
                 BACnetTimeoutError(f"No response after {self._retries} retries")
             )

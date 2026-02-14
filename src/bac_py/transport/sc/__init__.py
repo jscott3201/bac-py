@@ -156,15 +156,18 @@ class SCTransport:
 
     async def start(self) -> None:
         """Start the SC transport: hub function, hub connector, node switch."""
+        logger.info(f"SC transport starting: vmac={self._vmac}")
         if self._hub_function:
             await self._hub_function.start()
         if self._config.primary_hub_uri:
             await self._hub_connector.start()
         if self._node_switch:
             await self._node_switch.start()
+        logger.info("SC transport started")
 
     async def stop(self) -> None:
         """Stop the SC transport and release all resources."""
+        logger.info("SC transport stopping")
         if self._node_switch:
             with contextlib.suppress(Exception):
                 await self._node_switch.stop()
@@ -173,6 +176,7 @@ class SCTransport:
         if self._hub_function:
             with contextlib.suppress(Exception):
                 await self._hub_function.stop()
+        logger.info("SC transport stopped")
 
     def send_unicast(self, npdu: bytes, mac_address: bytes) -> None:
         """Send an NPDU to a specific VMAC.
@@ -180,6 +184,7 @@ class SCTransport:
         Tries direct connection first (if available), then hub.
         """
         dest = SCVMAC(mac_address)
+        logger.debug(f"SC send unicast: {len(npdu)} bytes to {dest}")
         msg = SCMessage(
             BvlcSCFunction.ENCAPSULATED_NPDU,
             message_id=0,
@@ -196,6 +201,7 @@ class SCTransport:
 
     def send_broadcast(self, npdu: bytes) -> None:
         """Send an NPDU as a broadcast via the hub."""
+        logger.debug(f"SC send broadcast: {len(npdu)} bytes")
         msg = SCMessage(
             BvlcSCFunction.ENCAPSULATED_NPDU,
             message_id=0,
@@ -237,6 +243,7 @@ class SCTransport:
         """Handle a message received from the hub connection."""
         if msg.function == BvlcSCFunction.ENCAPSULATED_NPDU and msg.payload:
             source_mac = msg.originating.address if msg.originating else b"\x00" * 6
+            logger.debug(f"SC recv from hub: {len(msg.payload)} bytes from {msg.originating}")
             if self._receive_callback:
                 self._receive_callback(msg.payload, source_mac)
         elif msg.function == BvlcSCFunction.ADDRESS_RESOLUTION_ACK and self._node_switch:
@@ -246,6 +253,7 @@ class SCTransport:
         """Handle a message received from a direct connection."""
         if msg.function == BvlcSCFunction.ENCAPSULATED_NPDU and msg.payload:
             source_mac = msg.originating.address if msg.originating else b"\x00" * 6
+            logger.debug(f"SC recv from direct: {len(msg.payload)} bytes from {msg.originating}")
             if self._receive_callback:
                 self._receive_callback(msg.payload, source_mac)
 

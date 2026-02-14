@@ -41,6 +41,7 @@ capabilities, see :doc:`features`.
    guide/server-mode
    guide/device-management
    guide/secure-connect
+   guide/debugging-logging
    guide/examples
 
 .. toctree::

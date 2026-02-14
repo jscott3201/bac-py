@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+
+logger = logging.getLogger(__name__)
 
 
 class TagClass(IntEnum):
@@ -73,9 +76,11 @@ def encode_tag(tag_number: int, cls: TagClass, length: int) -> bytes:
     """
     if tag_number < 0 or tag_number > 254:
         msg = f"Tag number must be 0-254, got {tag_number}"
+        logger.warning(msg)
         raise ValueError(msg)
     if length < 0:
         msg = f"Tag length must be non-negative, got {length}"
+        logger.warning(msg)
         raise ValueError(msg)
 
     # Fast path: tag_number <= 14 and length <= 4 → single byte (most common case)
@@ -159,6 +164,7 @@ def decode_tag(buf: memoryview | bytes, offset: int) -> tuple[Tag, int]:
 
     if offset >= len(buf):
         msg = f"Tag decode: offset {offset} beyond buffer length {len(buf)}"
+        logger.warning(msg)
         raise ValueError(msg)
 
     initial = buf[offset]
@@ -233,6 +239,7 @@ def extract_context_value(
         else:
             offset = new_offset + t.length
     msg = f"Missing closing tag {tag_number}"
+    logger.warning(msg)
     raise ValueError(msg)
 
 

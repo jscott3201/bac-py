@@ -702,6 +702,7 @@ class EventEngine:
 
     def _evaluate_enrollment(self, enrollment: BACnetObject, now: float) -> None:
         """Evaluate a single EventEnrollment object."""
+        logger.debug(f"evaluating EventEnrollment for {enrollment.object_identifier}")
         # Check event_detection_enable
         detection_enable = self._read_prop(enrollment, PropertyIdentifier.EVENT_DETECTION_ENABLE)
         if detection_enable is False:
@@ -742,6 +743,10 @@ class EventEngine:
         # Feed to state machine
         transition = ctx.state_machine.evaluate(event_result, fault_result, now)
         if transition is not None:
+            logger.info(
+                f"event state transition {enrollment.object_identifier}: "
+                f"{transition.from_state} -> {transition.to_state}"
+            )
             self._dispatch_notification(enrollment, transition, event_type, fault_result)
 
     def _read_monitored_property(self, enrollment: BACnetObject) -> Any:
@@ -788,6 +793,7 @@ class EventEngine:
 
     def _evaluate_intrinsic(self, obj: BACnetObject, now: float) -> None:
         """Evaluate an intrinsic-reporting object."""
+        logger.debug(f"evaluating intrinsic reporting for {obj.object_identifier}")
         # Check event_detection_enable if present
         detection_enable = obj._properties.get(PropertyIdentifier.EVENT_DETECTION_ENABLE)
         if detection_enable is False:
@@ -833,6 +839,10 @@ class EventEngine:
 
         transition = ctx.state_machine.evaluate(event_result, fault_result, now)
         if transition is not None:
+            logger.info(
+                f"event state transition {obj.object_identifier}: "
+                f"{transition.from_state} -> {transition.to_state}"
+            )
             self._dispatch_intrinsic_notification(obj, transition, event_type, fault_result)
 
     def _run_intrinsic_algorithm(
@@ -1125,6 +1135,7 @@ class EventEngine:
             from_state=transition.from_state,
         )
 
+        logger.debug(f"sending event notification for {enrollment.object_identifier}")
         self._route_notification(notification, notification_class_num, transition.to_state)
 
         # Update event_time_stamps on the enrollment
@@ -1160,6 +1171,7 @@ class EventEngine:
             from_state=transition.from_state,
         )
 
+        logger.debug(f"sending event notification for {obj.object_identifier}")
         self._route_notification(notification, notification_class_num, transition.to_state)
 
         # Update event_state on the object itself

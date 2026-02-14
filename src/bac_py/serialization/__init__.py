@@ -6,7 +6,10 @@ data structures to and from external interchange formats.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Protocol, runtime_checkable
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["Serializer", "deserialize", "get_serializer", "serialize"]
 
@@ -58,6 +61,7 @@ def serialize(obj: Any, format: str = "json", **kwargs: Any) -> bytes:
     """
     serializer = get_serializer(format, **kwargs)
     data = obj.to_dict() if hasattr(obj, "to_dict") else obj
+    logger.debug(f"serialize: {type(obj).__name__}")
     return serializer.encode(data)
 
 
@@ -69,4 +73,5 @@ def deserialize(raw: bytes, format: str = "json") -> dict[str, Any]:
     :returns: Deserialized dict.
     """
     serializer = get_serializer(format)
+    logger.debug(f"deserialize: {format}")
     return serializer.decode(raw)

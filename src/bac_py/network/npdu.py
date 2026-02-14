@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from bac_py.network.address import BACnetAddress
 from bac_py.types.enums import NetworkPriority
+
+logger = logging.getLogger(__name__)
 
 BACNET_PROTOCOL_VERSION = 1
 
@@ -88,28 +91,35 @@ def encode_npdu(npdu: NPDU) -> bytes:
             msg = "Destination network must be set when destination is present"
             raise ValueError(msg)
         dnet = npdu.destination.network
+        dadr = npdu.destination.mac_address
+        logger.debug(f"encode_npdu: dnet={dnet} dadr={dadr.hex() if dadr else '(empty)'}")
         buf.extend(dnet.to_bytes(2, "big"))
-        dlen = len(npdu.destination.mac_address)
+        dlen = len(dadr)
         buf.append(dlen)
         if dlen > 0:
-            buf.extend(npdu.destination.mac_address)
+            buf.extend(dadr)
 
     # Source (if present) - validate per Clause 6.2.2.1
     if npdu.source is not None:
         if npdu.source.network is None:
             msg = "Source network must be set when source is present (must be 1-65534)"
+            logger.warning(f"encode_npdu: {msg}")
             raise ValueError(msg)
         snet = npdu.source.network
         if snet == 0xFFFF:
             msg = "SNET cannot be 0xFFFF (global broadcast is not a valid source)"
+            logger.warning(f"encode_npdu: {msg}")
             raise ValueError(msg)
         if snet == 0:
             msg = "SNET cannot be 0 (must be 1-65534)"
+            logger.warning(f"encode_npdu: {msg}")
             raise ValueError(msg)
         slen = len(npdu.source.mac_address)
         if slen == 0:
             msg = "SLEN cannot be 0 when source is present"
+            logger.warning(f"encode_npdu: {msg}")
             raise ValueError(msg)
+        logger.debug(f"encode_npdu: snet={snet} sadr={npdu.source.mac_address.hex()}")
         buf.extend(snet.to_bytes(2, "big"))
         buf.append(slen)
         buf.extend(npdu.source.mac_address)
@@ -149,6 +159,7 @@ def decode_npdu(data: memoryview | bytes) -> NPDU:
     """
     if len(data) < 2:
         msg = f"NPDU data too short: need at least 2 bytes, got {len(data)}"
+        logger.warning(f"decode_npdu: {msg}")
         raise ValueError(msg)
 
     if isinstance(data, bytes):
@@ -160,6 +171,7 @@ def decode_npdu(data: memoryview | bytes) -> NPDU:
 
     if version != BACNET_PROTOCOL_VERSION:
         msg = f"Unsupported BACnet protocol version: {version}"
+        logger.warning(f"decode_npdu: {msg}")
         raise ValueError(msg)
 
     control = data[offset]
@@ -183,24 +195,29 @@ def decode_npdu(data: memoryview | bytes) -> NPDU:
         dadr = bytes(data[offset : offset + dlen])
         offset += dlen
         destination = BACnetAddress(network=dnet, mac_address=dadr)
+        logger.debug(f"decode_npdu: dnet={dnet} dadr={dadr.hex() if dadr else '(empty)'}")
 
     if has_source:
         snet = int.from_bytes(data[offset : offset + 2], "big")
         offset += 2
         if snet == 0xFFFF:
             msg = "Source SNET cannot be 0xFFFF (global broadcast)"
+            logger.warning(f"decode_npdu: {msg}")
             raise ValueError(msg)
         if snet == 0:
             msg = "Source SNET cannot be 0 (must be 1-65534)"
+            logger.warning(f"decode_npdu: {msg}")
             raise ValueError(msg)
         slen = data[offset]
         offset += 1
         if slen == 0:
             msg = "Source SLEN cannot be 0 when source is present"
+            logger.warning(f"decode_npdu: {msg}")
             raise ValueError(msg)
         sadr = bytes(data[offset : offset + slen])
         offset += slen
         source = BACnetAddress(network=snet, mac_address=sadr)
+        logger.debug(f"decode_npdu: snet={snet} sadr={sadr.hex()}")
 
     if has_destination:
         hop_count = data[offset]

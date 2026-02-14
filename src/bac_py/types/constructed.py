@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -9,6 +10,8 @@ from bac_py.types.primitives import BACnetDate, BACnetTime, BitString, ObjectIde
 
 if TYPE_CHECKING:
     from bac_py.types.enums import LightingOperation
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -219,6 +222,7 @@ class BACnetTimeStamp:
 
         if tag.cls != TagClass.CONTEXT:
             msg = f"Expected context tag for BACnetTimeStamp, got application tag {tag.number}"
+            logger.warning(msg)
             raise ValueError(msg)
 
         if tag.number == 0:
@@ -246,6 +250,7 @@ class BACnetTimeStamp:
             return cls(choice=2, value=BACnetDateTime(date=date_val, time=time_val)), new_offset
 
         msg = f"Invalid BACnetTimeStamp context tag: {tag.number}"
+        logger.warning(msg)
         raise ValueError(msg)
 
     def to_dict(self) -> dict[str, Any]:
@@ -1533,6 +1538,7 @@ class BACnetValueSource:
 
         if tag.cls != TagClass.CONTEXT:
             msg = f"Expected context tag for BACnetValueSource, got {tag}"
+            logger.warning(msg)
             raise ValueError(msg)
 
         if tag.number == 0:
@@ -1554,6 +1560,7 @@ class BACnetValueSource:
             return cls.from_address(addr), new_offset + tag.length
 
         msg = f"Invalid BACnetValueSource choice tag: {tag.number}"
+        logger.warning(msg)
         raise ValueError(msg)
 
     def to_dict(self) -> dict[str, Any]:

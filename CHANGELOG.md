@@ -5,6 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.6] - 2026-02-14
+
+### Added
+
+- **Comprehensive structured logging across the entire stack** -- Every module now
+  uses `logging.getLogger(__name__)` for hierarchical logger namespaces under
+  `bac_py.*`. Users can enable granular debugging by configuring any logger in the
+  hierarchy (e.g., `logging.getLogger("bac_py.app.client").setLevel(logging.DEBUG)`).
+  - **app/client.py**: 56 log statements across all public methods (DEBUG for
+    request/response, INFO for lifecycle/discovery operations)
+  - **app/application.py**: Lifecycle (INFO start/stop), APDU dispatch (DEBUG),
+    device info cache updates, handler errors (ERROR with exc_info)
+  - **App engines** (tsm, event, cov, audit, schedule, trendlog): Transaction
+    lifecycle, event state transitions, COV subscription management, audit record
+    creation, schedule/trend evaluation cycles
+  - **app/server.py**: Handler dispatch (DEBUG), registration events, all error
+    paths now log WARNING before raising BACnetError
+  - **Network layer** (npdu, layer, router, address): NPDU encode/decode routing
+    info, APDU dispatch, router cache updates, address parsing
+  - **Transports** (bip, bbmd, ethernet, bip6): Send/receive (DEBUG), BBMD
+    lifecycle (INFO start/stop), broadcast forwarding
+  - **Encoding/types** (apdu, tags, enums, constructed): APDU encode/decode type
+    identification, tag validation warnings, vendor-proprietary PropertyIdentifier
+    creation, CHOICE decode failures
+  - **SC transport** (all 8 files): Connection state machines, hub routing,
+    failover events, TLS context creation, BVLC message codec, WebSocket
+    connect/accept/close
+  - **Objects** (base, device): ObjectDatabase add/remove (INFO), property
+    read/write (DEBUG), not-found warnings
+  - **Segmentation**: Segment send/receive progress, window management, transfer
+    completion (INFO), duplicate/out-of-window warnings
+  - **Serialization**: Serialize/deserialize operations (DEBUG), type errors (WARNING)
+- **Debugging and logging documentation** -- New `docs/guide/debugging-logging.rst`
+  guide with logger hierarchy table, log level descriptions, practical debugging
+  recipes (failed reads, discovery, server handlers, segmentation, SC connections),
+  file logging configuration, and performance notes. Added "Structured Logging"
+  section to `docs/features.rst` and "Debugging and Logging" subsection to
+  `docs/getting-started.rst`.
+- **Logging in example scripts** -- Added `logging.basicConfig()` to 5 core
+  examples (`read_value.py`, `write_value.py`, `discover_devices.py`,
+  `monitor_cov.py`, `object_management.py`), bringing the total to 9 of 21
+  examples with logging setup.
+
 ## [1.3.5] - 2026-02-14
 
 ### Changed

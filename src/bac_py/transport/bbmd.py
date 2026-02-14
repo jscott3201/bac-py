@@ -239,6 +239,10 @@ class BBMDManager:
         """
         await asyncio.to_thread(self._load_bdt_backup)
         self._cleanup_task = asyncio.create_task(self._fdt_cleanup_loop())
+        logger.info(
+            f"BBMDManager started on {self._local_address.host}:{self._local_address.port} "
+            f"(BDT={len(self._bdt)} entries, FD registration={'enabled' if self._accept_fd_registrations else 'disabled'})"
+        )
 
     async def stop(self) -> None:
         """Stop the FDT cleanup background task."""
@@ -247,6 +251,7 @@ class BBMDManager:
             with contextlib.suppress(asyncio.CancelledError):
                 await self._cleanup_task
             self._cleanup_task = None
+        logger.info("BBMDManager stopped")
 
     def _is_unicast_bdt_mask(self, addr: BIPAddress) -> bool:
         """Check whether a BDT peer uses a unicast mask (all-ones).
@@ -350,6 +355,9 @@ class BBMDManager:
         sends it to all BDT peers (except itself) and all registered
         foreign devices.
         """
+        logger.debug(
+            f"Original-Broadcast from {source.host}:{source.port}, forwarding {len(npdu)} bytes"
+        )
         self._forward_to_peers_and_fds(npdu, source)
 
     def _handle_forwarded_npdu(
@@ -408,6 +416,7 @@ class BBMDManager:
         from that foreign device: forwards to all BDT peers and all
         registered foreign devices (except the sender), and broadcasts locally.
         """
+        logger.debug(f"Distribute-Broadcast-To-Network from {source.host}:{source.port}")
         # Verify the source is a registered foreign device
         if source not in self._fdt:
             result = _encode_bvlc_result(BvlcResultCode.DISTRIBUTE_BROADCAST_TO_NETWORK_NAK)
@@ -531,6 +540,7 @@ class BBMDManager:
         Responds with Read-BDT-Ack containing all BDT entries.
         Per J.2.4, an empty BDT is signified by a list of length zero.
         """
+        logger.debug(f"Read-BDT request from {source.host}:{source.port}")
         payload = bytearray()
         for entry in self._bdt:
             payload.extend(entry.encode())
@@ -574,6 +584,7 @@ class BBMDManager:
         Responds with Read-FDT-Ack containing all FDT entries.
         Per J.2.8, an empty FDT is signified by a list of length zero.
         """
+        logger.debug(f"Read-FDT request from {source.host}:{source.port}")
         payload = bytearray()
         for fd in self._fdt.values():
             payload.extend(fd.address.encode())

@@ -9,8 +9,12 @@ Usage::
 """
 
 import asyncio
+import logging
 
 from bac_py import Client
+
+# Uncomment for detailed protocol traces; use DEBUG for request-level detail
+logging.basicConfig(level=logging.INFO, format="%(name)s %(levelname)s %(message)s")
 
 DEVICE_ADDRESS = "192.168.1.100"
 

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 from enum import IntEnum
 from typing import Any
 
 import orjson
+
+logger = logging.getLogger(__name__)
 
 
 class JsonSerializer:
@@ -41,6 +44,7 @@ class JsonSerializer:
         result = orjson.loads(raw)
         if not isinstance(result, dict):
             msg = f"Expected JSON object, got {type(result).__name__}"
+            logger.warning(f"deserialize failed: {msg}")
             raise TypeError(msg)
         return result
 
@@ -60,4 +64,5 @@ class JsonSerializer:
         if isinstance(obj, IntEnum):
             return int(obj)
         msg = f"Cannot serialize {type(obj).__name__}"
+        logger.warning(f"serialize failed: {msg}")
         raise TypeError(msg)

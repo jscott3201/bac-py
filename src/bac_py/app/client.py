@@ -372,6 +372,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"read_property {object_identifier} {property_identifier} from {address}")
         request = ReadPropertyRequest(
             object_identifier=object_identifier,
             property_identifier=property_identifier,
@@ -409,6 +410,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"write_property {object_identifier} {property_identifier} to {address}")
         request = WritePropertyRequest(
             object_identifier=object_identifier,
             property_identifier=property_identifier,
@@ -442,6 +444,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"read_property_multiple {len(read_access_specs)} specs from {address}")
         request = ReadPropertyMultipleRequest(
             list_of_read_access_specs=read_access_specs,
         )
@@ -471,6 +474,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"write_property_multiple {len(write_access_specs)} specs to {address}")
         request = WritePropertyMultipleRequest(
             list_of_write_access_specs=write_access_specs,
         )
@@ -588,6 +592,7 @@ class BACnetClient:
             value = await client.read("192.168.1.100", "ai,1", "pv")
             name = await client.read("192.168.1.100", "ai,1", "object-name")
         """
+        logger.debug(f"read {object_identifier} {property_identifier} from {address}")
         addr = parse_address(address)
         obj_id = parse_object_identifier(object_identifier)
         prop_id = parse_property_identifier(property_identifier)
@@ -643,6 +648,7 @@ class BACnetClient:
             await client.write("192.168.1.100", "bo,1", "pv", 1, priority=8)
             await client.write("192.168.1.100", "av,1", "pv", None, priority=8)
         """
+        logger.debug(f"write {object_identifier} {property_identifier} to {address}")
         addr = parse_address(address)
         obj_id = parse_object_identifier(object_identifier)
         prop_id = parse_property_identifier(property_identifier)
@@ -693,6 +699,7 @@ class BACnetClient:
                     },
                 }
         """
+        logger.debug(f"read_multiple {len(specs)} properties from {address}")
         from bac_py.services.read_property_multiple import PropertyReference
 
         addr = parse_address(address)
@@ -768,6 +775,7 @@ class BACnetClient:
                 },
             )
         """
+        logger.debug(f"write_multiple {len(specs)} values to {address}")
         from bac_py.services.common import BACnetPropertyValue
 
         addr = parse_address(address)
@@ -818,6 +826,7 @@ class BACnetClient:
             for obj in objects:
                 print(obj.object_type, obj.instance_number)
         """
+        logger.debug(f"get_object_list from {address}")
         from bac_py.services.errors import BACnetAbortError
         from bac_py.types.enums import AbortReason
 
@@ -911,6 +920,7 @@ class BACnetClient:
                 lifetime=3600,
             )
         """
+        logger.info(f"subscribe_cov {object_identifier} on {address} lifetime={lifetime}")
         addr = parse_address(address)
         obj_id = parse_object_identifier(object_identifier)
 
@@ -947,6 +957,7 @@ class BACnetClient:
         :param unregister_callback: If ``True``, also unregister the COV callback.
         :param timeout: Optional caller-level timeout in seconds.
         """
+        logger.info(f"unsubscribe_cov {object_identifier} on {address}")
         addr = parse_address(address)
         obj_id = parse_object_identifier(object_identifier)
 
@@ -979,6 +990,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"read_range {object_identifier} {property_identifier} from {address}")
         request = ReadRangeRequest(
             object_identifier=object_identifier,
             property_identifier=property_identifier,
@@ -1080,6 +1092,7 @@ class BACnetClient:
             full timeout.
         :returns: List of :class:`IAmRequest` responses received within the timeout.
         """
+        logger.debug(f"who_is low={low_limit} high={high_limit}")
         # Auto-infer expected_count=1 for targeted unicast to a single instance
         if (
             expected_count is None
@@ -1142,6 +1155,7 @@ class BACnetClient:
             for dev in devices:
                 print(dev.instance, dev.address_str, dev.vendor_id)
         """
+        logger.info(f"discover timeout={timeout} low={low_limit} high={high_limit}")
         # Auto-infer expected_count=1 for targeted unicast to a single instance
         if (
             expected_count is None
@@ -1196,6 +1210,7 @@ class BACnetClient:
         :param enrich_timeout: Per-device timeout for RPM enrichment.
         :returns: List of :class:`DiscoveredDevice` with profile metadata.
         """
+        logger.info(f"discover_extended timeout={timeout} low={low_limit} high={high_limit}")
         from bac_py.services.errors import BACnetError, BACnetTimeoutError
         from bac_py.services.read_property_multiple import PropertyReference
 
@@ -1276,6 +1291,7 @@ class BACnetClient:
         :returns: Flat list of all discovered :class:`ObjectIdentifier`
             values, including Structured View objects themselves.
         """
+        logger.debug(f"traverse_hierarchy from {address}")
         result: list[ObjectIdentifier] = []
         await self._traverse_hierarchy_recursive(address, root, max_depth, timeout, result, set())
         return result
@@ -1346,6 +1362,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.info(f"subscribe_cov {object_identifier} on {address}")
         request = SubscribeCOVRequest(
             subscriber_process_identifier=process_id,
             monitored_object_identifier=object_identifier,
@@ -1380,6 +1397,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.info(f"unsubscribe_cov {object_identifier} on {address}")
         request = SubscribeCOVRequest(
             subscriber_process_identifier=process_id,
             monitored_object_identifier=object_identifier,
@@ -1419,6 +1437,9 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.info(
+            f"subscribe_cov_property {object_identifier}.{property_identifier} on {address}"
+        )
         request = SubscribeCOVPropertyRequest(
             subscriber_process_identifier=process_id,
             monitored_object_identifier=object_identifier,
@@ -1462,6 +1483,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.info(f"subscribe_cov_property_multiple on {address}")
         request = SubscribeCOVPropertyMultipleRequest(
             subscriber_process_identifier=process_id,
             list_of_cov_subscription_specifications=specifications,
@@ -1496,6 +1518,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.info(f"device_communication_control {enable_disable} on {address}")
         request = DeviceCommunicationControlRequest(
             enable_disable=enable_disable,
             time_duration=time_duration,
@@ -1524,6 +1547,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.info(f"reinitialize_device {reinitialized_state} on {address}")
         request = ReinitializeDeviceRequest(
             reinitialized_state=reinitialized_state,
             password=password,
@@ -1549,6 +1573,7 @@ class BACnetClient:
         :param date: BACnet date to synchronize.
         :param time: BACnet time to synchronize.
         """
+        logger.debug(f"time_synchronization to {destination}")
         request = TimeSynchronizationRequest(date=date, time=time)
         self._app.unconfirmed_request(
             destination=destination,
@@ -1570,6 +1595,7 @@ class BACnetClient:
         :param date: BACnet UTC date to synchronize.
         :param time: BACnet UTC time to synchronize.
         """
+        logger.debug(f"utc_time_synchronization to {destination}")
         request = UTCTimeSynchronizationRequest(date=date, time=time)
         self._app.unconfirmed_request(
             destination=destination,
@@ -1596,6 +1622,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"atomic_read_file {file_identifier} from {address}")
         request = AtomicReadFileRequest(
             file_identifier=file_identifier,
             access_method=access_method,
@@ -1625,6 +1652,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"atomic_write_file {file_identifier} to {address}")
         request = AtomicWriteFileRequest(
             file_identifier=file_identifier,
             access_method=access_method,
@@ -1659,6 +1687,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.info(f"create_object {object_type} on {address}")
         request = CreateObjectRequest(
             object_type=object_type,
             object_identifier=object_identifier,
@@ -1689,6 +1718,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.info(f"delete_object {object_identifier} on {address}")
         request = DeleteObjectRequest(object_identifier=object_identifier)
         await self._app.confirmed_request(
             destination=address,
@@ -1719,6 +1749,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"add_list_element {object_identifier} {property_identifier} on {address}")
         request = AddListElementRequest(
             object_identifier=object_identifier,
             property_identifier=property_identifier,
@@ -1752,6 +1783,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"remove_list_element {object_identifier} {property_identifier} on {address}")
         request = RemoveListElementRequest(
             object_identifier=object_identifier,
             property_identifier=property_identifier,
@@ -1795,6 +1827,7 @@ class BACnetClient:
         :returns: List of :class:`IHaveRequest` responses received within the
             timeout.
         """
+        logger.debug(f"who_has object_name={object_name} object_identifier={object_identifier}")
         request = WhoHasRequest(
             object_identifier=object_identifier,
             object_name=object_name,
@@ -1844,6 +1877,7 @@ class BACnetClient:
             for router in routers:
                 print(f"Router at {router.address}: networks {router.networks}")
         """
+        logger.debug(f"who_is_router_to_network network={network}")
         from bac_py.network.address import BIPAddress
         from bac_py.network.messages import (
             IAmRouterToNetwork,
@@ -1924,6 +1958,9 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(
+            f"confirmed_private_transfer vendor={vendor_id} service={service_number} to {address}"
+        )
         request = ConfirmedPrivateTransferRequest(
             vendor_id=vendor_id,
             service_number=service_number,
@@ -1953,6 +1990,7 @@ class BACnetClient:
         :param service_number: Vendor-specific service number.
         :param service_parameters: Optional vendor-specific data.
         """
+        logger.debug(f"unconfirmed_private_transfer vendor={vendor_id} service={service_number}")
         request = UnconfirmedPrivateTransferRequest(
             vendor_id=vendor_id,
             service_number=service_number,
@@ -1989,6 +2027,7 @@ class BACnetClient:
             rejects the request (not a BBMD).
         :raises TimeoutError: If no response within *timeout*.
         """
+        logger.debug(f"read_bdt from {bbmd_address}")
         from bac_py.transport.bip import BvlcNakError
 
         transport = self._require_transport()
@@ -2023,6 +2062,7 @@ class BACnetClient:
             rejects the request (not a BBMD).
         :raises TimeoutError: If no response within *timeout*.
         """
+        logger.debug(f"read_fdt from {bbmd_address}")
         from bac_py.transport.bip import BvlcNakError
 
         transport = self._require_transport()
@@ -2059,6 +2099,7 @@ class BACnetClient:
             rejects the write (NAK).
         :raises TimeoutError: If no response within *timeout*.
         """
+        logger.debug(f"write_bdt {len(entries)} entries to {bbmd_address}")
         from bac_py.transport.bbmd import BDTEntry
         from bac_py.types.enums import BvlcResultCode
 
@@ -2104,6 +2145,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.info(f"acknowledge_alarm {event_object_identifier} on {address}")
         request = AcknowledgeAlarmRequest(
             acknowledging_process_identifier=acknowledging_process_identifier,
             event_object_identifier=event_object_identifier,
@@ -2134,6 +2176,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"get_alarm_summary from {address}")
         request = GetAlarmSummaryRequest()
         response_data = await self._app.confirmed_request(
             destination=address,
@@ -2170,6 +2213,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"get_enrollment_summary from {address}")
         request = GetEnrollmentSummaryRequest(
             acknowledgment_filter=acknowledgment_filter,
             event_state_filter=event_state_filter,
@@ -2205,6 +2249,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"get_event_information from {address}")
         request = GetEventInformationRequest(
             last_received_object_identifier=last_received_object_identifier,
         )
@@ -2233,6 +2278,7 @@ class BACnetClient:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"confirmed_event_notification to {address}")
         await self._app.confirmed_request(
             destination=address,
             service_choice=ConfirmedServiceChoice.CONFIRMED_EVENT_NOTIFICATION,
@@ -2257,6 +2303,7 @@ class BACnetClient:
             rejects the delete (NAK).
         :raises TimeoutError: If no response within *timeout*.
         """
+        logger.info(f"delete_fdt_entry {entry_address} from {bbmd_address}")
         from bac_py.types.enums import BvlcResultCode
 
         transport = self._require_transport()
@@ -2293,6 +2340,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"send_confirmed_text_message to {address}")
         request = ConfirmedTextMessageRequest(
             text_message_source_device=source_device,
             message_priority=message_priority,
@@ -2327,6 +2375,7 @@ class BACnetClient:
         :param message_class_numeric: Optional numeric message class.
         :param message_class_character: Optional character message class.
         """
+        logger.debug("send_unconfirmed_text_message")
         request = UnconfirmedTextMessageRequest(
             text_message_source_device=source_device,
             message_priority=message_priority,
@@ -2358,6 +2407,7 @@ class BACnetClient:
         :param write_priority: Write priority (1-16).
         :param change_list: List of channel values to write.
         """
+        logger.debug(f"write_group group={group_number}")
         request = WriteGroupRequest(
             group_number=group_number,
             write_priority=write_priority,
@@ -2388,6 +2438,7 @@ class BACnetClient:
         :param model_name: Device model name.
         :param serial_number: Device serial number.
         """
+        logger.debug("who_am_i")
         request = WhoAmIRequest(
             vendor_id=vendor_id,
             model_name=model_name,
@@ -2416,6 +2467,7 @@ class BACnetClient:
         :param device_mac_address: MAC address of the target device.
         :param device_network_number: Optional network number.
         """
+        logger.debug(f"you_are {device_identifier} to {destination}")
         request = YouAreRequest(
             device_identifier=device_identifier,
             device_mac_address=device_mac_address,
@@ -2443,6 +2495,7 @@ class BACnetClient:
         :param timeout: Seconds to listen for Who-Am-I messages.
         :returns: List of :class:`UnconfiguredDevice` discovered.
         """
+        logger.info(f"discover_unconfigured timeout={timeout}")
         results: list[UnconfiguredDevice] = []
 
         def _on_who_am_i(service_data: bytes, source: BACnetAddress) -> None:
@@ -2491,6 +2544,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"vt_open {vt_class} to {address}")
         request = VTOpenRequest(
             vt_class=vt_class,
             local_vt_session_identifier=local_vt_session_identifier,
@@ -2517,6 +2571,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"vt_close sessions={session_identifiers} on {address}")
         request = VTCloseRequest(
             list_of_remote_vt_session_identifiers=session_identifiers,
         )
@@ -2546,6 +2601,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
+        logger.debug(f"vt_data session={vt_session_identifier} to {address}")
         request = VTDataRequest(
             vt_session_identifier=vt_session_identifier,
             vt_new_data=vt_new_data,
@@ -2581,6 +2637,7 @@ class BACnetClient:
         :returns: Decoded :class:`AuditLogQueryACK`.
         :raises BACnetError: On Error-PDU response.
         """
+        logger.debug(f"query_audit_log from {address}")
         request = AuditLogQueryRequest(
             audit_log=audit_log,
             query_parameters=query_parameters,
@@ -2610,6 +2667,7 @@ class BACnetClient:
         :param timeout: Optional caller-level timeout in seconds.
         :raises BACnetError: On Error-PDU response (confirmed only).
         """
+        logger.debug(f"send_audit_notification confirmed={confirmed}")
         if confirmed:
             request = ConfirmedAuditNotificationRequest(notifications=notifications)
             await self._app.confirmed_request(
@@ -2652,6 +2710,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU or invalid state transition.
         :raises BACnetTimeoutError: On timeout.
         """
+        logger.info(f"backup_device {address}")
         # Step 1: Start backup
         await self.reinitialize_device(
             address,
@@ -2731,6 +2790,7 @@ class BACnetClient:
         :raises BACnetError: On Error-PDU or invalid state transition.
         :raises BACnetTimeoutError: On timeout.
         """
+        logger.info(f"restore_device {address}")
         # Step 1: Start restore
         await self.reinitialize_device(
             address,

@@ -104,11 +104,13 @@ class SCHubConnector:
 
     async def start(self) -> None:
         """Start the hub connector, begin connection attempts."""
+        logger.info("SC hub connector starting")
         self._running = True
         self._connect_task = asyncio.ensure_future(self._connect_loop())
 
     async def stop(self) -> None:
         """Disconnect from hub and stop reconnection loop."""
+        logger.info("SC hub connector stopping")
         self._running = False
         if self._connect_task and not self._connect_task.done():
             self._connect_task.cancel()
@@ -166,6 +168,8 @@ class SCHubConnector:
                     continue
 
                 # Try failover hub
+                if self._config.failover_hub_uri:
+                    logger.info(f"Failing over to {self._config.failover_hub_uri}")
                 if self._config.failover_hub_uri and await self._try_connect(
                     self._config.failover_hub_uri,
                     _STATUS_FAILOVER,
@@ -177,6 +181,9 @@ class SCHubConnector:
                     continue
 
                 # Both failed — backoff and retry
+                logger.warning(
+                    f"SC hub connection failed, retrying in {self._reconnect_delay:.1f}s"
+                )
                 self._increase_backoff()
                 await asyncio.sleep(self._reconnect_delay)
         except asyncio.CancelledError:
@@ -243,6 +250,7 @@ class SCHubConnector:
             self._connection.on_disconnected = on_disc
 
         await disconnected.wait()
+        logger.info("Disconnected from hub")
         self._connected_event.clear()
         self._connection = None
         self._set_status(_STATUS_NONE)

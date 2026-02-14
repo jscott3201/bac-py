@@ -259,6 +259,38 @@ Example:
        print(f"BACnet error: class={e.error_class}, code={e.error_code}")
 
 
+.. _debugging-logging-quickstart:
+
+Debugging and Logging
+---------------------
+
+bac-py includes structured logging throughout the stack using Python's standard
+:mod:`logging` module. Enable it to see what's happening under the hood:
+
+.. code-block:: python
+
+   import logging
+
+   # Show lifecycle events (start, stop, subscriptions, etc.)
+   logging.basicConfig(
+       level=logging.INFO,
+       format="%(asctime)s %(name)s %(levelname)s %(message)s",
+   )
+
+   # Or for detailed protocol traces
+   logging.basicConfig(level=logging.DEBUG)
+
+You can target specific modules to reduce noise:
+
+.. code-block:: python
+
+   # Only debug client operations
+   logging.getLogger("bac_py.app.client").setLevel(logging.DEBUG)
+
+See :doc:`guide/debugging-logging` for the full logger hierarchy reference,
+practical debugging recipes, and file logging configuration.
+
+
 .. _two-api-levels:
 
 Two API Levels

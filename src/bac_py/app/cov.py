@@ -180,6 +180,7 @@ class COVManager:
         )
         self._subscriptions[key] = sub
         self._subs_by_object.setdefault(obj_id, {})[key] = sub
+        logger.info(f"COV subscription created: {obj_id} subscriber={subscriber}")
 
         # Start lifetime timer if applicable
         if lifetime is not None and lifetime > 0:
@@ -211,6 +212,7 @@ class COVManager:
                 obj_bucket.pop(key, None)
                 if not obj_bucket:
                     del self._subs_by_object[monitored_object]
+            logger.info(f"COV subscription removed: {monitored_object}")
 
     def check_and_notify(
         self,
@@ -673,6 +675,7 @@ class COVManager:
         Builds the notification with Present_Value and Status_Flags,
         then sends via the application layer.
         """
+        logger.debug(f"COV notification for {sub.monitored_object} to {sub.subscriber}")
         # Build list_of_values with Present_Value and Status_Flags
         present_value = self._read_present_value(obj)
         status_flags = self._read_status_flags(obj)

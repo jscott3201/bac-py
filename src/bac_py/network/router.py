@@ -487,6 +487,7 @@ class NetworkRouter:
         for port in self._routing_table.get_all_ports():
             port.transport.on_receive(partial(self._on_port_receive, port.port_id))
             await port.transport.start()
+            logger.info(f"Router port {port.port_id} started on network {port.network_number}")
 
         # Startup broadcasts per Clause 6.6.2.
         for port in self._routing_table.get_all_ports():
@@ -513,6 +514,7 @@ class NetworkRouter:
                 entry.busy_timeout_handle = None
         for port in self._routing_table.get_all_ports():
             await port.transport.stop()
+            logger.info(f"Router port {port.port_id} stopped on network {port.network_number}")
 
     # -- Properties ---------------------------------------------------------
 
@@ -660,8 +662,15 @@ class NetworkRouter:
             return
 
         if entry.next_router_mac is None:
+            logger.debug(
+                f"Forwarding to directly-connected network {dnet} on port {dest_port.port_id}"
+            )
             self._deliver_to_directly_connected(arrival_port_id, npdu, source_mac, dest_port)
         else:
+            logger.debug(
+                f"Forwarding to network {dnet} via next-hop router "
+                f"{entry.next_router_mac.hex()} on port {dest_port.port_id}"
+            )
             self._forward_via_next_hop(arrival_port_id, npdu, source_mac, dest_port, entry)
 
     def _deliver_to_directly_connected(
@@ -953,6 +962,10 @@ class NetworkRouter:
         """
         for dnet in msg.networks:
             self._routing_table.update_route(dnet, port_id=port_id, next_router_mac=source_mac)
+        logger.debug(
+            f"Route table updated: networks {msg.networks} via port {port_id} "
+            f"next-hop {source_mac.hex()}"
+        )
         # Re-broadcast on all other ports per Clause 6.6.3.3.
         self._broadcast_network_message_all_except(
             port_id, IAmRouterToNetwork(networks=msg.networks)
@@ -972,6 +985,9 @@ class NetworkRouter:
         Updates routing-table reachability based on the reject reason
         and relays the reject toward the original DADR destination.
         """
+        logger.warning(
+            f"Received Reject-Message-To-Network: network {msg.network}, reason {msg.reason!r}"
+        )
         if msg.reason == RejectMessageReason.NOT_DIRECTLY_CONNECTED:
             self._routing_table.mark_unreachable(msg.network)
         elif msg.reason == RejectMessageReason.ROUTER_BUSY:
@@ -1066,6 +1082,7 @@ class NetworkRouter:
         """
         if len(msg.ports) == 0:
             # Query: return full routing table.
+            logger.debug(f"Initialize-Routing-Table query from port {port_id}")
             reply_ports: list[RoutingTablePort] = []
             for entry in self._routing_table.get_all_entries():
                 reply_ports.append(
@@ -1083,6 +1100,9 @@ class NetworkRouter:
             )
         else:
             # Update: modify routing table per provided entries.
+            logger.debug(
+                f"Initialize-Routing-Table update with {len(msg.ports)} entries on port {port_id}"
+            )
             for port_entry in msg.ports:
                 if port_entry.port_id == 0:
                     self._routing_table.remove_entry(port_entry.network)
@@ -1164,6 +1184,9 @@ class NetworkRouter:
             return
         port = self._routing_table.get_port(port_id)
         if port is not None and not port.network_number_configured and msg.configured:
+            logger.info(
+                f"Learned network number {msg.network} for port {port_id} from Network-Number-Is"
+            )
             self._routing_table.update_port_network_number(port_id, msg.network)
 
     # -- I-Could-Be-Router-To-Network (Clause 6.4.3) ----------------------

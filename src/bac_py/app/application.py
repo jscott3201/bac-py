@@ -288,6 +288,12 @@ class BACnetApplication:
 
     async def start(self) -> None:
         """Start the transport and initialize all layers."""
+        logger.info(
+            "BACnetApplication starting on %s:%d (instance=%d)",
+            self._config.interface,
+            self._config.port,
+            self._config.instance_number,
+        )
         self._stopped = False
         self._stop_event = asyncio.Event()
 
@@ -342,6 +348,8 @@ class BACnetApplication:
         # Broadcast I-Am on startup per Clause 12.11.13
         self._broadcast_i_am()
 
+        logger.info("BACnetApplication started")
+
     async def _start_non_router_mode(self) -> None:
         """Start in non-router (simple device) mode."""
         self._transport = BIPTransport(
@@ -390,6 +398,7 @@ class BACnetApplication:
         """
         if self._stopped:
             return
+        logger.info("BACnetApplication stopping")
         self._stopped = True
 
         # Shutdown event engine
@@ -430,6 +439,7 @@ class BACnetApplication:
             await self._transport.stop()
 
         self._running = False
+        logger.info("BACnetApplication stopped")
 
     async def run(self) -> None:
         """Start the application and block until stopped."""
@@ -653,6 +663,10 @@ class BACnetApplication:
                 max_apdu_length=iam.max_apdu_length,
                 segmentation_supported=int(iam.segmentation_supported),
             )
+            logger.debug(
+                f"cached device info: instance={iam.object_identifier} "
+                f"max_apdu={iam.max_apdu_length} from {source}"
+            )
         except Exception:
             logger.debug("Failed to decode I-Am for cache from %s", source, exc_info=True)
 
@@ -678,6 +692,8 @@ class BACnetApplication:
         if self._client_tsm is None:
             msg = "Application not started"
             raise RuntimeError(msg)
+
+        logger.debug(f"sending confirmed request service={service_choice} to {destination}")
 
         # Constrain APDU size to peer capability if cached (Clause 19.4)
         max_apdu_override: int | None = None
@@ -947,6 +963,8 @@ class BACnetApplication:
         if network is None:
             return
 
+        logger.debug(f"dispatching confirmed service {service_choice} from {source}")
+
         # DCC enforcement: when DISABLE, only allow DCC and ReinitializeDevice
         if (
             self._dcc_state == EnableDisable.DISABLE
@@ -997,6 +1015,8 @@ class BACnetApplication:
                 error_data=e.error_data,
             )
         except BACnetRejectError as e:
+            if e.reason == RejectReason.UNRECOGNIZED_SERVICE:
+                logger.warning(f"no handler for confirmed service {service_choice}")
             response_pdu = RejectPDU(
                 invoke_id=txn.invoke_id,
                 reject_reason=e.reason,
@@ -1019,8 +1039,8 @@ class BACnetApplication:
                 invoke_id=txn.invoke_id,
                 reject_reason=RejectReason.INVALID_PARAMETER_DATA_TYPE,
             )
-        except Exception:
-            logger.exception("Unhandled error in service handler")
+        except Exception as exc:
+            logger.error(f"handler error for service {service_choice}: {exc}", exc_info=True)
             response_pdu = AbortPDU(
                 sent_by_server=True,
                 invoke_id=txn.invoke_id,
@@ -1058,6 +1078,8 @@ class BACnetApplication:
                 source,
             )
             return
+
+        logger.debug(f"dispatching unconfirmed service {pdu.service_choice} from {source}")
 
         # Dispatch to permanent handlers
         await self._service_registry.dispatch_unconfirmed(

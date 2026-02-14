@@ -250,6 +250,9 @@ class BIPTransport:
             raise RuntimeError(msg)
         destination = BIPAddress.decode(mac_address)
         bvll = encode_bvll(BvlcFunction.ORIGINAL_UNICAST_NPDU, npdu)
+        logger.debug(
+            f"BIP send unicast {len(npdu)} bytes to {destination.host}:{destination.port}"
+        )
         self._transport.sendto(bvll, (destination.host, destination.port))
 
     def send_broadcast(self, npdu: bytes) -> None:
@@ -273,6 +276,7 @@ class BIPTransport:
             return
 
         bvll = encode_bvll(BvlcFunction.ORIGINAL_BROADCAST_NPDU, npdu)
+        logger.debug(f"BIP send broadcast {len(npdu)} bytes")
         if self._multicast_enabled:
             # Send to multicast group per Annex J.8
             self._transport.sendto(bvll, (self._multicast_address, self._port))
@@ -617,6 +621,9 @@ class BIPTransport:
             return
 
         source = BIPAddress(host=addr[0], port=addr[1])
+        logger.debug(
+            f"BIP recv {len(data)} bytes from {addr[0]}:{addr[1]} func={msg.function.name}"
+        )
 
         # F6: Drop datagrams from our own address.  This prevents
         # processing our own broadcasts echoed back by the OS or

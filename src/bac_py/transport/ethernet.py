@@ -280,6 +280,9 @@ class EthernetTransport:
         if self._local_mac_bytes is None:
             msg = "Transport not started"
             raise RuntimeError(msg)
+        logger.debug(
+            f"ethernet send {len(npdu)} bytes to {':'.join(f'{b:02x}' for b in mac_address)}"
+        )
         frame = _encode_frame(mac_address, self._local_mac_bytes, npdu)
         self._send_frame(frame)
 
@@ -291,6 +294,7 @@ class EthernetTransport:
         if self._local_mac_bytes is None:
             msg = "Transport not started"
             raise RuntimeError(msg)
+        logger.debug(f"ethernet send broadcast {len(npdu)} bytes")
         frame = _encode_frame(ETHERNET_BROADCAST, self._local_mac_bytes, npdu)
         self._send_frame(frame)
 
@@ -362,6 +366,10 @@ class EthernetTransport:
             # Skip frames from ourselves
             if src_mac == self._local_mac_bytes:
                 return
+
+            logger.debug(
+                f"ethernet recv {len(npdu)} bytes from {':'.join(f'{b:02x}' for b in src_mac)}"
+            )
 
             if self._receive_callback is not None:
                 self._receive_callback(npdu, src_mac)

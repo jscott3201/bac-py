@@ -9,9 +9,12 @@ Optional dependency: ``cryptography`` for certificate inspection utilities.
 
 from __future__ import annotations
 
+import logging
 import ssl
 from dataclasses import dataclass, field
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -41,15 +44,18 @@ def build_client_ssl_context(config: SCTLSConfig) -> ssl.SSLContext | None:
     certificate material is provided.
     """
     if config.allow_plaintext and not config.certificate_path:
+        logger.debug("SC TLS client context skipped: plaintext allowed, no certificate")
         return None
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
 
     if config.certificate_path and config.private_key_path:
+        logger.debug(f"SC TLS loading client cert: {config.certificate_path}")
         ctx.load_cert_chain(config.certificate_path, config.private_key_path)
 
     _load_ca_certs(ctx, config)
+    logger.info("SC TLS client context created: mutual_auth=True")
     return ctx
 
 
@@ -60,6 +66,7 @@ def build_server_ssl_context(config: SCTLSConfig) -> ssl.SSLContext | None:
     certificate material is provided.
     """
     if config.allow_plaintext and not config.certificate_path:
+        logger.debug("SC TLS server context skipped: plaintext allowed, no certificate")
         return None
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
@@ -67,9 +74,11 @@ def build_server_ssl_context(config: SCTLSConfig) -> ssl.SSLContext | None:
     ctx.verify_mode = ssl.CERT_REQUIRED
 
     if config.certificate_path and config.private_key_path:
+        logger.debug(f"SC TLS loading server cert: {config.certificate_path}")
         ctx.load_cert_chain(config.certificate_path, config.private_key_path)
 
     _load_ca_certs(ctx, config)
+    logger.info("SC TLS server context created: mutual_auth=True")
     return ctx
 
 
@@ -83,6 +92,8 @@ def _load_ca_certs(ctx: ssl.SSLContext, config: SCTLSConfig) -> None:
     for ca_path in paths:
         p = Path(ca_path.strip())
         if p.is_file():
+            logger.debug(f"SC TLS loading CA file: {p}")
             ctx.load_verify_locations(cafile=str(p))
         elif p.is_dir():
+            logger.debug(f"SC TLS loading CA directory: {p}")
             ctx.load_verify_locations(capath=str(p))

@@ -78,6 +78,7 @@ class TrendLogEngine:
         """Start the periodic recording loop."""
         if self._task is not None:
             return
+        logger.info("TrendLogEngine started")
         self._task = asyncio.create_task(self._run_loop())
 
     async def stop(self) -> None:
@@ -89,6 +90,7 @@ class TrendLogEngine:
             self._task = None
         self._last_poll.clear()
         self._unregister_all_cov()
+        logger.info("TrendLogEngine stopped")
 
     # --- Main loop ---
 
@@ -306,4 +308,5 @@ class TrendLogEngine:
             log_datum=value,
             status_flags=status_flags,
         )
+        logger.debug(f"trend sample {tl.object_identifier}: value={value}")
         tl.append_record(record)

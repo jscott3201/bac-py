@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any, ClassVar
 
 from bac_py.objects.base import (
@@ -22,6 +23,8 @@ from bac_py.types.enums import (
     Segmentation,
 )
 from bac_py.types.primitives import BitString
+
+logger = logging.getLogger(__name__)
 
 
 @register_object_type
@@ -232,6 +235,7 @@ class DeviceObject(BACnetObject):
 
     def __init__(self, instance_number: int, **initial_properties: Any) -> None:
         super().__init__(instance_number, **initial_properties)
+        logger.debug(f"DeviceObject created: instance={instance_number}")
         # Initialize empty services/object-types supported if not provided
         self._set_default(
             PropertyIdentifier.PROTOCOL_SERVICES_SUPPORTED,

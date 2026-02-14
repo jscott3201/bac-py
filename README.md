@@ -36,6 +36,7 @@ async with Client(instance_number=999) as client:
 - **BACnet Ethernet** -- raw IEEE 802.3 transport with 802.2 LLC headers for legacy Ethernet data links (Clause 7)
 - **BACnet/IPv6** -- full Annex U transport with VMAC addressing and multicast
 - **BACnet Secure Connect** -- encrypted, authenticated communication over WebSocket/TLS with hub-and-spoke topology, automatic failover, and direct peer-to-peer connections (Annex AB)
+- **Structured logging** -- hierarchical `logging.getLogger(__name__)` loggers across every module for granular debugging (`bac_py.app.client`, `bac_py.network.*`, `bac_py.transport.*`, etc.)
 - **Smart encoding** -- property-aware type coercion for writes (int to Real for analog, Enumerated for binary, etc.)
 - **JSON serialization** -- `to_dict()`/`from_dict()` on all data types, optional `orjson` backend
 - **Type-safe** -- enums, frozen dataclasses, and comprehensive type hints throughout

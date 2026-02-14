@@ -631,6 +631,45 @@ Run with ``make docker-test`` (all scenarios) or individual targets like
 ``make docker-test-client``. See :ref:`docker-testing-example` for details.
 
 
+.. _structured-logging:
+
+Structured Logging
+------------------
+
+Every module in the stack uses Python's standard :mod:`logging` module with a
+hierarchical logger namespace under ``bac_py``. This gives you fine-grained
+control over diagnostics without any extra dependencies:
+
+.. code-block:: python
+
+   import logging
+
+   # Enable all bac-py logging at INFO level
+   logging.basicConfig(level=logging.INFO)
+
+   # Or target specific subsystems for DEBUG
+   logging.getLogger("bac_py.app.client").setLevel(logging.DEBUG)
+   logging.getLogger("bac_py.transport.sc").setLevel(logging.DEBUG)
+
+Log levels follow consistent semantics:
+
+- **DEBUG** -- protocol detail: request/response traces, APDU types, state
+  transitions, segment progress, property reads/writes
+- **INFO** -- lifecycle events: application start/stop, COV subscriptions,
+  object database changes, event state transitions
+- **WARNING** -- recoverable issues: unknown objects, write-access-denied,
+  tag validation errors, address parse failures
+- **ERROR** -- handler failures with full tracebacks
+
+Coverage spans the full stack: client, server, application engines (TSM, COV,
+events, scheduling, trend logging, audit), network layer, all transports
+(BIP, BBMD, Ethernet, IPv6, Secure Connect), encoding, objects, segmentation,
+and serialization.
+
+See :doc:`guide/debugging-logging` for the complete logger reference and
+practical debugging recipes.
+
+
 .. _architecture:
 
 Architecture

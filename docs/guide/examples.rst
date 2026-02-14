@@ -27,6 +27,13 @@ All examples follow the same structure:
 
    asyncio.run(main())
 
+.. tip::
+
+   Most examples include a ``logging.basicConfig()`` call that you can
+   uncomment or adjust to see protocol-level traces. Set ``level=logging.DEBUG``
+   to see every request and response. See :doc:`debugging-logging` for the
+   full logger hierarchy and filtering options.
+
 
 .. _examples-reading-writing:
 

@@ -77,6 +77,7 @@ class SCWebSocket:
         port = parsed.port or default_port
         use_ssl = ssl_ctx if parsed.scheme == "wss" else None
 
+        logger.debug(f"SC WebSocket connecting to {host}:{port}")
         reader, writer = await asyncio.open_connection(host, port, ssl=use_ssl)
 
         ws_uri = parse_uri(uri)
@@ -111,6 +112,7 @@ class SCWebSocket:
                 writer.write(outgoing)
                 await writer.drain()
 
+        logger.debug(f"SC WebSocket client connected to {host}:{port}")
         return cls(reader, writer, protocol)
 
     # -- Server factory --
@@ -157,12 +159,14 @@ class SCWebSocket:
         if protocol.handshake_exc is not None:
             raise protocol.handshake_exc
 
+        logger.debug("SC WebSocket server accepted connection")
         return cls(reader, writer, protocol)
 
     # -- I/O operations --
 
     async def send(self, data: bytes) -> None:
         """Send a binary WebSocket frame."""
+        logger.debug(f"SC WebSocket send: {len(data)} bytes")
         self._protocol.send_binary(data)
         outgoing = _drain_to_send(self._protocol)
         if outgoing:
@@ -180,6 +184,7 @@ class SCWebSocket:
             for event in events:
                 if isinstance(event, Frame):
                     if event.opcode == Opcode.BINARY:
+                        logger.debug(f"SC WebSocket recv: {len(event.data)} bytes")
                         return bytes(event.data)
                     if event.opcode == Opcode.CLOSE:
                         rcvd = Close.parse(event.data) if event.data else None
@@ -193,6 +198,7 @@ class SCWebSocket:
             # Need more data from the network
             data = await self._reader.read(_READ_SIZE)
             if not data:
+                logger.warning("SC WebSocket connection closed unexpectedly")
                 raise ConnectionClosedError(None, None, rcvd_then_sent=None)
             self._protocol.receive_data(data)
 

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import copy
+import logging
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import TYPE_CHECKING, Any, ClassVar
@@ -25,6 +26,8 @@ from bac_py.types.enums import (
     Reliability,
 )
 from bac_py.types.primitives import BACnetDouble, BitString, ObjectIdentifier
+
+logger = logging.getLogger(__name__)
 
 
 class PropertyAccess(IntEnum):
@@ -430,6 +433,8 @@ class BACnetObject:
         :returns: The property value.
         :raises BACnetError: If the property is unknown or *array_index* is invalid.
         """
+        logger.debug(f"read {self._object_id}.{prop_id}")
+
         if prop_id == PropertyIdentifier.PROPERTY_LIST:
             return self._get_property_list()
 
@@ -440,6 +445,7 @@ class BACnetObject:
             return self._get_status_flags()
 
         if prop_id not in self.PROPERTY_DEFINITIONS:
+            logger.warning(f"property not found: {self._object_id}.{prop_id}")
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
 
         value = self._properties.get(prop_id)
@@ -473,8 +479,11 @@ class BACnetObject:
         :raises BACnetError: If the property is unknown, read-only, or
             *priority* / *array_index* is invalid.
         """
+        logger.debug(f"write {self._object_id}.{prop_id}")
+
         prop_def = self.PROPERTY_DEFINITIONS.get(prop_id)
         if prop_def is None:
+            logger.warning(f"property not found: {self._object_id}.{prop_id}")
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
         if prop_def.access == PropertyAccess.READ_ONLY and not (
             # Present_Value is writable when Out_Of_Service is TRUE (Clause 12)
@@ -741,6 +750,7 @@ class ObjectDatabase:
             already exists.
         """
         if obj.object_identifier in self._objects:
+            logger.warning(f"object already exists: {obj.object_identifier}")
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.OBJECT_IDENTIFIER_ALREADY_EXISTS)
         name = obj._properties.get(PropertyIdentifier.OBJECT_NAME)
         if name is not None and name in self._names:
@@ -755,6 +765,7 @@ class ObjectDatabase:
             self._device_obj = obj
         obj._object_db = self
         self._increment_database_revision()
+        logger.info(f"object added: {obj.object_identifier}")
 
     def remove(self, object_id: ObjectIdentifier) -> None:
         """Remove an object from the database.
@@ -763,6 +774,7 @@ class ObjectDatabase:
         :raises BACnetError: If the object does not exist or is a Device object.
         """
         if object_id not in self._objects:
+            logger.warning(f"object not found: {object_id}")
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
         if object_id.object_type == ObjectType.DEVICE:
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.OBJECT_DELETION_NOT_PERMITTED)
@@ -778,6 +790,7 @@ class ObjectDatabase:
         obj._object_db = None
         del self._objects[object_id]
         self._increment_database_revision()
+        logger.info(f"object removed: {object_id}")
 
     def validate_name_unique(self, name: str, exclude: ObjectIdentifier | None = None) -> None:
         """Check that a name is unique within the database.

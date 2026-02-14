@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from enum import IntEnum
+
+logger = logging.getLogger(__name__)
 
 
 class ObjectType(IntEnum):
@@ -112,6 +115,7 @@ class PropertyIdentifier(IntEnum):
             member._name_ = f"VENDOR_{value}"
             member._value_ = value
             _PROPERTY_ID_VENDOR_CACHE[value] = member
+            logger.debug(f"vendor-proprietary PropertyIdentifier({value})")
             return member
         return None
 

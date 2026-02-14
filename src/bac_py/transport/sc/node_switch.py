@@ -113,6 +113,7 @@ class SCNodeSwitch:
 
     async def stop(self) -> None:
         """Stop the node switch and close all direct connections."""
+        logger.info("SC node switch stopping")
         # Close all direct connections
         for conn in list(self._direct_connections.values()):
             with contextlib.suppress(Exception):
@@ -138,6 +139,7 @@ class SCNodeSwitch:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
+        logger.info("SC node switch stopped")
 
     def has_direct(self, dest: SCVMAC) -> bool:
         """Check if a direct connection exists to the given VMAC."""
@@ -154,8 +156,10 @@ class SCNodeSwitch:
             return False
         try:
             await conn.send_message(msg)
+            logger.debug(f"SC message sent via direct connection to {dest}")
             return True
         except (ConnectionError, OSError):
+            logger.debug(f"SC direct send failed to {dest}")
             return False
 
     async def resolve_address(
@@ -207,8 +211,10 @@ class SCNodeSwitch:
         :returns: True if connected successfully.
         """
         if len(self._direct_connections) >= self._config.max_connections:
+            logger.debug(f"SC direct connection limit reached ({self._config.max_connections})")
             return False
 
+        logger.debug(f"SC establishing direct connection to {dest} via {uris}")
         ssl_ctx = build_client_ssl_context(self._config.tls_config)
         for uri in uris:
             try:

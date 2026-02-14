@@ -159,7 +159,15 @@ class SegmentSender:
                 f"Payload requires {len(segments)} segments but peer accepts "
                 f"at most {peer_max_segments}"
             )
+            logger.warning(
+                f"segment count exceeded: {len(segments)} segments, "
+                f"peer max={peer_max_segments}, invoke_id={invoke_id}"
+            )
             raise SegmentationError(AbortReason.APDU_TOO_LONG, msg)
+        logger.debug(
+            f"segmented send created: invoke_id={invoke_id} "
+            f"segments={len(segments)} window={proposed_window_size}"
+        )
         return cls(
             segments=segments,
             invoke_id=invoke_id,
@@ -180,6 +188,11 @@ class SegmentSender:
             seq_num = idx & 0xFF
             more_follows = idx < last_idx
             result.append((seq_num, self.segments[idx], more_follows))
+        logger.debug(
+            f"fill_window: invoke_id={self.invoke_id} "
+            f"segments={len(result)}/{self.total_segments} "
+            f"window_size={self.actual_window_size}"
+        )
         return result
 
     def handle_segment_ack(
@@ -200,11 +213,20 @@ class SegmentSender:
 
         if negative:
             # Re-send from the segment after the last successfully received
+            logger.debug(
+                f"negative ack: invoke_id={self.invoke_id} "
+                f"seq={ack_seq}, resending from idx={acked_idx + 1}"
+            )
             self._window_start_idx = acked_idx + 1
         else:
             # Advance past all acknowledged segments
             self._window_start_idx = acked_idx + 1
 
+        if self.is_complete:
+            logger.info(
+                f"segmented send complete: invoke_id={self.invoke_id} "
+                f"segments={self.total_segments}"
+            )
         return self.is_complete
 
     @property
@@ -318,6 +340,10 @@ class SegmentReceiver:
             # Map sequence to absolute index
             abs_idx = self._seq_to_abs_idx(seq_num)
             self._segments[abs_idx] = data
+            logger.debug(
+                f"segment {seq_num}/{self.actual_window_size} received, "
+                f"idx={abs_idx}, more_follows={more_follows}"
+            )
 
             if not more_follows:
                 self._final_idx = abs_idx
@@ -330,6 +356,7 @@ class SegmentReceiver:
 
             if self.is_complete:
                 self._window_start_idx = self._expected_idx
+                logger.info(f"segmented transfer complete: segments={len(self._segments)}")
                 return (SegmentAction.COMPLETE, seq_num)
 
             # ACK at window boundary: when contiguous reception fills the window
@@ -343,8 +370,10 @@ class SegmentReceiver:
         if duplicate_in_window(
             seq_num, expected_seq, self.actual_window_size, self.proposed_window_size
         ):
+            logger.warning(f"duplicate segment: seq={seq_num}")
             return (SegmentAction.RESEND_LAST_ACK, self._last_ack_seq)
 
+        logger.warning(f"out-of-window segment: seq={seq_num}, expected={expected_seq}")
         return (SegmentAction.ABORT, -1)
 
     @property

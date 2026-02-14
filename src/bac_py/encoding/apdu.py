@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from bac_py.encoding.primitives import decode_enumerated, encode_application_enumerated
 from bac_py.encoding.tags import decode_tag
 from bac_py.types.enums import AbortReason, ErrorClass, ErrorCode, PduType, RejectReason
+
+logger = logging.getLogger(__name__)
 
 # Max-segments encoding table (Clause 20.1.2.4)
 # B'000' = unspecified, B'001' = 2, ... B'110' = 64, B'111' = >64
@@ -337,6 +340,7 @@ def encode_apdu(pdu: APDU) -> bytes:
             return _encode_abort(pdu)
         case _:
             msg = f"Unknown PDU type: {type(pdu).__name__}"
+            logger.warning(msg)
             raise TypeError(msg)
 
 
@@ -346,6 +350,9 @@ def _encode_confirmed_request(pdu: ConfirmedRequestPDU) -> bytes:
     :param pdu: Confirmed request to encode.
     :returns: Encoded PDU bytes.
     """
+    logger.debug(
+        f"encode confirmed request service={pdu.service_choice} invoke_id={pdu.invoke_id}"
+    )
     buf = bytearray()
     # Byte 0: PDU type + flags
     byte0 = PduType.CONFIRMED_REQUEST << 4
@@ -489,6 +496,7 @@ def decode_apdu(data: memoryview | bytes) -> APDU:
         data = memoryview(data)
 
     pdu_type = PduType((data[0] >> 4) & 0x0F)
+    logger.debug(f"decode APDU type={pdu_type}")
 
     match pdu_type:
         case PduType.CONFIRMED_REQUEST:
@@ -509,6 +517,7 @@ def decode_apdu(data: memoryview | bytes) -> APDU:
             return _decode_abort(data)
         case _:
             msg = f"Unknown PDU type: {pdu_type!r}"
+            logger.warning(msg)
             raise TypeError(msg)
 
 

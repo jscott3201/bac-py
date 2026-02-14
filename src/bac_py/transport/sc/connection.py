@@ -137,7 +137,9 @@ class SCConnection:
         """
         self._role = SCConnectionRole.INITIATING
         self._ws = ws
+        old_state = self._state
         self._state = SCConnectionState.AWAITING_ACCEPT
+        logger.debug(f"SC connection {self._local_vmac}: {old_state.name} -> {self._state.name}")
 
         # Send Connect-Request
         payload = ConnectRequestPayload(
@@ -175,6 +177,8 @@ class SCConnection:
             self.peer_max_bvlc = accept.max_bvlc_length
             self.peer_max_npdu = accept.max_npdu_length
             self._state = SCConnectionState.CONNECTED
+            logger.debug(f"SC connection {self._local_vmac}: AWAITING_ACCEPT -> CONNECTED")
+            logger.info(f"SC connection established to peer {self.peer_vmac}")
             self._start_background_tasks()
             if self.on_connected:
                 self.on_connected()
@@ -209,7 +213,9 @@ class SCConnection:
         """
         self._role = SCConnectionRole.ACCEPTING
         self._ws = ws
+        old_state = self._state
         self._state = SCConnectionState.AWAITING_REQUEST
+        logger.debug(f"SC connection {self._local_vmac}: {old_state.name} -> {self._state.name}")
 
         # Wait for Connect-Request
         try:
@@ -270,6 +276,8 @@ class SCConnection:
         await self._ws.send(accept_msg.encode())
 
         self._state = SCConnectionState.CONNECTED
+        logger.debug(f"SC connection {self._local_vmac}: AWAITING_REQUEST -> CONNECTED")
+        logger.info(f"SC connection accepted from peer {self.peer_vmac}")
         self._start_background_tasks()
         if self.on_connected:
             self.on_connected()
@@ -295,7 +303,9 @@ class SCConnection:
             await self._go_idle()
             return
 
+        old_state = self._state
         self._state = SCConnectionState.DISCONNECTING
+        logger.debug(f"SC connection {self._local_vmac}: {old_state.name} -> DISCONNECTING")
 
         # Cancel background tasks first to get exclusive WebSocket access
         await self._stop_background_tasks()
@@ -360,7 +370,8 @@ class SCConnection:
                 await self._handle_message(msg)
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
+            logger.warning(f"SC connection {self._local_vmac} receive error: {exc}")
             if self._state == SCConnectionState.CONNECTED:
                 await self._go_idle()
 
@@ -390,6 +401,7 @@ class SCConnection:
                 return
 
             if msg.function == BvlcSCFunction.HEARTBEAT_ACK:
+                logger.debug(f"SC heartbeat ack received: {self._local_vmac}")
                 return  # Heartbeat response, no action needed
 
             # Forward other messages (Encapsulated-NPDU, etc.) to callback
@@ -409,6 +421,7 @@ class SCConnection:
                     BvlcSCFunction.HEARTBEAT_REQUEST,
                     message_id=self._next_msg_id(),
                 )
+                logger.debug(f"SC heartbeat sent: {self._local_vmac}")
                 try:
                     await self._ws.send(hb.encode())
                 except (OSError, ConnectionError):
@@ -426,7 +439,11 @@ class SCConnection:
             SCConnectionState.CONNECTED,
             SCConnectionState.DISCONNECTING,
         )
+        old_state = self._state
         self._state = SCConnectionState.IDLE
+        logger.debug(f"SC connection {self._local_vmac}: {old_state.name} -> IDLE")
+        if was_connected:
+            logger.info(f"SC connection closed: peer={self.peer_vmac}")
 
         # Cancel tasks (don't await — may be called from within a task)
         if self._heartbeat_task and not self._heartbeat_task.done():

@@ -90,6 +90,7 @@ class SCHubFunction:
 
     async def stop(self) -> None:
         """Stop the hub function, force-close all connections."""
+        logger.info("SC hub function stopping")
         # Force-close all connections first (before closing the server,
         # since wait_closed() waits for active connection handlers)
         for conn in list(self._connections.values()):
@@ -110,6 +111,7 @@ class SCHubFunction:
             self._server.close()
             await self._server.wait_closed()
             self._server = None
+        logger.info("SC hub function stopped")
 
     async def _handle_client(
         self,
@@ -196,8 +198,10 @@ class SCHubFunction:
             return
 
         if msg.destination and not msg.destination.is_broadcast:
+            logger.debug(f"SC hub routing unicast from {source.peer_vmac} to {msg.destination}")
             await self._unicast(msg, source.peer_vmac)
         else:
+            logger.debug(f"SC hub routing broadcast from {source.peer_vmac}")
             await self._broadcast(msg, source.peer_vmac)
 
     async def _unicast(self, msg: SCMessage, exclude: SCVMAC) -> None:
