@@ -715,8 +715,6 @@ class EventEngine:
         ctx = self._contexts.get(key)
         if ctx is None:
             ctx = _EnrollmentContext()
-            # Sync event_enable and time_delay from the enrollment object
-            self._sync_state_machine(ctx.state_machine, enrollment)
             self._contexts[key] = ctx
 
         # Sync state machine settings each cycle in case they changed
@@ -799,7 +797,6 @@ class EventEngine:
         ctx = self._contexts.get(key)
         if ctx is None:
             ctx = _EnrollmentContext()
-            self._sync_intrinsic_state_machine(ctx.state_machine, obj)
             self._contexts[key] = ctx
 
         self._sync_intrinsic_state_machine(ctx.state_machine, obj)

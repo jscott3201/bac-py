@@ -66,8 +66,7 @@ def encode_npdu(npdu: NPDU) -> bytes:
         BACnet specification (e.g. SNET is 0xFFFF or SLEN is 0).
     """
     # Pre-allocate with estimated capacity: 2 header + up to 18 addr + payload
-    buf = bytearray(2 + len(npdu.apdu) + len(npdu.network_message_data) + 20)
-    buf.clear()
+    buf = bytearray()
     buf.append(BACNET_PROTOCOL_VERSION)
 
     # Build control octet (bits 6 and 4 are reserved, always zero)

@@ -619,7 +619,7 @@ class DefaultServerHandlers:
         :raises BACnetError: If the property is not found or the array
             index is out of range.
         """
-        if obj.object_identifier == self._device.object_identifier:
+        if obj is self._device:
             if prop_id == PropertyIdentifier.OBJECT_LIST:
                 full_list = self._db.object_list
                 if array_index is not None:
@@ -670,7 +670,9 @@ class DefaultServerHandlers:
                     if pid in obj._properties or pdef.required:
                         result.append(PropertyReference(pid))
                 # Property_List is computed, always present
-                if PropertyIdentifier.PROPERTY_LIST not in {r.property_identifier for r in result}:
+                if not any(
+                    r.property_identifier == PropertyIdentifier.PROPERTY_LIST for r in result
+                ):
                     result.append(PropertyReference(PropertyIdentifier.PROPERTY_LIST))
             elif ref.property_identifier == PropertyIdentifier.REQUIRED:
                 for pid, pdef in obj.PROPERTY_DEFINITIONS.items():

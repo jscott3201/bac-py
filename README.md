@@ -1,11 +1,12 @@
 # bac-py
 
-Asynchronous BACnet/IP protocol library for Python 3.13+, implementing
+Asynchronous BACnet protocol library for Python 3.13+, implementing
 ASHRAE Standard 135-2020.
 
-bac-py provides client and server capabilities for BACnet/IP networks with a
-clean, layered architecture. It is built on native `asyncio` with zero required
-dependencies.
+bac-py provides client and server capabilities for BACnet networks with a
+clean, layered architecture. It supports BACnet/IP (Annex J), BACnet/IPv6
+(Annex U), BACnet Ethernet (Clause 7), and BACnet Secure Connect (Annex AB).
+Built on native `asyncio` with zero required runtime dependencies.
 
 ```python
 from bac_py import Client
@@ -52,10 +53,16 @@ With optional JSON serialization:
 pip install bac-py[serialization]
 ```
 
-With BACnet Secure Connect support:
+With BACnet Secure Connect support (WebSocket + TLS):
 
 ```bash
 pip install bac-py[secure]
+```
+
+Install all optional extras:
+
+```bash
+pip install bac-py[serialization,secure]
 ```
 
 ### Development
@@ -384,6 +391,10 @@ for detailed walkthroughs.
 | `audit_log.py`            | Query audit log records with pagination              |
 | `router_discovery.py`     | Discover routers and remote networks                 |
 | `foreign_device.py`       | Register as foreign device via BBMD                  |
+| `secure_connect.py`       | Connect to a BACnet/SC hub and exchange NPDUs        |
+| `secure_connect_hub.py`   | Run a BACnet/SC hub with object serving              |
+| `ip_to_sc_router.py`      | Bridge BACnet/IP and BACnet/SC via NetworkRouter     |
+| `sc_generate_certs.py`    | Generate test PKI and demonstrate TLS-secured SC     |
 
 ## Protocol-Level API
 
@@ -441,7 +452,7 @@ from bac_py.encoding.primitives import (
 ## Testing
 
 ```bash
-# Run the unit test suite (5,925+ tests)
+# Run the unit test suite (5,930+ tests)
 make test
 
 # With coverage
@@ -483,6 +494,7 @@ make docker-test-stress       # Stress: concurrent and sequential throughput
 make docker-test-device-mgmt  # Device management: DCC, time sync, text message
 make docker-test-cov-advanced # COV: concurrent subscriptions, property-level COV
 make docker-test-events       # Events: alarm reporting, acknowledgment, queries
+make docker-test-sc           # Secure Connect: hub, node connection, NPDU relay
 
 # Full stress test with JSON throughput report
 make docker-stress
@@ -503,12 +515,15 @@ separate bridge networks to simulate realistic BACnet/IP topologies:
 | Device Management | DCC, time synchronization, text messages, private transfer |
 | COV Advanced      | Concurrent COV subscriptions, property-level COV, lifetimes |
 | Events            | Alarm reporting, acknowledgment, event queries           |
+| Secure Connect    | SC hub + node connection, NPDU relay over WebSocket/TLS  |
 | Demo              | Interactive demonstration of client/server capabilities  |
 
 ## Requirements
 
 - Python >= 3.13
-- No runtime dependencies (optional: `orjson` for JSON serialization)
+- No runtime dependencies for BACnet/IP, BACnet/IPv6, and BACnet Ethernet
+- Optional: `orjson` for faster JSON serialization (`pip install bac-py[serialization]`)
+- Optional: `websockets` + `cryptography` for BACnet Secure Connect (`pip install bac-py[secure]`)
 - Docker and Docker Compose for integration tests (optional)
 
 ## License

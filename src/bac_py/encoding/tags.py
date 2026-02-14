@@ -77,34 +77,39 @@ def encode_tag(tag_number: int, cls: TagClass, length: int) -> bytes:
     if length < 0:
         msg = f"Tag length must be non-negative, got {length}"
         raise ValueError(msg)
-    buf = bytearray()
 
-    # Initial tag octet
+    # Fast path: tag_number <= 14 and length <= 4 → single byte (most common case)
+    if tag_number <= 14 and length <= 4:
+        return bytes([(tag_number << 4) | (cls << 3) | length])
+
+    # General case
     initial = ((tag_number << 4) | (cls << 3)) if tag_number <= 14 else ((0x0F << 4) | (cls << 3))
 
     if length <= 4:
-        initial |= length
-        buf.append(initial)
-    else:
-        initial |= 5  # Extended length marker
-        buf.append(initial)
-
-    # Extended tag number
-    if tag_number > 14:
-        buf.append(tag_number)
+        # tag_number > 14, length <= 4: two bytes
+        return bytes([initial | length, tag_number])
 
     # Extended length
-    if length > 4:
+    initial |= 5  # Extended length marker
+    if tag_number <= 14:
         if length <= 253:
-            buf.append(length)
-        elif length <= 65535:
-            buf.append(254)
-            buf.extend(length.to_bytes(2, "big"))
-        else:
-            buf.append(255)
-            buf.extend(length.to_bytes(4, "big"))
+            return bytes([initial, length])
+        if length <= 65535:
+            return bytes([initial, 254]) + length.to_bytes(2, "big")
+        return bytes([initial, 255]) + length.to_bytes(4, "big")
 
-    return bytes(buf)
+    # tag_number > 14 and length > 4
+    if length <= 253:
+        return bytes([initial, tag_number, length])
+    if length <= 65535:
+        return bytes([initial, tag_number, 254]) + length.to_bytes(2, "big")
+    return bytes([initial, tag_number, 255]) + length.to_bytes(4, "big")
+
+
+# Pre-computed opening/closing tags for tag numbers 0-14 (the common case).
+# Avoids bytes([...]) allocation on every call.
+_OPENING_TAGS: tuple[bytes, ...] = tuple(bytes([(i << 4) | 0x0E]) for i in range(15))
+_CLOSING_TAGS: tuple[bytes, ...] = tuple(bytes([(i << 4) | 0x0F]) for i in range(15))
 
 
 def encode_opening_tag(tag_number: int) -> bytes:
@@ -114,7 +119,7 @@ def encode_opening_tag(tag_number: int) -> bytes:
     :returns: Encoded opening tag bytes.
     """
     if tag_number <= 14:
-        return bytes([(tag_number << 4) | 0x0E])
+        return _OPENING_TAGS[tag_number]
     return bytes([0xFE, tag_number])
 
 
@@ -125,7 +130,7 @@ def encode_closing_tag(tag_number: int) -> bytes:
     :returns: Encoded closing tag bytes.
     """
     if tag_number <= 14:
-        return bytes([(tag_number << 4) | 0x0F])
+        return _CLOSING_TAGS[tag_number]
     return bytes([0xFF, tag_number])
 
 

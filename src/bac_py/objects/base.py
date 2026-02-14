@@ -727,6 +727,7 @@ class ObjectDatabase:
         self._objects: dict[ObjectIdentifier, BACnetObject] = {}
         self._names: dict[str, ObjectIdentifier] = {}
         self._type_index: dict[ObjectType, dict[ObjectIdentifier, BACnetObject]] = {}
+        self._device_obj: BACnetObject | None = None
         self._change_callbacks: dict[
             tuple[ObjectIdentifier, PropertyIdentifier],
             list[Callable[[PropertyIdentifier, Any, Any], None]],
@@ -750,6 +751,8 @@ class ObjectDatabase:
         ] = obj
         if name is not None:
             self._names[name] = obj.object_identifier
+        if obj.object_identifier.object_type == ObjectType.DEVICE:
+            self._device_obj = obj
         obj._object_db = self
         self._increment_database_revision()
 
@@ -808,11 +811,10 @@ class ObjectDatabase:
 
         Called when configuration changes: object add/remove, name changes.
         """
-        for obj in self._objects.values():
-            if obj.object_identifier.object_type == ObjectType.DEVICE:
-                current = obj._properties.get(PropertyIdentifier.DATABASE_REVISION, 0)
-                obj._properties[PropertyIdentifier.DATABASE_REVISION] = current + 1
-                break
+        obj = self._device_obj
+        if obj is not None:
+            current = obj._properties.get(PropertyIdentifier.DATABASE_REVISION, 0)
+            obj._properties[PropertyIdentifier.DATABASE_REVISION] = current + 1
 
     def register_change_callback(
         self,

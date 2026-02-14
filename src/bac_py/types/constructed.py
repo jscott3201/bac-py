@@ -188,11 +188,14 @@ class BACnetTimeStamp:
             assert isinstance(self.value, BACnetDateTime)
             from bac_py.encoding.primitives import encode_date, encode_time
 
-            buf = encode_opening_tag(2)
-            buf += encode_date(self.value.date)
-            buf += encode_time(self.value.time)
-            buf += encode_closing_tag(2)
-            return buf
+            return b"".join(
+                [
+                    encode_opening_tag(2),
+                    encode_date(self.value.date),
+                    encode_time(self.value.time),
+                    encode_closing_tag(2),
+                ]
+            )
 
         msg = f"Invalid BACnetTimeStamp choice: {self.choice}"
         raise ValueError(msg)
@@ -400,11 +403,14 @@ class BACnetCalendarEntry:
             return encode_context_date(0, self.value)
         if self.choice == 1:
             assert isinstance(self.value, BACnetDateRange)
-            buf = encode_opening_tag(1)
-            buf += encode_application_date(self.value.start_date)
-            buf += encode_application_date(self.value.end_date)
-            buf += encode_closing_tag(1)
-            return buf
+            return b"".join(
+                [
+                    encode_opening_tag(1),
+                    encode_application_date(self.value.start_date),
+                    encode_application_date(self.value.end_date),
+                    encode_closing_tag(1),
+                ]
+            )
         assert isinstance(self.value, BACnetWeekNDay)
         return encode_context_octet_string(
             2, bytes([self.value.month, self.value.week_of_month, self.value.day_of_week])
@@ -527,20 +533,20 @@ class BACnetSpecialEvent:
         )
         from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
 
+        parts: list[bytes] = []
         if isinstance(self.period, BACnetCalendarEntry):
-            buf = encode_opening_tag(0)
-            buf += self.period.encode()
-            buf += encode_closing_tag(0)
+            parts.append(encode_opening_tag(0))
+            parts.append(self.period.encode())
+            parts.append(encode_closing_tag(0))
         else:
-            buf = encode_context_object_id(1, self.period)
-        buf += encode_opening_tag(2)
+            parts.append(encode_context_object_id(1, self.period))
+        parts.append(encode_opening_tag(2))
         for tv in self.list_of_time_values:
-            buf += encode_application_time(tv.time) + encode_property_value(
-                tv.value, int_as_real=int_as_real
-            )
-        buf += encode_closing_tag(2)
-        buf += encode_context_unsigned(3, self.event_priority)
-        return buf
+            parts.append(encode_application_time(tv.time))
+            parts.append(encode_property_value(tv.value, int_as_real=int_as_real))
+        parts.append(encode_closing_tag(2))
+        parts.append(encode_context_unsigned(3, self.event_priority))
+        return b"".join(parts)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
@@ -754,11 +760,13 @@ class BACnetObjectPropertyReference:
             encode_context_unsigned,
         )
 
-        buf = encode_context_object_id(0, self.object_identifier)
-        buf += encode_context_enumerated(1, self.property_identifier)
+        parts = [
+            encode_context_object_id(0, self.object_identifier),
+            encode_context_enumerated(1, self.property_identifier),
+        ]
         if self.property_array_index is not None:
-            buf += encode_context_unsigned(2, self.property_array_index)
-        return buf
+            parts.append(encode_context_unsigned(2, self.property_array_index))
+        return b"".join(parts)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
@@ -862,10 +870,13 @@ class BACnetRecipient:
         if self.device is not None:
             return encode_context_object_id(0, self.device)
         if self.address is not None:
-            buf = encode_opening_tag(1)
-            buf += self.address.encode()
-            buf += encode_closing_tag(1)
-            return buf
+            return b"".join(
+                [
+                    encode_opening_tag(1),
+                    self.address.encode(),
+                    encode_closing_tag(1),
+                ]
+            )
         from bac_py.types.enums import ObjectType
 
         return encode_context_object_id(0, ObjectIdentifier(ObjectType(0), 0))
@@ -938,14 +949,17 @@ class BACnetDestination:
             encode_application_unsigned,
         )
 
-        buf = encode_application_bit_string(self.valid_days)
-        buf += encode_application_time(self.from_time)
-        buf += encode_application_time(self.to_time)
-        buf += self.recipient.encode()
-        buf += encode_application_unsigned(self.process_identifier)
-        buf += encode_application_boolean(self.issue_confirmed_notifications)
-        buf += encode_application_bit_string(self.transitions)
-        return buf
+        return b"".join(
+            [
+                encode_application_bit_string(self.valid_days),
+                encode_application_time(self.from_time),
+                encode_application_time(self.to_time),
+                self.recipient.encode(),
+                encode_application_unsigned(self.process_identifier),
+                encode_application_boolean(self.issue_confirmed_notifications),
+                encode_application_bit_string(self.transitions),
+            ]
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
@@ -1082,12 +1096,14 @@ class BACnetLogRecord:
             encode_property_value,
         )
 
-        buf = encode_application_date(self.timestamp.date)
-        buf += encode_application_time(self.timestamp.time)
-        buf += encode_property_value(self.log_datum, int_as_real=int_as_real)
+        parts = [
+            encode_application_date(self.timestamp.date),
+            encode_application_time(self.timestamp.time),
+            encode_property_value(self.log_datum, int_as_real=int_as_real),
+        ]
         if self.status_flags is not None:
-            buf += encode_context_bit_string(1, self.status_flags.to_bit_string())
-        return buf
+            parts.append(encode_context_bit_string(1, self.status_flags.to_bit_string()))
+        return b"".join(parts)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
@@ -1145,11 +1161,14 @@ class BACnetRecipientProcess:
         from bac_py.encoding.primitives import encode_context_unsigned
         from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
 
-        buf = encode_opening_tag(0)
-        buf += self.recipient.encode()
-        buf += encode_closing_tag(0)
-        buf += encode_context_unsigned(1, self.process_identifier)
-        return buf
+        return b"".join(
+            [
+                encode_opening_tag(0),
+                self.recipient.encode(),
+                encode_closing_tag(0),
+                encode_context_unsigned(1, self.process_identifier),
+            ]
+        )
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to a JSON-serializable dictionary.
@@ -1486,10 +1505,13 @@ class BACnetValueSource:
         if self.choice == 1:
             # [1] BACnetDeviceObjectReference -- constructed
             assert isinstance(self.value, BACnetDeviceObjectReference)
-            buf = encode_opening_tag(1)
-            buf += self.value.encode()
-            buf += encode_closing_tag(1)
-            return buf
+            return b"".join(
+                [
+                    encode_opening_tag(1),
+                    self.value.encode(),
+                    encode_closing_tag(1),
+                ]
+            )
 
         if self.choice == 2:
             # [2] BACnetAddress -- as octet string

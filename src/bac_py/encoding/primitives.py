@@ -181,7 +181,7 @@ def decode_real(data: memoryview | bytes) -> float:
     :param data: At least 4 bytes of big-endian IEEE-754 single-precision data.
     :returns: The decoded floating-point value.
     """
-    result: float = struct.unpack(">f", data[:4])[0]
+    result: float = struct.unpack_from(">f", data)[0]
     return result
 
 
@@ -203,7 +203,7 @@ def decode_double(data: memoryview | bytes) -> float:
     :param data: At least 8 bytes of big-endian IEEE-754 double-precision data.
     :returns: The decoded floating-point value.
     """
-    result: float = struct.unpack(">d", data[:8])[0]
+    result: float = struct.unpack_from(">d", data)[0]
     return result
 
 
@@ -234,7 +234,11 @@ def encode_character_string(value: str, charset: int = 0) -> bytes:
     if encoding is None:
         msg = f"Unsupported BACnet character set: 0x{charset:02x}"
         raise ValueError(msg)
-    return bytes([charset]) + value.encode(encoding)
+    encoded = value.encode(encoding)
+    buf = bytearray(1 + len(encoded))
+    buf[0] = charset
+    buf[1:] = encoded
+    return bytes(buf)
 
 
 def decode_character_string(data: memoryview | bytes) -> str:
@@ -259,7 +263,11 @@ def decode_character_string(data: memoryview | bytes) -> str:
             charset,
         )
         encoding = "iso-8859-1"
-    return bytes(data[1:]).decode(encoding)
+    return (
+        data[1:].tobytes().decode(encoding)
+        if isinstance(data, memoryview)
+        else data[1:].decode(encoding)
+    )
 
 
 # --- Enumerated (Clause 20.2.11) ---
@@ -292,7 +300,10 @@ def encode_bit_string(value: BitString) -> bytes:
     :param value: The :class:`BitString` to encode.
     :returns: Encoded bytes with leading unused-bits count followed by the bit data.
     """
-    return bytes([value.unused_bits]) + value.data
+    buf = bytearray(1 + len(value.data))
+    buf[0] = value.unused_bits
+    buf[1:] = value.data
+    return bytes(buf)
 
 
 def decode_bit_string(data: memoryview | bytes) -> BitString:
@@ -806,18 +817,19 @@ def decode_and_unwrap(data: bytes | memoryview) -> object:
     return values
 
 
-def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
-    """Encode a Python value to application-tagged bytes.
+_CONSTRUCTED_ENCODERS: dict[type, object] | None = None
 
-    Handles the common types stored in BACnet object properties,
-    including both primitive and constructed BACnet types.
 
-    :param value: The value to encode.
-    :param int_as_real: If ``True``, encode plain ``int`` values as Real instead
-        of Unsigned (used for analog object types where Present_Value is Real).
-    :returns: Application-tagged encoded bytes.
-    :raises TypeError: If the value type is not supported.
+def _build_constructed_encoders() -> dict[type, object]:
+    """Build a type-to-encoder dispatch table for constructed BACnet types.
+
+    Built lazily on first call to :func:`encode_property_value` to avoid
+    circular imports between ``encoding.primitives`` and ``types.constructed``.
+    Each encoder is a callable ``(value, int_as_real) -> bytes``.
     """
+    # Local import to break circular dependency with types.constructed
+    from typing import Any
+
     from bac_py.types.constructed import (
         BACnetAddress,
         BACnetCalendarEntry,
@@ -842,123 +854,178 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
         StatusFlags,
     )
 
+    def _enc_status_flags(v: Any, _iar: bool) -> bytes:
+        return encode_application_bit_string(v.to_bit_string())
+
+    def _enc_datetime(v: Any, _iar: bool) -> bytes:
+        return encode_application_date(v.date) + encode_application_time(v.time)
+
+    def _enc_date_range(v: Any, _iar: bool) -> bytes:
+        return encode_application_date(v.start_date) + encode_application_date(v.end_date)
+
+    def _enc_week_n_day(v: Any, _iar: bool) -> bytes:
+        return encode_application_octet_string(bytes([v.month, v.week_of_month, v.day_of_week]))
+
+    def _enc_calendar_entry(v: Any, _iar: bool) -> bytes:
+        return _encode_calendar_entry(v)
+
+    def _enc_time_value(v: Any, iar: bool) -> bytes:
+        return encode_application_time(v.time) + encode_property_value(v.value, int_as_real=iar)
+
+    def _enc_special_event(v: Any, iar: bool) -> bytes:
+        return _encode_special_event(v, int_as_real=iar)
+
+    def _enc_dev_obj_prop_ref(v: Any, _iar: bool) -> bytes:
+        parts = [
+            encode_context_object_id(0, v.object_identifier),
+            encode_context_enumerated(1, v.property_identifier),
+        ]
+        if v.property_array_index is not None:
+            parts.append(encode_context_unsigned(2, v.property_array_index))
+        if v.device_identifier is not None:
+            parts.append(encode_context_object_id(3, v.device_identifier))
+        return b"".join(parts)
+
+    def _enc_obj_prop_ref(v: Any, _iar: bool) -> bytes:
+        parts = [
+            encode_context_object_id(0, v.object_identifier),
+            encode_context_enumerated(1, v.property_identifier),
+        ]
+        if v.property_array_index is not None:
+            parts.append(encode_context_unsigned(2, v.property_array_index))
+        return b"".join(parts)
+
+    def _enc_address(v: Any, _iar: bool) -> bytes:
+        return encode_context_unsigned(0, v.network_number) + encode_context_octet_string(
+            1, v.mac_address
+        )
+
+    def _enc_recipient(v: Any, _iar: bool) -> bytes:
+        return _encode_recipient(v)
+
+    def _enc_recipient_process(v: Any, _iar: bool) -> bytes:
+        return b"".join(
+            [
+                encode_opening_tag(0),
+                _encode_recipient(v.recipient),
+                encode_closing_tag(0),
+                encode_context_unsigned(1, v.process_identifier),
+            ]
+        )
+
+    def _enc_destination(v: Any, _iar: bool) -> bytes:
+        return b"".join(
+            [
+                encode_application_bit_string(v.valid_days),
+                encode_application_time(v.from_time),
+                encode_application_time(v.to_time),
+                _encode_recipient(v.recipient),
+                encode_application_unsigned(v.process_identifier),
+                encode_application_boolean(v.issue_confirmed_notifications),
+                encode_application_bit_string(v.transitions),
+            ]
+        )
+
+    def _enc_scale(v: Any, _iar: bool) -> bytes:
+        if v.float_scale is not None:
+            return encode_context_real(0, v.float_scale)
+        if v.integer_scale is not None:
+            return encode_context_signed(1, v.integer_scale)
+        return encode_context_real(0, 0.0)
+
+    def _enc_prescale(v: Any, _iar: bool) -> bytes:
+        return encode_context_unsigned(0, v.multiplier) + encode_context_unsigned(
+            1, v.modulo_divide
+        )
+
+    def _enc_log_record(v: Any, iar: bool) -> bytes:
+        parts = [
+            encode_application_date(v.timestamp.date),
+            encode_application_time(v.timestamp.time),
+            encode_property_value(v.log_datum, int_as_real=iar),
+        ]
+        if v.status_flags is not None:
+            parts.append(encode_context_bit_string(1, v.status_flags.to_bit_string()))
+        return b"".join(parts)
+
+    def _enc_cov_subscription(v: Any, _iar: bool) -> bytes:
+        return _encode_cov_subscription(v)
+
+    def _enc_value_source(v: Any, _iar: bool) -> bytes:
+        result: bytes = v.encode()
+        return result
+
+    def _enc_dev_obj_ref(v: Any, _iar: bool) -> bytes:
+        result: bytes = v.encode()
+        return result
+
+    def _enc_priority_value(v: Any, iar: bool) -> bytes:
+        if v.value is None:
+            return encode_application_null()
+        return encode_property_value(v.value, int_as_real=iar)
+
+    def _enc_priority_array(v: Any, iar: bool) -> bytes:
+        parts: list[bytes] = []
+        for slot in v.slots:
+            if slot.value is None:
+                parts.append(encode_application_null())
+            else:
+                parts.append(encode_property_value(slot.value, int_as_real=iar))
+        return b"".join(parts)
+
+    return {
+        StatusFlags: _enc_status_flags,
+        BACnetDateTime: _enc_datetime,
+        BACnetDateRange: _enc_date_range,
+        BACnetWeekNDay: _enc_week_n_day,
+        BACnetCalendarEntry: _enc_calendar_entry,
+        BACnetTimeValue: _enc_time_value,
+        BACnetSpecialEvent: _enc_special_event,
+        BACnetDeviceObjectPropertyReference: _enc_dev_obj_prop_ref,
+        BACnetObjectPropertyReference: _enc_obj_prop_ref,
+        BACnetAddress: _enc_address,
+        BACnetRecipient: _enc_recipient,
+        BACnetRecipientProcess: _enc_recipient_process,
+        BACnetDestination: _enc_destination,
+        BACnetScale: _enc_scale,
+        BACnetPrescale: _enc_prescale,
+        BACnetLogRecord: _enc_log_record,
+        BACnetCOVSubscription: _enc_cov_subscription,
+        BACnetValueSource: _enc_value_source,
+        BACnetDeviceObjectReference: _enc_dev_obj_ref,
+        BACnetPriorityValue: _enc_priority_value,
+        BACnetPriorityArray: _enc_priority_array,
+    }
+
+
+def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
+    """Encode a Python value to application-tagged bytes.
+
+    Handles the common types stored in BACnet object properties,
+    including both primitive and constructed BACnet types.
+
+    :param value: The value to encode.
+    :param int_as_real: If ``True``, encode plain ``int`` values as Real instead
+        of Unsigned (used for analog object types where Present_Value is Real).
+    :returns: Application-tagged encoded bytes.
+    :raises TypeError: If the value type is not supported.
+    """
+    global _CONSTRUCTED_ENCODERS
+    if _CONSTRUCTED_ENCODERS is None:
+        _CONSTRUCTED_ENCODERS = _build_constructed_encoders()
+
     if value is None:
         return encode_application_null()
     if isinstance(value, ObjectIdentifier):
         return encode_application_object_id(value.object_type, value.instance_number)
 
-    # --- Constructed types (must precede primitive checks) ---
+    # --- Constructed types: O(1) dispatch table lookup ---
+    encoder = _CONSTRUCTED_ENCODERS.get(type(value))
+    if encoder is not None:
+        result: bytes = encoder(value, int_as_real)  # type: ignore[operator]
+        return result
 
-    if isinstance(value, StatusFlags):
-        return encode_application_bit_string(value.to_bit_string())
-
-    if isinstance(value, BACnetDateTime):
-        return encode_application_date(value.date) + encode_application_time(value.time)
-
-    if isinstance(value, BACnetDateRange):
-        return encode_application_date(value.start_date) + encode_application_date(value.end_date)
-
-    if isinstance(value, BACnetWeekNDay):
-        return encode_application_octet_string(
-            bytes([value.month, value.week_of_month, value.day_of_week])
-        )
-
-    if isinstance(value, BACnetCalendarEntry):
-        return _encode_calendar_entry(value)
-
-    if isinstance(value, BACnetTimeValue):
-        return encode_application_time(value.time) + encode_property_value(
-            value.value, int_as_real=int_as_real
-        )
-
-    if isinstance(value, BACnetSpecialEvent):
-        return _encode_special_event(value, int_as_real=int_as_real)
-
-    if isinstance(value, BACnetDeviceObjectPropertyReference):
-        buf = encode_context_object_id(0, value.object_identifier)
-        buf += encode_context_enumerated(1, value.property_identifier)
-        if value.property_array_index is not None:
-            buf += encode_context_unsigned(2, value.property_array_index)
-        if value.device_identifier is not None:
-            buf += encode_context_object_id(3, value.device_identifier)
-        return buf
-
-    if isinstance(value, BACnetObjectPropertyReference):
-        buf = encode_context_object_id(0, value.object_identifier)
-        buf += encode_context_enumerated(1, value.property_identifier)
-        if value.property_array_index is not None:
-            buf += encode_context_unsigned(2, value.property_array_index)
-        return buf
-
-    if isinstance(value, BACnetAddress):
-        buf = encode_context_unsigned(0, value.network_number)
-        buf += encode_context_octet_string(1, value.mac_address)
-        return buf
-
-    if isinstance(value, BACnetRecipient):
-        return _encode_recipient(value)
-
-    if isinstance(value, BACnetRecipientProcess):
-        buf = encode_opening_tag(0)
-        buf += _encode_recipient(value.recipient)
-        buf += encode_closing_tag(0)
-        buf += encode_context_unsigned(1, value.process_identifier)
-        return buf
-
-    if isinstance(value, BACnetDestination):
-        buf = encode_application_bit_string(value.valid_days)
-        buf += encode_application_time(value.from_time)
-        buf += encode_application_time(value.to_time)
-        buf += _encode_recipient(value.recipient)
-        buf += encode_application_unsigned(value.process_identifier)
-        buf += encode_application_boolean(value.issue_confirmed_notifications)
-        buf += encode_application_bit_string(value.transitions)
-        return buf
-
-    if isinstance(value, BACnetScale):
-        if value.float_scale is not None:
-            return encode_context_real(0, value.float_scale)
-        if value.integer_scale is not None:
-            return encode_context_signed(1, value.integer_scale)
-        return encode_context_real(0, 0.0)
-
-    if isinstance(value, BACnetPrescale):
-        return encode_context_unsigned(0, value.multiplier) + encode_context_unsigned(
-            1, value.modulo_divide
-        )
-
-    if isinstance(value, BACnetLogRecord):
-        buf = encode_application_date(value.timestamp.date)
-        buf += encode_application_time(value.timestamp.time)
-        buf += encode_property_value(value.log_datum, int_as_real=int_as_real)
-        if value.status_flags is not None:
-            buf += encode_context_bit_string(1, value.status_flags.to_bit_string())
-        return buf
-
-    if isinstance(value, BACnetCOVSubscription):
-        return _encode_cov_subscription(value)
-
-    if isinstance(value, BACnetValueSource):
-        return value.encode()
-
-    if isinstance(value, BACnetDeviceObjectReference):
-        return value.encode()
-
-    if isinstance(value, BACnetPriorityValue):
-        if value.value is None:
-            return encode_application_null()
-        return encode_property_value(value.value, int_as_real=int_as_real)
-
-    if isinstance(value, BACnetPriorityArray):
-        parts: list[bytes] = []
-        for slot in value.slots:
-            if slot.value is None:
-                parts.append(encode_application_null())
-            else:
-                parts.append(encode_property_value(slot.value, int_as_real=int_as_real))
-        return b"".join(parts)
-
-    # --- Primitive types ---
+    # --- Primitive types (order matters due to subclass relationships) ---
 
     if isinstance(value, BitString):
         return encode_application_bit_string(value)
@@ -987,10 +1054,7 @@ def encode_property_value(value: object, *, int_as_real: bool = False) -> bytes:
         # Already-encoded application-tagged bytes (pass-through)
         return value
     if isinstance(value, list):
-        list_parts: list[bytes] = []
-        for item in value:
-            list_parts.append(encode_property_value(item, int_as_real=int_as_real))
-        return b"".join(list_parts)
+        return b"".join(encode_property_value(item, int_as_real=int_as_real) for item in value)
 
     msg = f"Cannot encode value of type {type(value).__name__}"
     raise TypeError(msg)
@@ -1012,11 +1076,14 @@ def _encode_calendar_entry(entry: object) -> bytes:
         return encode_context_date(0, val)
     if isinstance(val, BACnetDateRange):
         # dateRange [1] - constructed
-        buf = encode_opening_tag(1)
-        buf += encode_application_date(val.start_date)
-        buf += encode_application_date(val.end_date)
-        buf += encode_closing_tag(1)
-        return buf
+        return b"".join(
+            [
+                encode_opening_tag(1),
+                encode_application_date(val.start_date),
+                encode_application_date(val.end_date),
+                encode_closing_tag(1),
+            ]
+        )
     # weekNDay [2]
     assert isinstance(val, BACnetWeekNDay)
     return encode_context_octet_string(
@@ -1035,21 +1102,21 @@ def _encode_special_event(event: object, *, int_as_real: bool = False) -> bytes:
     from bac_py.types.constructed import BACnetCalendarEntry, BACnetSpecialEvent
 
     assert isinstance(event, BACnetSpecialEvent)
+    parts: list[bytes] = []
     if isinstance(event.period, BACnetCalendarEntry):
-        buf = encode_opening_tag(0)
-        buf += _encode_calendar_entry(event.period)
-        buf += encode_closing_tag(0)
+        parts.append(encode_opening_tag(0))
+        parts.append(_encode_calendar_entry(event.period))
+        parts.append(encode_closing_tag(0))
     else:
         # Calendar object reference
-        buf = encode_context_object_id(1, event.period)
-    buf += encode_opening_tag(2)  # listOfTimeValues
+        parts.append(encode_context_object_id(1, event.period))
+    parts.append(encode_opening_tag(2))  # listOfTimeValues
     for tv in event.list_of_time_values:
-        buf += encode_application_time(tv.time) + encode_property_value(
-            tv.value, int_as_real=int_as_real
-        )
-    buf += encode_closing_tag(2)
-    buf += encode_context_unsigned(3, event.event_priority)
-    return buf
+        parts.append(encode_application_time(tv.time))
+        parts.append(encode_property_value(tv.value, int_as_real=int_as_real))
+    parts.append(encode_closing_tag(2))
+    parts.append(encode_context_unsigned(3, event.event_priority))
+    return b"".join(parts)
 
 
 def _encode_recipient(recipient: object) -> bytes:
@@ -1067,11 +1134,14 @@ def _encode_recipient(recipient: object) -> bytes:
         return encode_context_object_id(0, recipient.device)
     if recipient.address is not None:
         # address [1] BACnetAddress - constructed
-        buf = encode_opening_tag(1)
-        buf += encode_context_unsigned(0, recipient.address.network_number)
-        buf += encode_context_octet_string(1, recipient.address.mac_address)
-        buf += encode_closing_tag(1)
-        return buf
+        return b"".join(
+            [
+                encode_opening_tag(1),
+                encode_context_unsigned(0, recipient.address.network_number),
+                encode_context_octet_string(1, recipient.address.mac_address),
+                encode_closing_tag(1),
+            ]
+        )
     # Empty recipient defaults to device context tag with zero-length
     return encode_context_object_id(0, ObjectIdentifier(ObjectType(0), 0))
 
@@ -1085,22 +1155,24 @@ def _encode_cov_subscription(sub: object) -> bytes:
     from bac_py.types.constructed import BACnetCOVSubscription
 
     assert isinstance(sub, BACnetCOVSubscription)
-    # recipient [0] BACnetRecipientProcess
-    buf = encode_opening_tag(0)
-    buf += encode_opening_tag(0)  # recipient.recipient
-    buf += _encode_recipient(sub.recipient.recipient)
-    buf += encode_closing_tag(0)
-    buf += encode_context_unsigned(1, sub.recipient.process_identifier)
-    buf += encode_closing_tag(0)
-    # monitoredPropertyReference [1]
-    buf += encode_opening_tag(1)
-    buf += encode_context_object_id(0, sub.monitored_object)
-    buf += encode_closing_tag(1)
-    # issueConfirmedNotifications [2]
-    buf += encode_context_boolean(2, sub.issue_confirmed_notifications)
-    # timeRemaining [3]
-    buf += encode_context_unsigned(3, sub.time_remaining)
+    parts = [
+        # recipient [0] BACnetRecipientProcess
+        encode_opening_tag(0),
+        encode_opening_tag(0),  # recipient.recipient
+        _encode_recipient(sub.recipient.recipient),
+        encode_closing_tag(0),
+        encode_context_unsigned(1, sub.recipient.process_identifier),
+        encode_closing_tag(0),
+        # monitoredPropertyReference [1]
+        encode_opening_tag(1),
+        encode_context_object_id(0, sub.monitored_object),
+        encode_closing_tag(1),
+        # issueConfirmedNotifications [2]
+        encode_context_boolean(2, sub.issue_confirmed_notifications),
+        # timeRemaining [3]
+        encode_context_unsigned(3, sub.time_remaining),
+    ]
     # covIncrement [4] OPTIONAL
     if sub.cov_increment is not None:
-        buf += encode_context_real(4, sub.cov_increment)
-    return buf
+        parts.append(encode_context_real(4, sub.cov_increment))
+    return b"".join(parts)

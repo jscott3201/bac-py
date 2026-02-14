@@ -87,6 +87,9 @@ class ObjectType(IntEnum):
     AUDIT_LOG = 62  # New in 2020
 
 
+_PROPERTY_ID_VENDOR_CACHE: dict[int, object] = {}
+
+
 class PropertyIdentifier(IntEnum):
     """BACnet property identifiers per ASHRAE 135-2020 Clause 21.
 
@@ -102,9 +105,13 @@ class PropertyIdentifier(IntEnum):
     @classmethod
     def _missing_(cls, value: object) -> PropertyIdentifier | None:
         if isinstance(value, int) and 0 <= value <= 4194303:
+            cached = _PROPERTY_ID_VENDOR_CACHE.get(value)
+            if cached is not None:
+                return cached  # type: ignore[return-value]
             member = int.__new__(cls, value)
             member._name_ = f"VENDOR_{value}"
             member._value_ = value
+            _PROPERTY_ID_VENDOR_CACHE[value] = member
             return member
         return None
 

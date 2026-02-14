@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.5] - 2026-02-14
+
+### Changed
+
+- **ObjectDatabase Device object caching** -- `_increment_database_revision()` now
+  uses a cached reference to the Device object instead of scanning all objects on
+  every add/remove/rename operation (O(1) instead of O(n)).
+- **`encode_property_value()` dispatch table** -- Replaced 20-deep `isinstance`
+  cascade for constructed BACnet types with an O(1) type-keyed dispatch table.
+  The table is built lazily on first call to avoid circular imports. Primitive type
+  dispatch retains the `isinstance` chain due to subclass ordering requirements
+  (bool < int, IntEnum < int, BACnetDouble < float).
+- **`decode_real()` / `decode_double()` use `struct.unpack_from()`** -- Avoids a
+  memoryview slice copy on every float decode by using `unpack_from` instead of
+  `unpack` with a slice. This is a hot path in APDU decoding.
+- **`client.py` top-level imports** -- Moved 14 repeated local imports
+  (`parse_object_identifier`, `parse_property_identifier`, `_resolve_object_type`,
+  `GLOBAL_BROADCAST`, `MessagePriority`, `EnableDisable`, `ReinitializedState`)
+  to module-level to eliminate per-call import lookup overhead.
+- **Dispatch table encoders use `b"".join()`** -- Converted multi-part constructed
+  type encoders (`BACnetDestination`, `BACnetRecipientProcess`,
+  `BACnetDeviceObjectPropertyReference`, `BACnetObjectPropertyReference`,
+  `BACnetLogRecord`) from O(n²) `bytes +=` concatenation to O(n) `b"".join()`.
+- **`encode_tag()` fast path** -- Added a single-byte fast path for the common case
+  (tag_number <= 14 and length <= 4), avoiding bytearray allocation entirely.
+  This function is called 100+ times per APDU encode.
+- **`encode_npdu()` removed redundant `bytearray.clear()`** -- The buffer was
+  pre-allocated with an estimated size and then immediately cleared, defeating
+  the pre-allocation. Now starts with an empty bytearray.
+- **EventEngine deduplicated `_sync_state_machine()` calls** -- New enrollment
+  contexts were synced twice on first evaluation (once in creation, once in the
+  per-cycle sync). Removed the redundant initial sync.
+- **Server `_read_object_property()` uses identity check** -- Replaced
+  `ObjectIdentifier.__eq__` comparison with `obj is self._device` identity check
+  for the Device object special-case path.
+- **Server `_expand_property_references()` uses short-circuit scan** -- Replaced
+  set comprehension with `any()` generator for `PROPERTY_LIST` membership check,
+  avoiding full set construction on every ReadPropertyMultiple ALL request.
+- **Pre-computed opening/closing tag lookup tables** -- `encode_opening_tag()` and
+  `encode_closing_tag()` now return pre-computed `bytes` objects for tag numbers
+  0--14, eliminating a `bytes([...])` allocation on every call. These functions
+  are called for every constructed type in every APDU.
+- **Constructed type `encode()` methods use `b"".join()`** -- Converted all
+  remaining `bytes +=` concatenation in `constructed.py` encode methods
+  (`BACnetTimeStamp`, `BACnetCalendarEntry`, `BACnetSpecialEvent`,
+  `BACnetObjectPropertyReference`, `BACnetRecipient`, `BACnetDestination`,
+  `BACnetLogRecord`, `BACnetRecipientProcess`, `BACnetValueSource`) and
+  primitives.py helper functions (`_encode_calendar_entry`,
+  `_encode_special_event`, `_encode_recipient`, `_encode_cov_subscription`)
+  from O(n²) concatenation to O(n) `b"".join()`.
+- **`PropertyIdentifier._missing_()` vendor cache** -- Vendor-proprietary
+  property IDs (512--4194303) are now cached so repeated lookups return the
+  same pseudo-member instance instead of creating a new one each time.
+- **`encode_bit_string()` / `encode_character_string()` pre-sized buffers** --
+  Replaced `bytes([x]) + data` two-object concatenation with pre-sized
+  `bytearray` writes. `decode_character_string()` avoids an unnecessary
+  `bytes()` wrapper when input is already `bytes`.
+- **README broadened to cover all transports** -- Updated description, installation,
+  examples table, Docker scenarios, and requirements to reflect BACnet/IP, IPv6,
+  Ethernet, and Secure Connect support.
+- **`pyproject.toml` cleanup** -- Broadened description, added `bacnet-sc` keyword,
+  removed unused `cli` optional dependency, removed stale duplicate `[tool.ruff]`
+  section (authoritative config is in `ruff.toml`).
+
 ## [1.3.4] - 2026-02-14
 
 ### Added

@@ -30,7 +30,13 @@ from bac_py.app.client import (
     RouterInfo,
     UnconfiguredDevice,
 )
-from bac_py.network.address import parse_address
+from bac_py.network.address import GLOBAL_BROADCAST, parse_address
+from bac_py.types.enums import EnableDisable, MessagePriority, ReinitializedState
+from bac_py.types.parsing import (
+    _resolve_object_type,
+    parse_object_identifier,
+    parse_property_identifier,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -71,13 +77,10 @@ if TYPE_CHECKING:
     from bac_py.types.constructed import BACnetTimeStamp
     from bac_py.types.enums import (
         AcknowledgmentFilter,
-        EnableDisable,
         EventState,
         EventType,
-        MessagePriority,
         ObjectType,
         PropertyIdentifier,
-        ReinitializedState,
     )
     from bac_py.types.primitives import BACnetDate, BACnetTime, ObjectIdentifier
 
@@ -91,8 +94,6 @@ def _resolve_broadcast_destination(destination: str | BACnetAddress | None) -> B
     If *destination* is ``None``, returns ``GLOBAL_BROADCAST``.
     """
     if destination is None:
-        from bac_py.network.address import GLOBAL_BROADCAST
-
         return GLOBAL_BROADCAST
     return parse_address(destination)
 
@@ -423,8 +424,6 @@ class Client:
         :param timeout: Optional caller-level timeout in seconds.
         :returns: Decoded :class:`GetEventInformationACK` with event summaries.
         """
-        from bac_py.types.parsing import parse_object_identifier
-
         client = self._require_client()
         last_oid = (
             parse_object_identifier(last_received_object_identifier)
@@ -459,8 +458,6 @@ class Client:
         :param time_of_acknowledgment: Time stamp of the acknowledgment.
         :param timeout: Optional caller-level timeout in seconds.
         """
-        from bac_py.types.parsing import parse_object_identifier
-
         client = self._require_client()
         obj_id = parse_object_identifier(event_object_identifier)
         await client.acknowledge_alarm(
@@ -499,8 +496,6 @@ class Client:
         :param message_class_character: Optional character message class.
         :param timeout: Optional caller-level timeout (confirmed only).
         """
-        from bac_py.types.enums import MessagePriority
-
         client = self._require_client()
         addr = parse_address(destination)
         priority = message_priority if message_priority is not None else MessagePriority.NORMAL
@@ -603,8 +598,6 @@ class Client:
         :param timeout: Optional caller-level timeout in seconds.
         :returns: Decoded :class:`AuditLogQueryACK`.
         """
-        from bac_py.types.parsing import parse_object_identifier
-
         client = self._require_client()
         log_oid = parse_object_identifier(audit_log)
         return await client.query_audit_log(
@@ -646,8 +639,6 @@ class Client:
         :param cov_increment: Optional COV increment override.
         :param timeout: Optional caller-level timeout in seconds.
         """
-        from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
-
         client = self._require_client()
         obj_id = parse_object_identifier(object_identifier)
         prop_id = parse_property_identifier(property_identifier)
@@ -836,8 +827,6 @@ class Client:
         :param lifetime: Subscription lifetime in seconds, or ``None``.
         :param timeout: Optional caller-level timeout in seconds.
         """
-        from bac_py.types.parsing import parse_object_identifier
-
         client = self._require_client()
         await client.subscribe_cov(
             parse_address(address),
@@ -864,8 +853,6 @@ class Client:
         :param process_id: Subscriber process identifier.
         :param timeout: Optional caller-level timeout in seconds.
         """
-        from bac_py.types.parsing import parse_object_identifier
-
         client = self._require_client()
         await client.unsubscribe_cov(
             parse_address(address),
@@ -893,8 +880,6 @@ class Client:
         :param password: Optional password.
         :param timeout: Optional caller-level timeout in seconds.
         """
-        from bac_py.types.enums import EnableDisable
-
         client = self._require_client()
         state = _parse_enum(enable_disable, EnableDisable)
         await client.device_communication_control(
@@ -918,8 +903,6 @@ class Client:
         :param password: Optional password.
         :param timeout: Optional caller-level timeout in seconds.
         """
-        from bac_py.types.enums import ReinitializedState
-
         client = self._require_client()
         state = _parse_enum(reinitialized_state, ReinitializedState)
         await client.reinitialize_device(parse_address(address), state, password, timeout=timeout)
@@ -969,8 +952,6 @@ class Client:
         :param access_method: Stream or record access parameters.
         :param timeout: Optional caller-level timeout in seconds.
         """
-        from bac_py.types.parsing import parse_object_identifier
-
         client = self._require_client()
         return await client.atomic_read_file(
             parse_address(address),
@@ -994,8 +975,6 @@ class Client:
         :param access_method: Stream or record access parameters.
         :param timeout: Optional caller-level timeout in seconds.
         """
-        from bac_py.types.parsing import parse_object_identifier
-
         client = self._require_client()
         return await client.atomic_write_file(
             parse_address(address),
@@ -1025,8 +1004,6 @@ class Client:
         :param timeout: Optional caller-level timeout in seconds.
         :returns: :class:`ObjectIdentifier` of the newly created object.
         """
-        from bac_py.types.parsing import _resolve_object_type, parse_object_identifier
-
         client = self._require_client()
         resolved_type: ObjectType | None = None
         resolved_oid: ObjectIdentifier | None = None
@@ -1053,8 +1030,6 @@ class Client:
         :param object_identifier: Object to delete (e.g. ``"av,1"``).
         :param timeout: Optional caller-level timeout in seconds.
         """
-        from bac_py.types.parsing import parse_object_identifier
-
         client = self._require_client()
         await client.delete_object(
             parse_address(address), parse_object_identifier(object_identifier), timeout=timeout
@@ -1080,8 +1055,6 @@ class Client:
         :param array_index: Optional array index.
         :param timeout: Optional caller-level timeout in seconds.
         """
-        from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
-
         client = self._require_client()
         await client.add_list_element(
             parse_address(address),
@@ -1112,8 +1085,6 @@ class Client:
         :param array_index: Optional array index.
         :param timeout: Optional caller-level timeout in seconds.
         """
-        from bac_py.types.parsing import parse_object_identifier, parse_property_identifier
-
         client = self._require_client()
         await client.remove_list_element(
             parse_address(address),
@@ -1152,8 +1123,6 @@ class Client:
         :param expected_count: When set, return early once this many
             responses have been collected.
         """
-        from bac_py.types.parsing import parse_object_identifier
-
         client = self._require_client()
         dest = _resolve_broadcast_destination(destination)
         oid = parse_object_identifier(object_identifier) if object_identifier is not None else None
@@ -1227,8 +1196,6 @@ class Client:
         :param timeout: Optional caller-level timeout in seconds.
         :returns: Flat list of all :class:`ObjectIdentifier` found.
         """
-        from bac_py.types.parsing import parse_object_identifier
-
         client = self._require_client()
         return await client.traverse_hierarchy(
             parse_address(address),
