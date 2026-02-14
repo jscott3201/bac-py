@@ -664,6 +664,26 @@ def run_sc_stress() -> None:
     sys.exit(result.returncode)
 
 
+def run_router_stress() -> None:
+    """Run the router stress test runner."""
+    logger.info("Running router stress tests...")
+    result = subprocess.run(
+        ["uv", "run", "python", "-m", "docker.lib.router_stress_runner"],
+        cwd="/app",
+    )
+    sys.exit(result.returncode)
+
+
+def run_bbmd_stress() -> None:
+    """Run the BBMD stress test runner."""
+    logger.info("Running BBMD stress tests...")
+    result = subprocess.run(
+        ["uv", "run", "python", "-m", "docker.lib.bbmd_stress_runner"],
+        cwd="/app",
+    )
+    sys.exit(result.returncode)
+
+
 async def run_thermostat() -> None:
     """Run the smart thermostat demo server."""
     import importlib.util
@@ -718,6 +738,10 @@ def main() -> None:
         run_stress()
     elif role == "sc-stress":
         run_sc_stress()
+    elif role == "router-stress":
+        run_router_stress()
+    elif role == "bbmd-stress":
+        run_bbmd_stress()
     elif role == "thermostat":
         asyncio.run(run_thermostat())
     elif role == "demo-client":
@@ -726,7 +750,7 @@ def main() -> None:
         logger.error(
             "Unknown ROLE: %r (expected: server, server-extended, stress-server, "
             "bbmd, router, sc-hub, sc-node, test, stress, sc-stress, "
-            "thermostat, demo-client)",
+            "router-stress, bbmd-stress, thermostat, demo-client)",
             role,
         )
         sys.exit(1)

@@ -2,6 +2,8 @@
        docker-build docker-test docker-stress docker-test-client docker-test-bbmd \
        docker-test-router docker-test-device-mgmt docker-test-cov-advanced \
        docker-test-events docker-test-sc docker-test-sc-stress docker-sc-stress \
+       docker-test-router-stress docker-router-stress \
+       docker-test-bbmd-stress docker-bbmd-stress \
        docker-demo docker-demo-auto docker-clean
 
 lint:
@@ -95,6 +97,22 @@ docker-sc-stress: docker-build
 	$(COMPOSE) --profile sc-stress-runner up --abort-on-container-exit --exit-code-from sc-stress-runner
 	$(COMPOSE) --profile sc-stress-runner down -v
 
+docker-test-router-stress: docker-build
+	$(COMPOSE) --profile router-stress up --abort-on-container-exit --exit-code-from test-router-stress
+	$(COMPOSE) --profile router-stress down -v
+
+docker-router-stress: docker-build
+	$(COMPOSE) --profile router-stress-runner up --abort-on-container-exit --exit-code-from router-stress-runner
+	$(COMPOSE) --profile router-stress-runner down -v
+
+docker-test-bbmd-stress: docker-build
+	$(COMPOSE) --profile bbmd-stress up --abort-on-container-exit --exit-code-from test-bbmd-stress
+	$(COMPOSE) --profile bbmd-stress down -v
+
+docker-bbmd-stress: docker-build
+	$(COMPOSE) --profile bbmd-stress-runner up --abort-on-container-exit --exit-code-from bbmd-stress-runner
+	$(COMPOSE) --profile bbmd-stress-runner down -v
+
 docker-demo: docker-build
 	$(COMPOSE) --profile demo run --rm demo-client
 	$(COMPOSE) --profile demo down -v
@@ -109,3 +127,7 @@ docker-clean:
 	$(COMPOSE) --profile stress-runner down -v --rmi local
 	$(COMPOSE) --profile sc-stress down -v --rmi local
 	$(COMPOSE) --profile sc-stress-runner down -v --rmi local
+	$(COMPOSE) --profile router-stress down -v --rmi local
+	$(COMPOSE) --profile router-stress-runner down -v --rmi local
+	$(COMPOSE) --profile bbmd-stress down -v --rmi local
+	$(COMPOSE) --profile bbmd-stress-runner down -v --rmi local

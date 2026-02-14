@@ -13,10 +13,14 @@
 #   8. Events & Alarms     (profile: events)           — alarms, acknowledgement
 #   9. Secure Connect      (profile: secure-connect)   — SC hub/node WebSocket
 #  10. SC Stress           (profile: sc-stress)        — SC throughput/latency
+#  11. Router Stress       (profile: router-stress)    — cross-network routing
+#  12. BBMD Stress         (profile: bbmd-stress)      — foreign device forwarding
 #
 # Runners (JSON report to stdout):
 #   - BIP stress runner    (profile: stress-runner)
 #   - SC stress runner     (profile: sc-stress-runner)
+#   - Router stress runner (profile: router-stress-runner)
+#   - BBMD stress runner   (profile: bbmd-stress-runner)
 #
 # Usage:
 #   make docker-test              # run all test scenarios
@@ -555,3 +559,174 @@ services:
       sc-stress-node2:
         condition: service_healthy
     profiles: ["sc-stress-runner"]
+
+  # ===========================================================================
+  # Scenario 11: Router Stress (cross-network routing throughput)
+  # ===========================================================================
+
+  router-stress:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-router-stress
+    mem_limit: 2g
+    environment:
+      ROLE: router
+      DEVICE_INSTANCE: "500"
+      NETWORK_1: "1"
+      NETWORK_2: "2"
+      INTERFACE_1: "172.30.1.150"
+      INTERFACE_2: "172.30.2.50"
+      PORT_1: "47808"
+      PORT_2: "47808"
+      BROADCAST_ADDRESS: "172.30.1.255"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.150
+      bacnet-secondary:
+        ipv4_address: 172.30.2.50
+    profiles: ["router-stress", "router-stress-runner"]
+
+  server-router-stress:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-server-router-stress
+    mem_limit: 2g
+    environment:
+      ROLE: stress-server
+      DEVICE_INSTANCE: "501"
+      BACNET_PORT: "47808"
+      BROADCAST_ADDRESS: "172.30.2.255"
+    networks:
+      bacnet-secondary:
+        ipv4_address: 172.30.2.60
+    depends_on:
+      router-stress:
+        condition: service_healthy
+    profiles: ["router-stress", "router-stress-runner"]
+
+  test-router-stress:
+    <<: *build
+    container_name: bacnet-test-router-stress
+    mem_limit: 2g
+    environment:
+      ROLE: test
+      TEST_FILE: test_router_stress.py
+      SERVER_INSTANCE: "501"
+      REMOTE_NETWORK: "2"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.160
+    depends_on:
+      router-stress:
+        condition: service_healthy
+      server-router-stress:
+        condition: service_healthy
+    profiles: ["router-stress"]
+
+  router-stress-runner:
+    <<: *build
+    container_name: bacnet-router-stress-runner
+    mem_limit: 2g
+    environment:
+      ROLE: router-stress
+      SERVER_INSTANCE: "501"
+      REMOTE_NETWORK: "2"
+      NUM_POOLS: "1"
+      READERS_PER_POOL: "2"
+      WRITERS_PER_POOL: "1"
+      RPM_PER_POOL: "1"
+      WPM_PER_POOL: "1"
+      OBJLIST_WORKERS: "1"
+      WARMUP_SECONDS: "15"
+      SUSTAIN_SECONDS: "60"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.161
+    depends_on:
+      router-stress:
+        condition: service_healthy
+      server-router-stress:
+        condition: service_healthy
+    profiles: ["router-stress-runner"]
+
+  # ===========================================================================
+  # Scenario 12: BBMD Stress (foreign device management throughput)
+  # ===========================================================================
+
+  bbmd-stress:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-bbmd-stress
+    mem_limit: 2g
+    environment:
+      ROLE: bbmd
+      DEVICE_INSTANCE: "550"
+      BACNET_PORT: "47808"
+      BROADCAST_ADDRESS: "172.30.1.255"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.170
+    profiles: ["bbmd-stress", "bbmd-stress-runner"]
+
+  server-bbmd-stress:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-server-bbmd-stress
+    mem_limit: 2g
+    environment:
+      ROLE: stress-server
+      DEVICE_INSTANCE: "551"
+      BACNET_PORT: "47808"
+      BROADCAST_ADDRESS: "172.30.1.255"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.171
+    depends_on:
+      bbmd-stress:
+        condition: service_healthy
+    profiles: ["bbmd-stress", "bbmd-stress-runner"]
+
+  test-bbmd-stress:
+    <<: *build
+    container_name: bacnet-test-bbmd-stress
+    mem_limit: 2g
+    environment:
+      ROLE: test
+      TEST_FILE: test_bbmd_stress.py
+      BBMD_ADDRESS: "172.30.1.170"
+      SERVER_ADDRESS: "172.30.1.171"
+      SERVER_INSTANCE: "551"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.172
+    depends_on:
+      bbmd-stress:
+        condition: service_healthy
+      server-bbmd-stress:
+        condition: service_healthy
+    profiles: ["bbmd-stress"]
+
+  bbmd-stress-runner:
+    <<: *build
+    container_name: bacnet-bbmd-stress-runner
+    mem_limit: 2g
+    environment:
+      ROLE: bbmd-stress
+      BBMD_ADDRESS: "172.30.1.170"
+      SERVER_ADDRESS: "172.30.1.171"
+      SERVER_INSTANCE: "551"
+      NUM_POOLS: "1"
+      READERS_PER_POOL: "2"
+      WRITERS_PER_POOL: "1"
+      RPM_PER_POOL: "1"
+      WPM_PER_POOL: "1"
+      OBJLIST_WORKERS: "1"
+      FDT_WORKERS: "1"
+      BDT_WORKERS: "1"
+      WARMUP_SECONDS: "15"
+      SUSTAIN_SECONDS: "60"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.173
+    depends_on:
+      bbmd-stress:
+        condition: service_healthy
+      server-bbmd-stress:
+        condition: service_healthy
+    profiles: ["bbmd-stress-runner"]

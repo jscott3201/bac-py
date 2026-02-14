@@ -310,7 +310,7 @@ class TestMessageForwarding:
             received_messages: list[SCMessage] = []
             connected_event = asyncio.Event()
 
-            async def on_msg(msg: SCMessage):
+            async def on_msg(msg: SCMessage, raw: bytes | None = None):
                 received_messages.append(msg)
 
             conn.on_connected = connected_event.set
@@ -491,7 +491,7 @@ class TestConnectionCallbackCleanup:
             disconnected_event = asyncio.Event()
             conn.on_connected = connected_event.set
             conn.on_disconnected = disconnected_event.set
-            conn.on_message = lambda msg: None
+            conn.on_message = lambda msg, raw=None: None
             conn.on_vmac_collision = lambda: None
 
             # Accept a connection
@@ -530,7 +530,7 @@ class TestConnectionCallbackCleanup:
         conn = SCConnection(SCVMAC.random(), DeviceUUID.generate())
         conn.on_connected = lambda: None
         conn.on_disconnected = lambda: None
-        conn.on_message = lambda msg: None
+        conn.on_message = lambda msg, raw=None: None
         conn.on_vmac_collision = lambda: None
 
         # Force to non-IDLE so _go_idle doesn't short-circuit

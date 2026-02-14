@@ -96,7 +96,7 @@ class SCConnection:
         # Callbacks
         self.on_connected: Callable[[], None] | None = None
         self.on_disconnected: Callable[[], None] | None = None
-        self.on_message: Callable[[SCMessage], Awaitable[None] | None] | None = None
+        self.on_message: Callable[[SCMessage, bytes | None], Awaitable[None] | None] | None = None
         self.on_vmac_collision: Callable[[], None] | None = None
 
         # Internal tasks
@@ -305,6 +305,16 @@ class SCConnection:
             raise ConnectionError(msg_text)
         await self._ws.send(msg.encode())
 
+    async def send_raw(self, data: bytes) -> None:
+        """Send pre-encoded BVLC-SC bytes, skipping encode().
+
+        Used by the hub to forward messages without re-encoding.
+        """
+        if self._state != SCConnectionState.CONNECTED or self._ws is None:
+            msg_text = "Cannot send: connection not in CONNECTED state"
+            raise ConnectionError(msg_text)
+        await self._ws.send_raw(data)
+
     # ------------------------------------------------------------------
     # Disconnect
     # ------------------------------------------------------------------
@@ -379,7 +389,7 @@ class SCConnection:
             while self._state == SCConnectionState.CONNECTED and self._ws is not None:
                 raw = await self._ws.recv()
                 msg = SCMessage.decode(raw)
-                await self._handle_message(msg)
+                await self._handle_message(msg, raw)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -387,7 +397,7 @@ class SCConnection:
             if self._state == SCConnectionState.CONNECTED:
                 await self._go_idle()
 
-    async def _handle_message(self, msg: SCMessage) -> None:
+    async def _handle_message(self, msg: SCMessage, raw: bytes | None = None) -> None:
         """Process a received BVLC-SC message per current state."""
         if self._state == SCConnectionState.CONNECTED:
             if msg.function == BvlcSCFunction.DISCONNECT_REQUEST:
@@ -416,10 +426,11 @@ class SCConnection:
                 logger.debug("SC heartbeat ack received: %s", self._local_vmac)
                 return  # Heartbeat response, no action needed
 
-            # Forward other messages (Encapsulated-NPDU, etc.) to callback
+            # Forward other messages (Encapsulated-NPDU, etc.) to callback.
+            # Pass raw bytes so hub can forward without re-encoding.
             if self.on_message:
                 try:
-                    result = self.on_message(msg)
+                    result = self.on_message(msg, raw)
                     if asyncio.iscoroutine(result):
                         await result
                 except Exception as exc:

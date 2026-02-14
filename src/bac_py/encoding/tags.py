@@ -83,9 +83,9 @@ def encode_tag(tag_number: int, cls: TagClass, length: int) -> bytes:
         logger.warning(msg)
         raise ValueError(msg)
 
-    # Fast path: tag_number <= 14 and length <= 4 → single byte (most common case)
+    # Fast path: tag_number <= 14 and length <= 4 → pre-computed single byte
     if tag_number <= 14 and length <= 4:
-        return bytes([(tag_number << 4) | (cls << 3) | length])
+        return _TAGS_1BYTE[cls][tag_number][length]
 
     # General case
     initial = ((tag_number << 4) | (cls << 3)) if tag_number <= 14 else ((0x0F << 4) | (cls << 3))
@@ -110,6 +110,17 @@ def encode_tag(tag_number: int, cls: TagClass, length: int) -> bytes:
         return bytes([initial, tag_number, 254]) + length.to_bytes(2, "big")
     return bytes([initial, tag_number, 255]) + length.to_bytes(4, "big")
 
+
+# Pre-computed single-byte tags for the most common case: tag 0-14, length 0-4.
+# Indexed as _TAGS_1BYTE[cls][tag_number][length].  Avoids ``bytes([...])``
+# allocation on every call — this covers ~95% of all encode_tag() invocations.
+_TAGS_1BYTE: tuple[tuple[tuple[bytes, ...], ...], ...] = tuple(
+    tuple(
+        tuple(bytes([(tag << 4) | (cls << 3) | length]) for length in range(5))
+        for tag in range(15)
+    )
+    for cls in range(2)
+)
 
 # Pre-computed opening/closing tags for tag numbers 0-14 (the common case).
 # Avoids bytes([...]) allocation on every call.

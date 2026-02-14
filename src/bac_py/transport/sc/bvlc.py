@@ -137,30 +137,48 @@ class SCMessage:
         """Encode this message to wire bytes."""
         logger.debug("BVLC-SC encode: %s", self.function.name)
         flags = SCControlFlag.NONE
+        # Pre-calculate total size to avoid bytearray reallocations
+        size = SC_HEADER_MIN_LENGTH  # 4 bytes (function + flags + message_id)
         if self.originating is not None:
             flags |= SCControlFlag.ORIGINATING_VMAC
+            size += VMAC_LENGTH
         if self.destination is not None:
             flags |= SCControlFlag.DESTINATION_VMAC
+            size += VMAC_LENGTH
+
+        # Encode options lazily (only if present)
+        dest_opt_bytes: bytes = b""
+        data_opt_bytes: bytes = b""
         if self.dest_options:
             flags |= SCControlFlag.DESTINATION_OPTIONS
+            dest_opt_bytes = _encode_options(self.dest_options)
+            size += len(dest_opt_bytes)
         if self.data_options:
             flags |= SCControlFlag.DATA_OPTIONS
+            data_opt_bytes = _encode_options(self.data_options)
+            size += len(data_opt_bytes)
+        size += len(self.payload)
 
-        buf = bytearray(4)
+        buf = bytearray(size)
         buf[0] = self.function
         buf[1] = flags
         struct.pack_into("!H", buf, 2, self.message_id)
+        offset = SC_HEADER_MIN_LENGTH
 
         if self.originating is not None:
-            buf.extend(self.originating.address)
+            buf[offset : offset + VMAC_LENGTH] = self.originating.address
+            offset += VMAC_LENGTH
         if self.destination is not None:
-            buf.extend(self.destination.address)
-        if self.dest_options:
-            buf.extend(_encode_options(self.dest_options))
-        if self.data_options:
-            buf.extend(_encode_options(self.data_options))
+            buf[offset : offset + VMAC_LENGTH] = self.destination.address
+            offset += VMAC_LENGTH
+        if dest_opt_bytes:
+            buf[offset : offset + len(dest_opt_bytes)] = dest_opt_bytes
+            offset += len(dest_opt_bytes)
+        if data_opt_bytes:
+            buf[offset : offset + len(data_opt_bytes)] = data_opt_bytes
+            offset += len(data_opt_bytes)
         if self.payload:
-            buf.extend(self.payload)
+            buf[offset : offset + len(self.payload)] = self.payload
 
         return bytes(buf)
 
@@ -224,6 +242,37 @@ class SCMessage:
             data_options=data_options,
             payload=payload,
         )
+
+
+def encode_encapsulated_npdu(
+    originating: SCVMAC,
+    destination: SCVMAC | None,
+    payload: bytes,
+) -> bytes:
+    """Fast-path encode for Encapsulated-NPDU (AB.2.12).
+
+    Avoids creating an :class:`SCMessage` object and the generic
+    ``encode()`` method overhead.  Used by :meth:`SCTransport.send_unicast`
+    and :meth:`SCTransport.send_broadcast` on the hot path.
+    """
+    if destination is not None:
+        # Flags: ORIGINATING_VMAC(0x08) | DESTINATION_VMAC(0x04)
+        buf = bytearray(16 + len(payload))
+        buf[0] = BvlcSCFunction.ENCAPSULATED_NPDU
+        buf[1] = SCControlFlag.ORIGINATING_VMAC | SCControlFlag.DESTINATION_VMAC
+        # message_id = 0 (already zero in bytearray)
+        buf[4:10] = originating.address
+        buf[10:16] = destination.address
+        buf[16:] = payload
+    else:
+        # Flags: ORIGINATING_VMAC(0x08)
+        buf = bytearray(10 + len(payload))
+        buf[0] = BvlcSCFunction.ENCAPSULATED_NPDU
+        buf[1] = SCControlFlag.ORIGINATING_VMAC
+        # message_id = 0
+        buf[4:10] = originating.address
+        buf[10:] = payload
+    return bytes(buf)
 
 
 def _encode_options(options: tuple[SCHeaderOption, ...]) -> bytes:

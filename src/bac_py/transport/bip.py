@@ -247,18 +247,21 @@ class BIPTransport:
     def send_unicast(self, npdu: bytes, mac_address: bytes) -> None:
         """Send a directed message (Original-Unicast-NPDU).
 
+        Parses the 6-byte MAC inline to avoid BIPAddress object creation
+        on the hot path.
+
         :param npdu: NPDU bytes to send.
         :param mac_address: 6-byte destination MAC (4-byte IP + 2-byte port).
         """
         if self._transport is None:
             msg = "Transport not started"
             raise RuntimeError(msg)
-        destination = BIPAddress.decode(mac_address)
+        # Inline MAC parsing: 4-byte IP + 2-byte port (avoids BIPAddress allocation)
+        host = f"{mac_address[0]}.{mac_address[1]}.{mac_address[2]}.{mac_address[3]}"
+        port = (mac_address[4] << 8) | mac_address[5]
         bvll = encode_bvll(BvlcFunction.ORIGINAL_UNICAST_NPDU, npdu)
-        logger.debug(
-            "BIP send unicast %d bytes to %s:%d", len(npdu), destination.host, destination.port
-        )
-        self._transport.sendto(bvll, (destination.host, destination.port))
+        logger.debug("BIP send unicast %d bytes to %s:%d", len(npdu), host, port)
+        self._transport.sendto(bvll, (host, port))
 
     def send_broadcast(self, npdu: bytes) -> None:
         """Send a local broadcast (Original-Broadcast-NPDU).

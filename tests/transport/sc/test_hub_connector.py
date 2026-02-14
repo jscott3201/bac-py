@@ -237,7 +237,7 @@ class TestHubConnectorLifecycle:
         try:
             received: list[SCMessage] = []
 
-            async def on_msg(msg: SCMessage) -> None:
+            async def on_msg(msg: SCMessage, raw: bytes | None = None) -> None:
                 received.append(msg)
 
             connector = SCHubConnector(

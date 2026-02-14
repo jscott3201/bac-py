@@ -5,6 +5,97 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.11] - 2026-02-14
+
+### Added
+
+- **Router stress test scenario** (`docker/scenarios/test_router_stress.py`):
+  Sustained cross-network routing throughput test.  Discovers a server on a
+  remote BACnet network through a router and runs mixed-workload stress workers
+  (read, write, RPM, WPM, object-list) with all traffic traversing the router.
+  Includes periodic route health-check workers.  New
+  `make docker-test-router-stress` and `make docker-router-stress` targets.
+- **BBMD stress test scenario** (`docker/scenarios/test_bbmd_stress.py`):
+  Sustained foreign-device management throughput test.  Registers test clients
+  as foreign devices with a BBMD and runs mixed BACnet service workloads
+  alongside BBMD-specific operations (FDT reads, BDT reads).  Measures BBMD
+  overhead under concurrent foreign device activity.  New
+  `make docker-test-bbmd-stress` and `make docker-bbmd-stress` targets.
+- **Shared stress modules** (`docker/lib/router_stress.py`,
+  `docker/lib/bbmd_stress.py`): Reusable worker libraries extending
+  `bip_stress.Stats` with routing-specific (`RouterStats`) and BBMD-specific
+  (`BBMDStats`) metrics.  Both modules reuse the core BIP stress workers for
+  read/write/RPM/WPM operations.
+- **Standalone stress runners** (`docker/lib/router_stress_runner.py`,
+  `docker/lib/bbmd_stress_runner.py`): JSON-reporting standalone runners for
+  router and BBMD stress tests, following the same warmup/sustain/report pattern
+  as the existing BIP and SC stress runners.
+
+### Changed
+
+- **BACnet/SC WebSocket performance optimizations** (`transport/sc/`): Multiple
+  improvements to the SC transport hot path, collectively improving sustained
+  throughput by ~25% and reducing p99 latency from 0.6ms to 0.4ms:
+  - **TCP_NODELAY on all SC connections** (`websocket.py`): Disables Nagle's
+    algorithm on both client and server WebSocket connections.  Prevents 40-200ms
+    stalls when sending small BACnet frames (100-1500 bytes) due to Nagle +
+    delayed-ACK interaction.
+  - **Raw bytes forwarding in hub** (`hub_function.py`, `connection.py`): The hub
+    now forwards pre-encoded message bytes directly to destination connections,
+    skipping the decode-then-re-encode cycle for routed messages.  The
+    `on_message` callback chain passes raw wire bytes alongside the parsed
+    `SCMessage` (optional `raw: bytes | None` parameter, backward-compatible).
+  - **BVLC header caching** (`__init__.py`): `SCTransport.send_unicast()` and
+    `send_broadcast()` use pre-computed BVLC-SC headers (per-destination for
+    unicast, fixed for broadcast) concatenated with the NPDU payload, bypassing
+    `SCMessage` object creation and `encode()` on every send.
+  - **Direct chunk writes** (`websocket.py`): New `_write_pending()` helper writes
+    protocol output chunks directly to the `StreamWriter` instead of collecting
+    them with `b"".join()`, eliminating an allocation and copy per send.
+  - **Concurrent hub broadcasts** (`hub_function.py`): Broadcast messages are
+    forwarded to all connected nodes concurrently via `asyncio.gather()` instead
+    of sequentially.
+  - **Pre-sized encode buffer** (`bvlc.py`): `SCMessage.encode()` pre-calculates
+    the total message size and allocates a single `bytearray`, eliminating
+    incremental growth and reallocation.  Added `encode_encapsulated_npdu()`
+    fast-path function for the common case.
+
+- **Cross-transport encoding optimizations**: Applied the pre-sized bytearray
+  pattern from BACnet/SC to all transport and encoding layers, reducing
+  per-message memory allocations across the entire stack:
+  - **BVLL encode** (`bvll.py`): `encode_bvll()` now uses a single pre-sized
+    `bytearray` with `struct.pack_into()` instead of `bytes([...]) + content`
+    concatenation.  Eliminates 2 intermediate allocations per send for BACnet/IP,
+    BBMD forwarding, and foreign device registration.
+  - **BVLL6 encode** (`bvll_ipv6.py`): `encode_bvll6()` rewritten to calculate
+    total message size upfront and fill a single `bytearray`, replacing the
+    `list.append()` + `b"".join()` + `header + content` pattern that created
+    3+ intermediate allocations per send.
+  - **BIP send_unicast** (`bip.py`): Inline MAC-to-host:port parsing avoids
+    creating a `BIPAddress` object on every unicast send.
+  - **Ethernet frame encoding** (`ethernet.py`): `_encode_frame()` uses a
+    single pre-sized `bytearray` (zero-initialized for implicit padding) instead
+    of concatenation + conditional padding allocation.  LLC header validation
+    simplified to a single 3-byte slice comparison.  MAC address logging uses
+    `.hex(':')` instead of generator + join.
+  - **NPDU logging guards** (`npdu.py`): Debug log statements that call `.hex()`
+    on MAC addresses are now guarded by `logger.isEnabledFor(DEBUG)`, avoiding
+    string formatting overhead on every encode/decode when debug logging is
+    disabled.
+  - **Tag encoding lookup table** (`tags.py`): Pre-computed 150-entry lookup
+    table for the most common single-byte tag encodings (tag 0-14, length 0-4,
+    both APPLICATION and CONTEXT classes).  Eliminates `bytes([...])` list
+    allocation on ~95% of `encode_tag()` calls.
+
+- **Benchmarks guide** (`docs/guide/benchmarks.rst`): Added documentation for
+  router stress and BBMD stress test configurations, architecture, and worker
+  descriptions.
+
+- **Docker infrastructure** (`docker-compose.yml`, `entrypoint.py`, `Makefile`):
+  Added Scenario 11 (Router Stress) and Scenario 12 (BBMD Stress) with dedicated
+  server, router/BBMD, test, and runner containers.  Added `router-stress` and
+  `bbmd-stress` role dispatches in the entrypoint.  Added 4 new Makefile targets.
+
 ## [1.3.10] - 2026-02-14
 
 ### Fixed

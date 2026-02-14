@@ -356,20 +356,27 @@ make fix           # auto-fix lint/format issues
 
 ### Docker Integration Tests
 
-Real BACnet/IP communication over UDP between containers:
+Real BACnet communication over UDP and WebSocket between containers:
 
 ```bash
-make docker-build             # Build image (Alpine + uv + orjson)
-make docker-test              # All integration scenarios
-make docker-test-client       # Client/server: read, write, discover, RPM, WPM
-make docker-test-bbmd         # BBMD: foreign device registration + forwarding
-make docker-test-router       # Router: cross-network discovery and reads
-make docker-test-stress       # Stress: concurrent and sequential throughput
-make docker-test-device-mgmt  # Device management: DCC, time sync, text message
-make docker-test-cov-advanced # COV: concurrent subscriptions, property-level COV
-make docker-test-events       # Events: alarm reporting, acknowledgment, queries
-make docker-test-sc           # Secure Connect: hub, node, NPDU relay
-make docker-clean             # Cleanup
+make docker-build                # Build image (Alpine + uv + orjson)
+make docker-test                 # All integration scenarios
+make docker-test-client          # Client/server: read, write, discover, RPM, WPM
+make docker-test-bbmd            # BBMD: foreign device registration + forwarding
+make docker-test-router          # Router: cross-network discovery and reads
+make docker-test-stress          # BIP stress: sustained throughput (60s)
+make docker-test-sc              # Secure Connect: hub, node, NPDU relay
+make docker-test-sc-stress       # SC stress: WebSocket throughput (60s)
+make docker-test-router-stress   # Router stress: cross-network routing (60s)
+make docker-test-bbmd-stress     # BBMD stress: foreign device throughput (60s)
+make docker-test-device-mgmt     # Device management: DCC, time sync, text message
+make docker-test-cov-advanced    # COV: concurrent subscriptions, property-level COV
+make docker-test-events          # Events: alarm reporting, acknowledgment, queries
+make docker-stress               # BIP stress runner (JSON report to stdout)
+make docker-sc-stress            # SC stress runner (JSON report to stdout)
+make docker-router-stress        # Router stress runner (JSON report to stdout)
+make docker-bbmd-stress          # BBMD stress runner (JSON report to stdout)
+make docker-clean                # Cleanup
 ```
 
 ## Requirements

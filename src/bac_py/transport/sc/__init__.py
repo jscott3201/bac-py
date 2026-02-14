@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import struct
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -83,6 +84,18 @@ class SCTransport:
         self._uuid = self._config.device_uuid or DeviceUUID.generate()
         self._receive_callback: Callable[[bytes, bytes], None] | None = None
         self._send_tasks: set[asyncio.Task[None]] = set()
+
+        # Cached BVLC-SC headers keyed by destination MAC (6 bytes).
+        # For unicast: 16-byte header (function + flags + msg_id + orig + dest).
+        # Avoids SCVMAC/SCMessage creation and encode() on every send.
+        self._unicast_header_cache: dict[bytes, bytes] = {}
+        # Broadcast header is fixed (10 bytes: function + flags + msg_id + orig).
+        # SCControlFlag.ORIGINATING_VMAC = 0x08
+        _bcast_flags = 0x08  # ORIGINATING_VMAC
+        self._broadcast_header: bytes = (
+            struct.pack("!BBH", BvlcSCFunction.ENCAPSULATED_NPDU, _bcast_flags, 0)
+            + self._vmac.address
+        )
 
         # Hub connector (client)
         self._hub_connector = SCHubConnector(
@@ -196,33 +209,45 @@ class SCTransport:
         """Send an NPDU to a specific VMAC.
 
         Tries direct connection first (if available), then hub.
+        Uses a per-destination header cache to avoid SCVMAC/SCMessage
+        creation and encoding overhead on the hot path.
         """
-        dest = SCVMAC(mac_address)
-        logger.debug("SC send unicast: %d bytes to %s", len(npdu), dest)
-        msg = SCMessage(
-            BvlcSCFunction.ENCAPSULATED_NPDU,
-            message_id=0,
-            originating=self._vmac,
-            destination=dest,
-            payload=npdu,
-        )
+        logger.debug("SC send unicast: %d bytes to %s", len(npdu), mac_address.hex())
 
-        # Try direct connection first
-        if self._node_switch and self._node_switch.has_direct(dest):
-            self._schedule_send(self._send_direct_or_hub(dest, msg))
-        else:
-            self._schedule_send(self._send_via_hub(msg))
+        # Try direct connection first (rare path — most traffic goes via hub)
+        if self._node_switch:
+            dest = SCVMAC(mac_address)
+            if self._node_switch.has_direct(dest):
+                msg = SCMessage(
+                    BvlcSCFunction.ENCAPSULATED_NPDU,
+                    message_id=0,
+                    originating=self._vmac,
+                    destination=dest,
+                    payload=npdu,
+                )
+                self._schedule_send(self._send_direct_or_hub(dest, msg))
+                return
+
+        # Fast path: use cached header + payload concatenation.
+        # Header is 16 bytes and constant per (source, dest) pair.
+        header = self._unicast_header_cache.get(mac_address)
+        if header is None:
+            # SCControlFlag: ORIGINATING_VMAC(0x08) | DESTINATION_VMAC(0x04) = 0x0C
+            header = (
+                struct.pack("!BBH", BvlcSCFunction.ENCAPSULATED_NPDU, 0x0C, 0)
+                + self._vmac.address
+                + mac_address
+            )
+            self._unicast_header_cache[mac_address] = header
+        self._schedule_send(self._send_raw_via_hub(header + npdu))
 
     def send_broadcast(self, npdu: bytes) -> None:
-        """Send an NPDU as a broadcast via the hub."""
+        """Send an NPDU as a broadcast via the hub.
+
+        Uses a pre-computed broadcast header to skip encoding overhead.
+        """
         logger.debug("SC send broadcast: %d bytes", len(npdu))
-        msg = SCMessage(
-            BvlcSCFunction.ENCAPSULATED_NPDU,
-            message_id=0,
-            originating=self._vmac,
-            payload=npdu,
-        )
-        self._schedule_send(self._send_via_hub(msg))
+        self._schedule_send(self._send_raw_via_hub(self._broadcast_header + npdu))
 
     def _schedule_send(self, coro: Awaitable[None]) -> None:
         """Schedule an async send and track the task."""
@@ -241,6 +266,13 @@ class SCTransport:
         except ConnectionError:
             logger.debug("Hub not connected, message dropped")
 
+    async def _send_raw_via_hub(self, data: bytes) -> None:
+        """Send pre-encoded bytes through the hub connector."""
+        try:
+            await self._hub_connector.send_raw(data)
+        except ConnectionError:
+            logger.debug("Hub not connected, message dropped")
+
     async def _send_direct_or_hub(self, dest: SCVMAC, msg: SCMessage) -> None:
         """Try direct connection first, fall back to hub."""
         if self._node_switch:
@@ -253,7 +285,7 @@ class SCTransport:
     # Message receive handlers
     # ------------------------------------------------------------------
 
-    async def _on_hub_message(self, msg: SCMessage) -> None:
+    async def _on_hub_message(self, msg: SCMessage, raw: bytes | None = None) -> None:
         """Handle a message received from the hub connection."""
         if msg.function == BvlcSCFunction.ENCAPSULATED_NPDU and msg.payload:
             source_mac = msg.originating.address if msg.originating else b"\x00" * 6
@@ -263,7 +295,7 @@ class SCTransport:
         elif msg.function == BvlcSCFunction.ADDRESS_RESOLUTION_ACK and self._node_switch:
             self._node_switch.handle_address_resolution_ack(msg)
 
-    async def _on_direct_message(self, msg: SCMessage) -> None:
+    async def _on_direct_message(self, msg: SCMessage, raw: bytes | None = None) -> None:
         """Handle a message received from a direct connection."""
         if msg.function == BvlcSCFunction.ENCAPSULATED_NPDU and msg.payload:
             source_mac = msg.originating.address if msg.originating else b"\x00" * 6

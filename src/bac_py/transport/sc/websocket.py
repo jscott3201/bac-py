@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import socket
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
@@ -32,10 +33,36 @@ logger = logging.getLogger(__name__)
 _READ_SIZE = 65536
 
 
+def _set_nodelay(writer: StreamWriter) -> None:
+    """Enable TCP_NODELAY on the underlying socket.
+
+    Disables Nagle's algorithm so small BACnet/SC frames are sent immediately
+    rather than being buffered.  Critical for low-latency request-response
+    patterns where Nagle + delayed-ACK interaction can add 40-200ms stalls.
+    """
+    sock = writer.get_extra_info("socket")
+    if sock is not None:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+
 def _drain_to_send(protocol: ClientProtocol | ServerProtocol) -> bytes:
     """Collect all pending outgoing data from the protocol."""
     chunks = protocol.data_to_send()
     return b"".join(chunks)
+
+
+def _write_pending(protocol: ClientProtocol | ServerProtocol, writer: StreamWriter) -> bool:
+    """Write all pending protocol data directly to the writer.
+
+    Writes each chunk individually to avoid the ``b"".join()`` copy.
+    Returns True if any data was written.
+    """
+    wrote = False
+    for chunk in protocol.data_to_send():
+        if chunk:
+            writer.write(chunk)
+            wrote = True
+    return wrote
 
 
 class SCWebSocket:
@@ -92,6 +119,7 @@ class SCWebSocket:
         else:
             logger.debug("SC WebSocket connecting (TLS) to %s:%d", host, port)
         reader, writer = await asyncio.open_connection(host, port, ssl=use_ssl)
+        _set_nodelay(writer)
 
         ws_uri = parse_uri(uri)
         protocol = ClientProtocol(ws_uri, subprotocols=[Subprotocol(subprotocol)])
@@ -147,6 +175,7 @@ class SCWebSocket:
         :param handshake_timeout: Maximum seconds to wait for the handshake.
         """
         protocol = ServerProtocol(subprotocols=[Subprotocol(subprotocol)])
+        _set_nodelay(writer)
 
         # Read the HTTP upgrade request (with timeout to prevent slow clients)
         async with asyncio.timeout(handshake_timeout):
@@ -185,10 +214,10 @@ class SCWebSocket:
         """Send a binary WebSocket frame."""
         logger.debug("SC WebSocket send: %d bytes", len(data))
         self._protocol.send_binary(data)
-        outgoing = _drain_to_send(self._protocol)
-        if outgoing:
-            self._writer.write(outgoing)
+        if _write_pending(self._protocol, self._writer):
             await self._writer.drain()
+
+    send_raw = send  # Alias — same operation, named for semantic clarity
 
     async def recv(self) -> bytes:
         """Receive the next binary WebSocket message.
@@ -254,9 +283,7 @@ class SCWebSocket:
 
     async def _flush_outgoing(self) -> None:
         """Write any pending protocol output to the transport."""
-        outgoing = _drain_to_send(self._protocol)
-        if outgoing:
-            self._writer.write(outgoing)
+        if _write_pending(self._protocol, self._writer):
             with contextlib.suppress(OSError, ConnectionError):
                 await self._writer.drain()
 

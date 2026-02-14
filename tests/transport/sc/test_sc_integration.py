@@ -198,7 +198,7 @@ async def test_direct_connection_between_nodes():
     )
     received: list[bytes] = []
 
-    async def on_msg(msg):
+    async def on_msg(msg, raw=None):
         if hasattr(msg, "payload"):
             received.append(msg.payload)
 

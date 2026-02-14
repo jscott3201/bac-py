@@ -52,21 +52,25 @@ _MIN_PAYLOAD = 46
 def _encode_frame(dst_mac: bytes, src_mac: bytes, npdu: bytes) -> bytes:
     """Build an IEEE 802.3 frame with 802.2 LLC header for BACnet.
 
+    Uses a single pre-sized bytearray to avoid intermediate allocations
+    and separate padding. Zero-initialized bytes provide implicit padding.
+
     :param dst_mac: 6-byte destination MAC address.
     :param src_mac: 6-byte source MAC address.
     :param npdu: BACnet NPDU payload bytes.
     :returns: Complete 802.3 frame bytes ready for transmission.
     """
-    payload = LLC_HEADER + npdu
-    # Length field in 802.3 is the LLC + data length (not including padding)
-    length = len(payload)
-    header = dst_mac + src_mac + struct.pack("!H", length)
-    frame = header + payload
-    # Pad to minimum Ethernet frame size (64 bytes - 4 CRC = 60 bytes minimum)
+    llc_data_len = LLC_HEADER_SIZE + len(npdu)
+    # Ensure minimum frame size (60 bytes); bytearray zero-fills padding
     min_frame_size = ETHERNET_HEADER_SIZE + _MIN_PAYLOAD
-    if len(frame) < min_frame_size:
-        frame += b"\x00" * (min_frame_size - len(frame))
-    return frame
+    frame_size = max(ETHERNET_HEADER_SIZE + llc_data_len, min_frame_size)
+    buf = bytearray(frame_size)
+    buf[0:6] = dst_mac
+    buf[6:12] = src_mac
+    struct.pack_into("!H", buf, 12, llc_data_len)
+    buf[14:17] = LLC_HEADER
+    buf[17 : 17 + len(npdu)] = npdu
+    return bytes(buf)
 
 
 def _decode_frame(raw: bytes) -> tuple[bytes, bytes] | None:
@@ -92,13 +96,9 @@ def _decode_frame(raw: bytes) -> tuple[bytes, bytes] | None:
     if length > 1500:
         return None
 
-    # Check LLC header
+    # Check LLC header (single slice comparison instead of 3 individual checks)
     llc_offset = ETHERNET_HEADER_SIZE
-    if raw[llc_offset] != LLC_DSAP:
-        return None
-    if raw[llc_offset + 1] != LLC_SSAP:
-        return None
-    if raw[llc_offset + 2] != LLC_CONTROL:
+    if raw[llc_offset : llc_offset + LLC_HEADER_SIZE] != LLC_HEADER:
         return None
 
     # Extract NPDU (after LLC header, using length field to determine size)
@@ -247,7 +247,7 @@ class EthernetTransport:
         logger.info(
             "EthernetTransport started on %s (MAC %s)",
             self._interface,
-            ":".join(f"{b:02x}" for b in self._local_mac_bytes),
+            self._local_mac_bytes.hex(":"),
         )
 
     async def stop(self) -> None:
@@ -299,9 +299,7 @@ class EthernetTransport:
         if len(npdu) > MAX_NPDU_LENGTH:
             msg = f"NPDU too large: {len(npdu)} bytes exceeds maximum {MAX_NPDU_LENGTH}"
             raise ValueError(msg)
-        logger.debug(
-            "ethernet send %d bytes to %s", len(npdu), ":".join(f"{b:02x}" for b in mac_address)
-        )
+        logger.debug("ethernet send %d bytes to %s", len(npdu), mac_address.hex(":"))
         frame = _encode_frame(mac_address, self._local_mac_bytes, npdu)
         self._send_frame(frame)
 
@@ -390,9 +388,7 @@ class EthernetTransport:
             if src_mac == self._local_mac_bytes:
                 return
 
-            logger.debug(
-                "ethernet recv %d bytes from %s", len(npdu), ":".join(f"{b:02x}" for b in src_mac)
-            )
+            logger.debug("ethernet recv %d bytes from %s", len(npdu), src_mac.hex(":"))
 
             if self._receive_callback is not None:
                 try:
@@ -400,7 +396,7 @@ class EthernetTransport:
                 except Exception:
                     logger.warning(
                         "Callback error processing frame from %s",
-                        ":".join(f"{b:02x}" for b in src_mac),
+                        src_mac.hex(":"),
                         exc_info=True,
                     )
 

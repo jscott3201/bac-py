@@ -77,7 +77,7 @@ class SCNodeSwitch:
         self._server_ssl_ctx = build_server_ssl_context(self._config.tls_config)
 
         # Callbacks
-        self.on_message: Callable[[SCMessage], Awaitable[None] | None] | None = None
+        self.on_message: Callable[[SCMessage, bytes | None], Awaitable[None] | None] | None = None
 
     @property
     def connections(self) -> dict[SCVMAC, SCConnection]:

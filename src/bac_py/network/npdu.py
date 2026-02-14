@@ -9,6 +9,7 @@ from bac_py.network.address import BACnetAddress
 from bac_py.types.enums import NetworkPriority
 
 logger = logging.getLogger(__name__)
+_DEBUG = logging.DEBUG
 
 BACNET_PROTOCOL_VERSION = 1
 
@@ -68,7 +69,6 @@ def encode_npdu(npdu: NPDU) -> bytes:
     :raises ValueError: If source address fields are invalid per the
         BACnet specification (e.g. SNET is 0xFFFF or SLEN is 0).
     """
-    # Pre-allocate with estimated capacity: 2 header + up to 18 addr + payload
     buf = bytearray()
     buf.append(BACNET_PROTOCOL_VERSION)
 
@@ -92,7 +92,8 @@ def encode_npdu(npdu: NPDU) -> bytes:
             raise ValueError(msg)
         dnet = npdu.destination.network
         dadr = npdu.destination.mac_address
-        logger.debug("encode_npdu: dnet=%d dadr=%s", dnet, dadr.hex() if dadr else "(empty)")
+        if logger.isEnabledFor(_DEBUG):
+            logger.debug("encode_npdu: dnet=%d dadr=%s", dnet, dadr.hex() if dadr else "(empty)")
         buf.extend(dnet.to_bytes(2, "big"))
         dlen = len(dadr)
         buf.append(dlen)
@@ -119,7 +120,8 @@ def encode_npdu(npdu: NPDU) -> bytes:
             msg = "SLEN cannot be 0 when source is present"
             logger.warning("encode_npdu: %s", msg)
             raise ValueError(msg)
-        logger.debug("encode_npdu: snet=%d sadr=%s", snet, npdu.source.mac_address.hex())
+        if logger.isEnabledFor(_DEBUG):
+            logger.debug("encode_npdu: snet=%d sadr=%s", snet, npdu.source.mac_address.hex())
         buf.extend(snet.to_bytes(2, "big"))
         buf.append(slen)
         buf.extend(npdu.source.mac_address)
@@ -205,7 +207,8 @@ def decode_npdu(data: memoryview | bytes) -> NPDU:
         dadr = bytes(data[offset : offset + dlen])
         offset += dlen
         destination = BACnetAddress(network=dnet, mac_address=dadr)
-        logger.debug("decode_npdu: dnet=%d dadr=%s", dnet, dadr.hex() if dadr else "(empty)")
+        if logger.isEnabledFor(_DEBUG):
+            logger.debug("decode_npdu: dnet=%d dadr=%s", dnet, dadr.hex() if dadr else "(empty)")
 
     if has_source:
         if offset + 3 > len(data):
@@ -237,7 +240,8 @@ def decode_npdu(data: memoryview | bytes) -> NPDU:
         sadr = bytes(data[offset : offset + slen])
         offset += slen
         source = BACnetAddress(network=snet, mac_address=sadr)
-        logger.debug("decode_npdu: snet=%d sadr=%s", snet, sadr.hex())
+        if logger.isEnabledFor(_DEBUG):
+            logger.debug("decode_npdu: snet=%d sadr=%s", snet, sadr.hex())
 
     if has_destination:
         if offset >= len(data):

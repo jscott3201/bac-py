@@ -186,9 +186,7 @@ def spawn_workers(
 
     for wid in range(unicast_count):
         tasks.append(
-            asyncio.create_task(
-                unicast_worker(wid, transport, target_vmacs, pending, stats, stop)
-            )
+            asyncio.create_task(unicast_worker(wid, transport, target_vmacs, pending, stats, stop))
         )
     for wid in range(broadcast_count):
         tasks.append(asyncio.create_task(broadcast_worker(wid, transport, stats, stop)))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 
 from bac_py.network.address import BIPAddress
@@ -9,6 +10,7 @@ from bac_py.types.enums import BvlcFunction
 
 BVLC_TYPE_BACNET_IP = 0x81
 BVLL_HEADER_LENGTH = 4  # Type(1) + Function(1) + Length(2)
+_FORWARDED_ADDR_LENGTH = 6  # 4-byte IP + 2-byte port
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +29,8 @@ def encode_bvll(
 ) -> bytes:
     """Encode a complete BVLL message.
 
+    Uses a single pre-sized bytearray to avoid intermediate allocations.
+
     :param function: BVLC function code.
     :param payload: NPDU payload bytes.
     :param originating_address: Required for Forwarded-NPDU.
@@ -36,13 +40,22 @@ def encode_bvll(
         if originating_address is None:
             msg = "Forwarded-NPDU requires originating_address"
             raise ValueError(msg)
-        content = originating_address.encode() + payload
-    else:
-        content = payload
+        total = BVLL_HEADER_LENGTH + _FORWARDED_ADDR_LENGTH + len(payload)
+        buf = bytearray(total)
+        buf[0] = BVLC_TYPE_BACNET_IP
+        buf[1] = function
+        struct.pack_into("!H", buf, 2, total)
+        buf[4:10] = originating_address.encode()
+        buf[10:] = payload
+        return bytes(buf)
 
-    length = BVLL_HEADER_LENGTH + len(content)
-    header = bytes([BVLC_TYPE_BACNET_IP, function, length >> 8, length & 0xFF])
-    return header + content
+    total = BVLL_HEADER_LENGTH + len(payload)
+    buf = bytearray(total)
+    buf[0] = BVLC_TYPE_BACNET_IP
+    buf[1] = function
+    struct.pack_into("!H", buf, 2, total)
+    buf[4:] = payload
+    return bytes(buf)
 
 
 def decode_bvll(data: memoryview | bytes) -> BvllMessage:

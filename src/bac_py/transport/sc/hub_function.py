@@ -147,7 +147,11 @@ class SCHubFunction:
 
         conn.on_connected = lambda: self._on_node_connected(conn)
         conn.on_disconnected = lambda: self._on_node_disconnected(conn)
-        conn.on_message = lambda msg: self._on_node_message(conn, msg)
+
+        async def _route(msg: SCMessage, raw: bytes | None = None) -> None:
+            await self._on_node_message(conn, msg, raw)
+
+        conn.on_message = _route
 
         task = asyncio.ensure_future(conn.accept(ws, vmac_checker=self._check_vmac))
         self._client_tasks.add(task)
@@ -195,11 +199,16 @@ class SCHubFunction:
             del self._uuid_map[conn.peer_uuid]
         logger.info("SC node disconnected: VMAC=%s", conn.peer_vmac)
 
-    async def _on_node_message(self, source: SCConnection, msg: SCMessage) -> None:
+    async def _on_node_message(
+        self, source: SCConnection, msg: SCMessage, raw: bytes | None = None
+    ) -> None:
         """Route a message received from a connected node.
 
         - Unicast (destination set): forward to matching VMAC connection.
         - Broadcast (no destination): replicate to all except source.
+
+        When *raw* bytes are available (from the receive loop), they are
+        forwarded directly to avoid re-encoding the identical message.
         """
         if source.peer_vmac is None:
             return
@@ -217,26 +226,42 @@ class SCHubFunction:
 
         if msg.destination and not msg.destination.is_broadcast:
             logger.debug("SC hub routing unicast from %s to %s", source.peer_vmac, msg.destination)
-            await self._unicast(msg, source.peer_vmac)
+            await self._unicast(msg, source.peer_vmac, raw)
         else:
             logger.debug("SC hub routing broadcast from %s", source.peer_vmac)
-            await self._broadcast(msg, source.peer_vmac)
+            await self._broadcast(msg, source.peer_vmac, raw)
 
-    async def _unicast(self, msg: SCMessage, exclude: SCVMAC) -> None:
-        """Forward unicast message to destination VMAC."""
+    async def _unicast(self, msg: SCMessage, exclude: SCVMAC, raw: bytes | None = None) -> None:
+        """Forward unicast message to destination VMAC.
+
+        Uses pre-encoded *raw* bytes when available to skip re-encoding.
+        """
         if msg.destination is None:
             return
         dest_conn = self._connections.get(msg.destination)
         if dest_conn and dest_conn.state == SCConnectionState.CONNECTED:
             with contextlib.suppress(Exception):
-                await dest_conn.send_message(msg)
+                if raw is not None:
+                    await dest_conn.send_raw(raw)
+                else:
+                    await dest_conn.send_message(msg)
 
-    async def _broadcast(self, msg: SCMessage, exclude: SCVMAC) -> None:
-        """Send message to all connected nodes except the source."""
-        for vmac, conn in list(self._connections.items()):
-            if vmac == exclude:
-                continue
-            if conn.state != SCConnectionState.CONNECTED:
-                continue
+    async def _broadcast(self, msg: SCMessage, exclude: SCVMAC, raw: bytes | None = None) -> None:
+        """Send message to all connected nodes except the source.
+
+        Uses pre-encoded *raw* bytes when available to skip re-encoding.
+        """
+        encoded = raw if raw is not None else msg.encode()
+        targets = [
+            conn
+            for vmac, conn in self._connections.items()
+            if vmac != exclude and conn.state == SCConnectionState.CONNECTED
+        ]
+        if len(targets) == 1:
             with contextlib.suppress(Exception):
-                await conn.send_message(msg)
+                await targets[0].send_raw(encoded)
+        elif targets:
+            await asyncio.gather(
+                *(conn.send_raw(encoded) for conn in targets),
+                return_exceptions=True,
+            )

@@ -4,8 +4,9 @@ Benchmarks
 ==========
 
 bac-py includes Docker-based stress tests that measure sustained throughput and
-latency under realistic BACnet workloads. Two benchmark scenarios exercise the
-core protocol paths: BACnet/IP (UDP) and BACnet Secure Connect (WebSocket).
+latency under realistic BACnet workloads. Four benchmark scenarios exercise the
+core protocol paths: BACnet/IP (UDP), BACnet Secure Connect (WebSocket),
+cross-network routing, and BBMD foreign-device forwarding.
 
 Both tests enforce a **< 0.5% error rate** threshold over a 60-second sustained
 measurement window, preceded by a 15-second warmup phase.
@@ -186,13 +187,64 @@ for echo correlation. The test verifies that echoed payloads match.
    * - Metric
      - Value
    * - Sustained throughput
-     - ~900 msg/s
+     - ~1,100 msg/s
    * - Error rate
      - < 0.5%
    * - Unicast latency (p50 / p95 / p99)
-     - 0.3ms / 0.3ms / 0.6ms
+     - 0.2ms / 0.3ms / 0.4ms
    * - Duration
      - 60s sustained + 15s warmup
+
+
+.. _router-stress-benchmark:
+
+Router Stress Test
+------------------
+
+The router stress test exercises cross-network routing performance by sending
+standard BACnet service traffic through a BACnet router.  The test client is on
+BACnet network 1 and the stress server (with 40 objects) is on BACnet network 2,
+with all requests routed through the router.
+
+**Architecture:**
+
+- **Router** -- Bridges network 1 (172.30.1.0/24) and network 2 (172.30.2.0/24)
+- **Stress Server** -- Standard stress server (40 objects) on network 2
+- **Test Client** -- On network 1, discovers server via router, runs mixed workloads
+
+**Worker mix (7 total):**
+
+Same as the BIP stress test (2 readers, 1 writer, 1 RPM, 1 WPM, 1 object-list)
+plus a route health-check worker that periodically verifies the router is
+advertising the remote network via Who-Is-Router-To-Network.
+
+.. note::
+
+   The router stress test requires the BACnet router to properly forward
+   broadcast discovery messages between Docker bridge networks at the application
+   layer.  This is distinct from IP-level broadcast forwarding.
+
+
+.. _bbmd-stress-benchmark:
+
+BBMD Stress Test
+----------------
+
+The BBMD stress test exercises foreign-device management alongside standard
+BACnet service traffic.  Test clients register as foreign devices with a BBMD
+and perform concurrent reads, writes, RPM/WPM, plus BBMD-specific operations.
+
+**Architecture:**
+
+- **BBMD** -- Manages foreign device registrations and broadcast distribution
+- **Stress Server** -- Standard stress server (40 objects) on the same network
+- **Test Client** -- Registered as foreign device, runs mixed workloads + FDT/BDT reads
+
+**Worker mix (8 total):**
+
+Same as the BIP stress test (2 readers, 1 writer, 1 RPM, 1 WPM, 1 object-list)
+plus 1 FDT read worker and 1 BDT read worker that periodically query the BBMD's
+Foreign Device Table and Broadcast Distribution Table.
 
 
 .. _running-benchmarks:
@@ -216,6 +268,18 @@ invocations:
 
    # BACnet/SC stress runner (standalone, JSON report to stdout)
    make docker-sc-stress
+
+   # Router stress test (pytest, pass/fail)
+   make docker-test-router-stress
+
+   # Router stress runner (standalone, JSON report to stdout)
+   make docker-router-stress
+
+   # BBMD stress test (pytest, pass/fail)
+   make docker-test-bbmd-stress
+
+   # BBMD stress runner (standalone, JSON report to stdout)
+   make docker-bbmd-stress
 
    # Run all Docker integration tests including stress
    make docker-test

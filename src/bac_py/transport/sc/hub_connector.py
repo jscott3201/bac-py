@@ -77,7 +77,7 @@ class SCHubConnector:
         self._ssl_ctx = build_client_ssl_context(self._config.tls_config)
 
         # Callbacks
-        self.on_message: Callable[[SCMessage], Awaitable[None] | None] | None = None
+        self.on_message: Callable[[SCMessage, bytes | None], Awaitable[None] | None] | None = None
         self.on_status_change: Callable[[SCHubConnectionStatus], None] | None = None
 
     @property
@@ -138,6 +138,16 @@ class SCHubConnector:
             err = "Hub connector not connected"
             raise ConnectionError(err)
         await self._connection.send_message(msg)
+
+    async def send_raw(self, data: bytes) -> None:
+        """Send pre-encoded bytes to the hub.
+
+        :raises ConnectionError: If not connected.
+        """
+        if not self.is_connected or self._connection is None:
+            err = "Hub connector not connected"
+            raise ConnectionError(err)
+        await self._connection.send_raw(data)
 
     async def wait_connected(self, timeout: float | None = None) -> bool:
         """Wait until the connector is connected to a hub.
