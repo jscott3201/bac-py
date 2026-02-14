@@ -12,6 +12,10 @@ from dataclasses import dataclass
 
 from bac_py.types.enums import NetworkMessageType, RejectMessageReason
 
+# Maximum number of 2-byte network numbers decoded from a single message.
+# BACnet MTU constrains this to ~750 anyway; 512 is conservative.
+_MAX_NETWORK_LIST: int = 512
+
 # ---------------------------------------------------------------------------
 # Message dataclasses
 # ---------------------------------------------------------------------------
@@ -333,6 +337,10 @@ def _decode_network_list(data: bytes) -> tuple[int, ...]:
     """Decode a sequence of 2-byte big-endian network numbers."""
     if len(data) % 2 != 0:
         msg = "Network list data length must be a multiple of 2"
+        raise ValueError(msg)
+    count = len(data) // 2
+    if count > _MAX_NETWORK_LIST:
+        msg = f"Network list too large: {count} entries (max {_MAX_NETWORK_LIST})"
         raise ValueError(msg)
     networks = []
     for i in range(0, len(data), 2):

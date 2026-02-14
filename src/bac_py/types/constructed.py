@@ -179,19 +179,25 @@ class BACnetTimeStamp:
 
         if self.choice == 0:
             # [0] Time -- 4 bytes: hour, minute, second, hundredth
-            assert isinstance(self.value, BACnetTime)
+            if not isinstance(self.value, BACnetTime):
+                msg = f"Expected BACnetTime for choice 0, got {type(self.value).__name__}"
+                raise TypeError(msg)
             from bac_py.encoding.primitives import encode_time
 
             return encode_context_tagged(0, encode_time(self.value))
 
         if self.choice == 1:
             # [1] Unsigned sequence number
-            assert isinstance(self.value, int)
+            if not isinstance(self.value, int):
+                msg = f"Expected int for choice 1, got {type(self.value).__name__}"
+                raise TypeError(msg)
             return encode_context_tagged(1, encode_unsigned(self.value))
 
         if self.choice == 2:
             # [2] BACnetDateTime -- constructed (opening/closing tags)
-            assert isinstance(self.value, BACnetDateTime)
+            if not isinstance(self.value, BACnetDateTime):
+                msg = f"Expected BACnetDateTime for choice 2, got {type(self.value).__name__}"
+                raise TypeError(msg)
             from bac_py.encoding.primitives import encode_date, encode_time
 
             return b"".join(
@@ -407,10 +413,14 @@ class BACnetCalendarEntry:
         from bac_py.encoding.tags import encode_closing_tag, encode_opening_tag
 
         if self.choice == 0:
-            assert isinstance(self.value, BACnetDate)
+            if not isinstance(self.value, BACnetDate):
+                msg = f"Expected BACnetDate for choice 0, got {type(self.value).__name__}"
+                raise TypeError(msg)
             return encode_context_date(0, self.value)
         if self.choice == 1:
-            assert isinstance(self.value, BACnetDateRange)
+            if not isinstance(self.value, BACnetDateRange):
+                msg = f"Expected BACnetDateRange for choice 1, got {type(self.value).__name__}"
+                raise TypeError(msg)
             return b"".join(
                 [
                     encode_opening_tag(1),
@@ -419,7 +429,9 @@ class BACnetCalendarEntry:
                     encode_closing_tag(1),
                 ]
             )
-        assert isinstance(self.value, BACnetWeekNDay)
+        if not isinstance(self.value, BACnetWeekNDay):
+            msg = f"Expected BACnetWeekNDay for choice 2, got {type(self.value).__name__}"
+            raise TypeError(msg)
         return encode_context_octet_string(
             2, bytes([self.value.month, self.value.week_of_month, self.value.day_of_week])
         )
@@ -1512,7 +1524,9 @@ class BACnetValueSource:
 
         if self.choice == 1:
             # [1] BACnetDeviceObjectReference -- constructed
-            assert isinstance(self.value, BACnetDeviceObjectReference)
+            if not isinstance(self.value, BACnetDeviceObjectReference):
+                msg = f"Expected BACnetDeviceObjectReference for choice 1, got {type(self.value).__name__}"
+                raise TypeError(msg)
             return b"".join(
                 [
                     encode_opening_tag(1),
@@ -1523,7 +1537,9 @@ class BACnetValueSource:
 
         if self.choice == 2:
             # [2] BACnetAddress -- as octet string
-            assert isinstance(self.value, bytes)
+            if not isinstance(self.value, bytes):
+                msg = f"Expected bytes for choice 2, got {type(self.value).__name__}"
+                raise TypeError(msg)
             return encode_context_octet_string(2, self.value)
 
         msg = f"Invalid BACnetValueSource choice: {self.choice}"

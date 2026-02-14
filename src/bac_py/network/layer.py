@@ -54,6 +54,10 @@ class RouterCacheEntry:
 # should eventually be re-discovered via Who-Is-Router queries.
 _DEFAULT_CACHE_TTL: float = 300.0
 
+# Maximum number of entries in the router cache.  A misbehaving network
+# could otherwise grow this unboundedly via I-Am-Router-To-Network floods.
+_MAX_ROUTER_CACHE: int = 1024
+
 
 class NetworkLayer:
     """Network layer manager (non-router mode).
@@ -276,7 +280,10 @@ class NetworkLayer:
             logger.debug(
                 "Dispatching APDU (%d bytes) to application from %s", len(npdu.apdu), src_addr
             )
-            self._receive_callback(npdu.apdu, src_addr)
+            try:
+                self._receive_callback(npdu.apdu, src_addr)
+            except Exception:
+                logger.warning("Error in receive callback", exc_info=True)
 
     # ------------------------------------------------------------------
     # Network message handling (non-router)
@@ -329,6 +336,29 @@ class NetworkLayer:
             except Exception:
                 logger.warning("Error in network message listener", exc_info=True)
 
+    def _evict_stale_cache_entries(self) -> None:
+        """Remove expired entries from the router cache.
+
+        Called before inserting new entries when the cache is at capacity.
+        """
+        now = time.monotonic()
+        stale = [k for k, v in self._router_cache.items() if now - v.last_seen > self._cache_ttl]
+        for k in stale:
+            del self._router_cache[k]
+
+    def _ensure_cache_capacity(self) -> None:
+        """Ensure the router cache has room for at least one new entry.
+
+        Evicts stale entries first.  If still at capacity, evicts the
+        oldest entry by ``last_seen`` timestamp.
+        """
+        if len(self._router_cache) < _MAX_ROUTER_CACHE:
+            return
+        self._evict_stale_cache_entries()
+        if len(self._router_cache) >= _MAX_ROUTER_CACHE:
+            oldest_key = min(self._router_cache, key=lambda k: self._router_cache[k].last_seen)
+            del self._router_cache[oldest_key]
+
     def _handle_i_am_router(
         self,
         msg: IAmRouterToNetwork,
@@ -344,6 +374,8 @@ class NetworkLayer:
         """
         now = time.monotonic()
         for dnet in msg.networks:
+            if dnet not in self._router_cache:
+                self._ensure_cache_capacity()
             self._router_cache[dnet] = RouterCacheEntry(
                 network=dnet,
                 router_mac=source_mac,
@@ -379,6 +411,8 @@ class NetworkLayer:
                 existing.last_seen = now
                 return
         # No entry or stale — learn from source
+        if snet not in self._router_cache:
+            self._ensure_cache_capacity()
         self._router_cache[snet] = RouterCacheEntry(
             network=snet,
             router_mac=source_mac,

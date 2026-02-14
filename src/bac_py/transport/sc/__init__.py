@@ -291,7 +291,10 @@ class SCTransport:
             source_mac = msg.originating.address if msg.originating else b"\x00" * 6
             logger.debug("SC recv from hub: %d bytes from %s", len(msg.payload), msg.originating)
             if self._receive_callback:
-                self._receive_callback(msg.payload, source_mac)
+                try:
+                    self._receive_callback(msg.payload, source_mac)
+                except Exception:
+                    logger.warning("Error in receive callback", exc_info=True)
         elif msg.function == BvlcSCFunction.ADDRESS_RESOLUTION_ACK and self._node_switch:
             self._node_switch.handle_address_resolution_ack(msg)
 
@@ -303,7 +306,10 @@ class SCTransport:
                 "SC recv from direct: %d bytes from %s", len(msg.payload), msg.originating
             )
             if self._receive_callback:
-                self._receive_callback(msg.payload, source_mac)
+                try:
+                    self._receive_callback(msg.payload, source_mac)
+                except Exception:
+                    logger.warning("Error in receive callback", exc_info=True)
 
 
 __all__ = [

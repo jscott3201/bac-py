@@ -437,7 +437,10 @@ class BIP6Transport:
         Distribute-Broadcast-NPDU needs to be delivered locally.
         """
         if self._receive_callback is not None:
-            self._receive_callback(npdu, source_vmac)
+            try:
+                self._receive_callback(npdu, source_vmac)
+            except Exception:
+                logger.warning("Error in receive callback", exc_info=True)
 
     # ------------------------------------------------------------------
     # Address resolution
@@ -591,15 +594,24 @@ class BIP6Transport:
         match msg.function:
             case Bvlc6Function.ORIGINAL_UNICAST_NPDU:
                 if self._receive_callback and msg.source_vmac:
-                    self._receive_callback(msg.data, msg.source_vmac)
+                    try:
+                        self._receive_callback(msg.data, msg.source_vmac)
+                    except Exception:
+                        logger.warning("Error in receive callback", exc_info=True)
 
             case Bvlc6Function.ORIGINAL_BROADCAST_NPDU:
                 if self._receive_callback and msg.source_vmac:
-                    self._receive_callback(msg.data, msg.source_vmac)
+                    try:
+                        self._receive_callback(msg.data, msg.source_vmac)
+                    except Exception:
+                        logger.warning("Error in receive callback", exc_info=True)
 
             case Bvlc6Function.FORWARDED_NPDU:
                 if self._receive_callback and msg.source_vmac:
-                    self._receive_callback(msg.data, msg.source_vmac)
+                    try:
+                        self._receive_callback(msg.data, msg.source_vmac)
+                    except Exception:
+                        logger.warning("Error in receive callback", exc_info=True)
 
             case Bvlc6Function.ADDRESS_RESOLUTION:
                 if msg.source_vmac:

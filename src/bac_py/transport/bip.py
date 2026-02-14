@@ -607,7 +607,10 @@ class BIPTransport:
             )
             return
         if self._receive_callback is not None:
-            self._receive_callback(npdu, source.encode())
+            try:
+                self._receive_callback(npdu, source.encode())
+            except Exception:
+                logger.warning("Error in receive callback", exc_info=True)
 
     def _on_connection_lost(self, exc: Exception | None) -> None:
         """Handle UDP connection loss."""
@@ -680,7 +683,10 @@ class BIPTransport:
         match msg.function:
             case BvlcFunction.ORIGINAL_UNICAST_NPDU:
                 if self._receive_callback:
-                    self._receive_callback(msg.data, source.encode())
+                    try:
+                        self._receive_callback(msg.data, source.encode())
+                    except Exception:
+                        logger.warning("Error in receive callback", exc_info=True)
             case BvlcFunction.ORIGINAL_BROADCAST_NPDU:
                 # F7: Drop confirmed requests received via broadcast.
                 if _is_confirmed_request_npdu(msg.data):
@@ -691,7 +697,10 @@ class BIPTransport:
                     )
                     return
                 if self._receive_callback:
-                    self._receive_callback(msg.data, source.encode())
+                    try:
+                        self._receive_callback(msg.data, source.encode())
+                    except Exception:
+                        logger.warning("Error in receive callback", exc_info=True)
             case BvlcFunction.FORWARDED_NPDU:
                 # F7: Drop confirmed requests received via broadcast.
                 if _is_confirmed_request_npdu(msg.data):
@@ -701,7 +710,10 @@ class BIPTransport:
                     )
                     return
                 if self._receive_callback and msg.originating_address:
-                    self._receive_callback(msg.data, msg.originating_address.encode())
+                    try:
+                        self._receive_callback(msg.data, msg.originating_address.encode())
+                    except Exception:
+                        logger.warning("Error in receive callback", exc_info=True)
             case BvlcFunction.BVLC_RESULT:
                 # F5: Route to pending client request futures first.
                 if not self._resolve_pending_bvlc(msg.function, msg.data, source):

@@ -537,7 +537,10 @@ class NetworkRouter:
             logger.warning("Dropped malformed NPDU on port %d", port_id)
             return
 
-        self._process_npdu(port_id, npdu, source_mac)
+        try:
+            self._process_npdu(port_id, npdu, source_mac)
+        except Exception:
+            logger.warning("Error processing NPDU on port %d", port_id, exc_info=True)
 
     def _process_npdu(self, port_id: int, npdu: NPDU, source_mac: bytes) -> None:
         """Route an NPDU per the forwarding flowchart (Figure 6-12).
@@ -592,7 +595,10 @@ class NetworkRouter:
             network = port.network_number if port is not None else None
             src_addr = BACnetAddress(network=network, mac_address=source_mac)
 
-        self._application_callback(npdu.apdu, src_addr)
+        try:
+            self._application_callback(npdu.apdu, src_addr)
+        except Exception:
+            logger.warning("Error in application callback", exc_info=True)
 
     # -- Forwarding ---------------------------------------------------------
 

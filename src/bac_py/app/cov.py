@@ -119,8 +119,16 @@ class COVManager:
     - Any object: change in Status_Flags
     """
 
-    def __init__(self, app: BACnetApplication) -> None:
+    def __init__(
+        self,
+        app: BACnetApplication,
+        *,
+        max_subscriptions: int = 1000,
+        max_property_subscriptions: int = 1000,
+    ) -> None:
         self._app = app
+        self._max_subscriptions = max_subscriptions
+        self._max_property_subscriptions = max_property_subscriptions
         self._subscriptions: dict[
             tuple[Any, int, Any],  # (subscriber, process_id, object_id)
             COVSubscription,
@@ -161,6 +169,10 @@ class COVManager:
         existing = self._subscriptions.get(key)
         if existing and existing.expiry_handle:
             existing.expiry_handle.cancel()
+
+        # Reject if at capacity and this is a new subscription
+        if existing is None and len(self._subscriptions) >= self._max_subscriptions:
+            raise BACnetError(ErrorClass.RESOURCES, ErrorCode.NO_SPACE_TO_ADD_LIST_ELEMENT)
 
         # Capture initial values for COV comparison
         present_value = self._read_present_value(obj)
@@ -324,6 +336,13 @@ class COVManager:
         if existing and existing.expiry_handle:
             existing.expiry_handle.cancel()
 
+        # Reject if at capacity and this is a new subscription
+        if (
+            existing is None
+            and len(self._property_subscriptions) >= self._max_property_subscriptions
+        ):
+            raise BACnetError(ErrorClass.RESOURCES, ErrorCode.NO_SPACE_TO_ADD_LIST_ELEMENT)
+
         # Capture initial value of the specific property
         initial_value = self._read_property_value(obj, prop_id, array_index)
 
@@ -392,6 +411,13 @@ class COVManager:
                 existing = self._property_subscriptions.get(key)
                 if existing and existing.expiry_handle:
                     existing.expiry_handle.cancel()
+
+                # Reject if at capacity and this is a new subscription
+                if (
+                    existing is None
+                    and len(self._property_subscriptions) >= self._max_property_subscriptions
+                ):
+                    raise BACnetError(ErrorClass.RESOURCES, ErrorCode.NO_SPACE_TO_ADD_LIST_ELEMENT)
 
                 # Capture initial value of the specific property
                 initial_value = self._read_property_value(obj, prop_id, array_index)

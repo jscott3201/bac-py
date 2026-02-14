@@ -14,6 +14,9 @@ from typing import Any
 from bac_py.types.constructed import BACnetDateTime, BACnetLogRecord, StatusFlags
 from bac_py.types.primitives import BACnetDate, BACnetTime
 
+# Maximum number of records that can be imported from JSON or CSV.
+_MAX_IMPORT_RECORDS: int = 100_000
+
 
 def _datetime_to_iso(dt: BACnetDateTime) -> str:
     """Convert a BACnetDateTime to an ISO 8601 string.
@@ -165,6 +168,9 @@ class TimeSeriesImporter:
         raw_records = payload.get("records", [])
         if not isinstance(raw_records, list):
             raise ValueError("Expected 'records' to be an array")
+        if len(raw_records) > _MAX_IMPORT_RECORDS:
+            msg = f"Too many records: {len(raw_records)} (max {_MAX_IMPORT_RECORDS})"
+            raise ValueError(msg)
 
         records = [BACnetLogRecord.from_dict(r) for r in raw_records]
         return records, metadata
@@ -189,6 +195,9 @@ class TimeSeriesImporter:
         records: list[BACnetLogRecord] = []
 
         for row_num, row in enumerate(reader, start=2):
+            if len(records) >= _MAX_IMPORT_RECORDS:
+                msg = f"Too many records: exceeded {_MAX_IMPORT_RECORDS}"
+                raise ValueError(msg)
             ts_str = row.get("timestamp", "")
             if not ts_str:
                 raise ValueError(f"Row {row_num}: missing timestamp")

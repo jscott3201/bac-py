@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-02-14
+
+### Fixed
+
+- **Receive callback crash protection**: Wrapped 13 `_receive_callback` and
+  application callback call sites in `try/except` across `bip.py`, `bip6.py`,
+  `sc/__init__.py`, `router.py`, and `layer.py`. An exception from the callback
+  no longer crashes the transport's datagram handler or router receive loop.
+  The ethernet transport already had this pattern; now all transports are
+  consistent.
+- **Assert → TypeError in encode paths**: Replaced 8 `assert isinstance()`
+  calls in `BACnetTimeStamp.encode()`, `BACnetCalendarEntry.encode()`, and
+  `BACnetValueSource.encode()` with explicit `TypeError` raises. These
+  validations now work correctly under `python -O` (optimized builds).
+- **Router cache cap**: `NetworkLayer._router_cache` is now capped at 1024
+  entries. When full, stale entries are evicted first, then the oldest entry.
+  Prevents unbounded memory growth from I-Am-Router-To-Network floods.
+- **Network list decode cap**: `_decode_network_list()` now rejects messages
+  containing more than 512 network numbers, preventing allocation of
+  oversized tuples from malformed packets.
+- **COV subscription cap**: `COVManager` now accepts `max_subscriptions` and
+  `max_property_subscriptions` parameters (default 1000). New subscriptions
+  beyond the limit are rejected with `BACnetError(RESOURCES)`.
+- **Time series import cap**: `TimeSeriesImporter.from_json()` and
+  `from_csv()` now reject imports exceeding 100,000 records with a
+  `ValueError`, preventing memory exhaustion from oversized files.
+
 ## [1.4.1] - 2026-02-14
 
 ### Changed
