@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.9] - 2026-02-14
+
+### Added
+
+- **Interactive CLI example**: New `examples/interactive_cli.py` providing a menu-driven
+  interactive CLI for testing Client API features against a real BACnet device. Supports
+  read/write (single and multiple), device discovery (Who-Is, Who-Has, object list), COV
+  subscriptions with live notifications, and time synchronization. Uses non-blocking input
+  to keep the event loop responsive for COV callbacks between actions.
+
 ## [1.4.8] - 2026-02-14
 
 ### Added

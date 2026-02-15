@@ -2,7 +2,7 @@
 
 Asynchronous BACnet/IP protocol library for Python 3.13+, implementing ASHRAE Standard 135-2020. Zero required runtime dependencies, built on native `asyncio`.
 
-[Documentation](https://bac-py.readthedocs.io) | [Getting Started](https://bac-py.readthedocs.io/en/latest/getting-started.html) | [API Reference](https://bac-py.readthedocs.io/en/latest/api/app/client.html) | [Changelog](https://bac-py.readthedocs.io/en/latest/changelog.html)
+[Documentation](https://jscott3201.github.io/bac-py/) | [Getting Started](https://jscott3201.github.io/bac-py/getting-started.html) | [API Reference](https://jscott3201.github.io/bac-py/api/app/index.html) | [Changelog](https://jscott3201.github.io/bac-py/changelog.html)
 
 ```python
 from bac_py import Client
@@ -38,7 +38,7 @@ async with Client(instance_number=999) as client:
 | **Convenience API** | String-based addressing (`"ai,1"`, `"pv"`), smart type coercion, auto-discovery |
 | **Serialization** | `to_dict()`/`from_dict()` on all data types; optional `orjson` backend |
 | **Conformance** | BIBB declarations and PICS generation per Clause 24 |
-| **Quality** | 6,300+ unit tests, Docker integration tests, local benchmarks, type-safe enums and frozen dataclasses throughout |
+| **Quality** | 6,380+ unit tests, Docker integration tests, local benchmarks, type-safe enums and frozen dataclasses throughout |
 
 ## Installation
 
@@ -84,7 +84,7 @@ The convenience API accepts 48 object type aliases (`ai`, `ao`, `av`, `bi`,
 `bo`, `bv`, `msv`, `dev`, `sched`, `tl`, `nc`, etc.) and 45 property
 abbreviations (`pv`, `name`, `type`, `list`, `status`, `priority`, `min`,
 `max`, etc.). Full names like `"analog-input,1"` and `"present-value"` also
-work. See the [alias reference](https://bac-py.readthedocs.io/en/latest/getting-started.html#string-aliases) for the complete table.
+work. See the [alias reference](https://jscott3201.github.io/bac-py/getting-started.html#string-aliases) for the complete table.
 
 ### Write a Value
 
@@ -318,7 +318,7 @@ from bac_py.services.errors import (
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 22 runnable scripts. See the
+The [`examples/`](examples/) directory contains 23 runnable scripts. See the
 [Examples Guide](https://jscott3201.github.io/bac-py/guide/examples.html) for
 detailed walkthroughs.
 
@@ -345,6 +345,7 @@ detailed walkthroughs.
 | `secure_connect_hub.py` | Run a BACnet/SC hub with object serving |
 | `ip_to_sc_router.py` | Bridge BACnet/IP and BACnet/SC networks |
 | `ipv6_client_server.py` | BACnet/IPv6 client and server with foreign device |
+| `interactive_cli.py` | Menu-driven interactive CLI for exploring the full API |
 | `sc_generate_certs.py` | Generate test PKI and demonstrate TLS-secured SC |
 
 ## Testing

@@ -3,7 +3,7 @@
 Example Scripts
 ===============
 
-The ``examples/`` directory contains 22 runnable scripts demonstrating bac-py's
+The ``examples/`` directory contains 23 runnable scripts demonstrating bac-py's
 capabilities. Each script is self-contained and uses the high-level
 :class:`~bac_py.client.Client` API with ``asyncio.run()``.
 
@@ -33,6 +33,42 @@ All examples follow the same structure:
    uncomment or adjust to see protocol-level traces. Set ``level=logging.DEBUG``
    to see every request and response. See :doc:`debugging-logging` for the
    full logger hierarchy and filtering options.
+
+
+.. _examples-interactive-cli:
+
+Interactive CLI
+---------------
+
+interactive_cli.py
+^^^^^^^^^^^^^^^^^^
+
+A menu-driven interactive CLI for testing Client API features against a real
+BACnet device. Provides a single tool to explore the full API interactively
+instead of editing and re-running individual example scripts.
+
+.. code-block:: bash
+
+   # Start with a target address
+   uv run python examples/interactive_cli.py 192.168.1.100
+
+   # Or enter the address interactively
+   uv run python examples/interactive_cli.py
+
+The menu offers 10 actions covering the core Client API:
+
+- **Read / Write** -- single property reads and writes with array index and
+  priority support, plus batch operations via ReadPropertyMultiple and
+  WritePropertyMultiple
+- **Discovery** -- Who-Is device discovery, Who-Has object search, and object
+  list enumeration
+- **COV** -- subscribe and unsubscribe with live ``[COV]``-prefixed
+  notifications printed between menu prompts
+- **Device Management** -- time synchronization using the current system clock
+
+Input uses ``asyncio.run_in_executor()`` so the event loop stays responsive for
+COV callbacks while waiting for user input. Active COV subscriptions are
+automatically cleaned up on exit.
 
 
 .. _examples-reading-writing:
