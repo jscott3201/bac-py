@@ -8,13 +8,13 @@ from bac_py.transport.sc.types import SC_DIRECT_SUBPROTOCOL, SC_HUB_SUBPROTOCOL
 from bac_py.transport.sc.websocket import SCWebSocket
 
 
-async def _start_ws_server(subprotocol: str = SC_HUB_SUBPROTOCOL):
+async def _start_ws_server(subprotocol: str = SC_HUB_SUBPROTOCOL, **accept_kwargs):
     """Start a loopback WebSocket server, return (server, port, accepted_ws_future)."""
     accepted_future: asyncio.Future[SCWebSocket] = asyncio.get_event_loop().create_future()
 
     async def on_connect(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         try:
-            ws = await SCWebSocket.accept(reader, writer, subprotocol)
+            ws = await SCWebSocket.accept(reader, writer, subprotocol, **accept_kwargs)
             if not accepted_future.done():
                 accepted_future.set_result(ws)
         except Exception as exc:
@@ -278,6 +278,137 @@ class TestWebSocketFrameSizeLimit:
             await client_ws.send(large)
             data = await asyncio.wait_for(server_ws.recv(), timeout=5)
             assert data == large
+
+            client_ws._close_transport()
+            server_ws._close_transport()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+
+class TestWebSocketMaxSize:
+    """Verify max_size is forwarded to the websockets protocol layer."""
+
+    async def test_connect_with_max_size(self):
+        """Connections work correctly with max_size set."""
+        server, port, accepted = await _start_ws_server()
+        try:
+            client_ws = await SCWebSocket.connect(
+                f"ws://127.0.0.1:{port}",
+                ssl_ctx=None,
+                subprotocol=SC_HUB_SUBPROTOCOL,
+                max_size=1600,
+            )
+            server_ws = await asyncio.wait_for(accepted, timeout=5)
+
+            # Normal-size message should work
+            await client_ws.send(b"\x01\x02\x03")
+            data = await asyncio.wait_for(server_ws.recv(), timeout=5)
+            assert data == b"\x01\x02\x03"
+
+            client_ws._close_transport()
+            server_ws._close_transport()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    async def test_accept_with_max_size(self):
+        """Server accepts connections correctly with max_size set."""
+        server, port, accepted = await _start_ws_server(max_size=2000)
+        try:
+            client_ws = await SCWebSocket.connect(
+                f"ws://127.0.0.1:{port}",
+                ssl_ctx=None,
+                subprotocol=SC_HUB_SUBPROTOCOL,
+            )
+            server_ws = await asyncio.wait_for(accepted, timeout=5)
+
+            # Messages within limit work
+            await client_ws.send(b"\x04\x05\x06")
+            data = await asyncio.wait_for(server_ws.recv(), timeout=5)
+            assert data == b"\x04\x05\x06"
+
+            client_ws._close_transport()
+            server_ws._close_transport()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    async def test_connect_default_max_size_none(self):
+        """Without max_size, protocol uses default (no limit or library default)."""
+        server, port, accepted = await _start_ws_server()
+        try:
+            client_ws = await SCWebSocket.connect(
+                f"ws://127.0.0.1:{port}",
+                ssl_ctx=None,
+                subprotocol=SC_HUB_SUBPROTOCOL,
+            )
+            server_ws = await asyncio.wait_for(accepted, timeout=5)
+
+            # Should still work normally
+            await client_ws.send(b"\xaa\xbb")
+            data = await asyncio.wait_for(server_ws.recv(), timeout=5)
+            assert data == b"\xaa\xbb"
+
+            client_ws._close_transport()
+            server_ws._close_transport()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+
+class TestWebSocketWriteNoDrain:
+    """Verify write_no_drain / drain batch write pattern."""
+
+    async def test_write_no_drain_then_drain(self):
+        """Data buffered via write_no_drain is received after drain."""
+        server, port, accepted = await _start_ws_server()
+        try:
+            client_ws = await SCWebSocket.connect(
+                f"ws://127.0.0.1:{port}",
+                ssl_ctx=None,
+                subprotocol=SC_HUB_SUBPROTOCOL,
+            )
+            server_ws = await asyncio.wait_for(accepted, timeout=5)
+
+            # Buffer without draining
+            wrote = client_ws.write_no_drain(b"\x01\x02\x03")
+            assert wrote is True
+
+            # Drain to flush
+            await client_ws.drain()
+
+            # Server should receive the data
+            data = await asyncio.wait_for(server_ws.recv(), timeout=5)
+            assert data == b"\x01\x02\x03"
+
+            client_ws._close_transport()
+            server_ws._close_transport()
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    async def test_multiple_write_no_drain_single_drain(self):
+        """Multiple buffered writes are all flushed by a single drain."""
+        server, port, accepted = await _start_ws_server()
+        try:
+            client_ws = await SCWebSocket.connect(
+                f"ws://127.0.0.1:{port}",
+                ssl_ctx=None,
+                subprotocol=SC_HUB_SUBPROTOCOL,
+            )
+            server_ws = await asyncio.wait_for(accepted, timeout=5)
+
+            # Buffer two messages
+            client_ws.write_no_drain(b"\x01\x02")
+            client_ws.write_no_drain(b"\x03\x04")
+            await client_ws.drain()
+
+            # Both messages should arrive (as separate WebSocket frames)
+            data1 = await asyncio.wait_for(server_ws.recv(), timeout=5)
+            data2 = await asyncio.wait_for(server_ws.recv(), timeout=5)
+            assert data1 == b"\x01\x02"
+            assert data2 == b"\x03\x04"
 
             client_ws._close_transport()
             server_ws._close_transport()

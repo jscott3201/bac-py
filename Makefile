@@ -1,4 +1,6 @@
 .PHONY: lint typecheck test docs check fix format coverage coverage-html \
+       bench-bip bench-bip-json bench-router bench-router-json \
+       bench-bbmd bench-bbmd-json bench-sc bench-sc-json \
        docker-build docker-test docker-stress docker-test-client docker-test-bbmd \
        docker-test-router docker-test-device-mgmt docker-test-cov-advanced \
        docker-test-events docker-test-sc docker-test-sc-stress docker-sc-stress \
@@ -8,11 +10,11 @@
        docker-demo docker-demo-auto docker-clean
 
 lint:
-	uv run ruff check src/ tests/ docker/ examples/
-	uv run ruff format --check src/ tests/ docker/ examples/
+	uv run ruff check src/ tests/ docker/ examples/ scripts/
+	uv run ruff format --check src/ tests/ docker/ examples/ scripts/
 
 typecheck:
-	uv run mypy src/ examples/ docker/
+	uv run mypy src/ examples/ docker/ scripts/
 
 test:
 	uv run pytest --tb=short -q
@@ -23,17 +25,45 @@ docs:
 check: lint typecheck test docs
 
 fix:
-	uv run ruff check --fix src/ tests/ docker/ examples/
-	uv run ruff format src/ tests/ docker/ examples/
+	uv run ruff check --fix src/ tests/ docker/ examples/ scripts/
+	uv run ruff format src/ tests/ docker/ examples/ scripts/
 
 format:
-	uv run ruff format src/ tests/ docker/ examples/
+	uv run ruff format src/ tests/ docker/ examples/ scripts/
 
 coverage:
 	uv run pytest --cov --cov-report=term-missing
 
 coverage-html:
 	uv run pytest --cov --cov-report=html
+
+# ---------------------------------------------------------------------------
+# Local benchmarks (no Docker required)
+# ---------------------------------------------------------------------------
+
+bench-bip:
+	uv run python scripts/bench_bip.py
+
+bench-bip-json:
+	uv run python scripts/bench_bip.py --json
+
+bench-router:
+	uv run python scripts/bench_router.py
+
+bench-router-json:
+	uv run python scripts/bench_router.py --json
+
+bench-bbmd:
+	uv run python scripts/bench_bbmd.py
+
+bench-bbmd-json:
+	uv run python scripts/bench_bbmd.py --json
+
+bench-sc:
+	uv run python scripts/bench_sc.py
+
+bench-sc-json:
+	uv run python scripts/bench_sc.py --json
 
 # ---------------------------------------------------------------------------
 # Docker integration tests

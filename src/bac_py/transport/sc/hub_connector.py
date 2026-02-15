@@ -209,7 +209,9 @@ class SCHubConnector:
         :returns: True if connected successfully.
         """
         try:
-            ws = await SCWebSocket.connect(uri, self._ssl_ctx, SC_HUB_SUBPROTOCOL)
+            ws = await SCWebSocket.connect(
+                uri, self._ssl_ctx, SC_HUB_SUBPROTOCOL, max_size=self._config.max_bvlc_length
+            )
         except (OSError, ConnectionError, Exception) as exc:
             logger.debug("Failed to connect to %s: %s", uri, exc)
             return False

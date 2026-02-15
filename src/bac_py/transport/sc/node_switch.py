@@ -228,7 +228,12 @@ class SCNodeSwitch:
         logger.debug("SC establishing direct connection to %s via %s", dest, uris)
         for uri in uris:
             try:
-                ws = await SCWebSocket.connect(uri, self._client_ssl_ctx, SC_DIRECT_SUBPROTOCOL)
+                ws = await SCWebSocket.connect(
+                    uri,
+                    self._client_ssl_ctx,
+                    SC_DIRECT_SUBPROTOCOL,
+                    max_size=self._config.max_bvlc_length,
+                )
             except (OSError, ConnectionError):
                 continue
 
@@ -270,7 +275,9 @@ class SCNodeSwitch:
             return
 
         try:
-            ws = await SCWebSocket.accept(reader, writer, SC_DIRECT_SUBPROTOCOL)
+            ws = await SCWebSocket.accept(
+                reader, writer, SC_DIRECT_SUBPROTOCOL, max_size=self._config.max_bvlc_length
+            )
         except Exception:
             logger.debug("Direct WebSocket accept failed", exc_info=True)
             writer.close()

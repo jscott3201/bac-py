@@ -5,7 +5,49 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.4.3] - 2026-02-14
+
+### Changed
+
+- **WebSocket write buffer tuning**: SC WebSocket connections now set write
+  buffer high/low water marks (32 KiB / 8 KiB) to trigger backpressure earlier
+  for slow peers, and enable TCP_NODELAY for low-latency frame delivery.
+- **WebSocket max_size enforcement**: `SCWebSocket.connect()` and `.accept()`
+  now accept a `max_size` parameter forwarded to the websockets protocol layer
+  for early oversized-frame rejection. All callers (hub connector, hub function,
+  node switch) pass `max_bvlc_length` as the limit.
+- **Hub broadcast batched writes**: `SCHubFunction._broadcast()` now buffers
+  WebSocket frames to all connections synchronously, then drains them
+  concurrently via `asyncio.gather()`, reducing broadcast latency.
+- **WebSocket recv() event buffering**: Fixed a bug where multiple WebSocket
+  frames arriving in a single TCP segment could cause lost frames. `recv()` now
+  buffers unconsumed events from `events_received()` for subsequent calls.
+
+### Added
+
+- **Local SC benchmark**: `scripts/bench_sc.py` runs a complete hub, echo
+  nodes, and stress workers in a single process for Docker-free benchmarking.
+  Supports human-readable and `--json` output modes.  Makefile targets:
+  `make bench-sc` and `make bench-sc-json`.
+- **Local BIP benchmark**: `scripts/bench_bip.py` runs an in-process BACnet/IP
+  server with 40 objects and configurable stress client pools on localhost.
+  Mixed workloads: read, write, RPM, WPM, object-list, COV.  Makefile targets:
+  `make bench-bip` and `make bench-bip-json`.
+- **Local router benchmark**: `scripts/bench_router.py` creates a two-network
+  router on localhost with a stress server on network 2 and client pools on
+  network 1.  Measures cross-network routing overhead.  Makefile targets:
+  `make bench-router` and `make bench-router-json`.
+- **Local BBMD benchmark**: `scripts/bench_bbmd.py` runs a server with BBMD
+  attached and foreign-device client pools.  Includes FDT/BDT read workers.
+  Makefile targets: `make bench-bbmd` and `make bench-bbmd-json`.
+
+### Documentation
+
+- **Benchmarks guide overhaul** (`docs/guide/benchmarks.rst`): Restructured into
+  Local Benchmarks and Docker Benchmarks sections with reference results for all
+  four transport types.  Added results comparison table, key observations
+  (local vs Docker performance characteristics), local CLI tuning parameters,
+  and testing conditions.
 
 ## [1.4.2] - 2026-02-14
 

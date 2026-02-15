@@ -131,7 +131,9 @@ class SCHubFunction:
             return
 
         try:
-            ws = await SCWebSocket.accept(reader, writer, SC_HUB_SUBPROTOCOL)
+            ws = await SCWebSocket.accept(
+                reader, writer, SC_HUB_SUBPROTOCOL, max_size=self._config.max_bvlc_length
+            )
         except Exception:
             logger.debug("WebSocket accept failed", exc_info=True)
             writer.close()
@@ -250,6 +252,8 @@ class SCHubFunction:
         """Send message to all connected nodes except the source.
 
         Uses pre-encoded *raw* bytes when available to skip re-encoding.
+        Batches writes to all connections first (synchronous buffer),
+        then drains them concurrently for lower latency.
         """
         encoded = raw if raw is not None else msg.encode()
         targets = [
@@ -261,7 +265,17 @@ class SCHubFunction:
             with contextlib.suppress(Exception):
                 await targets[0].send_raw(encoded)
         elif targets:
-            await asyncio.gather(
-                *(conn.send_raw(encoded) for conn in targets),
-                return_exceptions=True,
-            )
+            # Phase 1: buffer writes synchronously (no await)
+            needs_drain = []
+            for conn in targets:
+                try:
+                    if conn.write_raw_no_drain(encoded):
+                        needs_drain.append(conn)
+                except Exception:
+                    pass
+            # Phase 2: drain all concurrently
+            if needs_drain:
+                await asyncio.gather(
+                    *(conn.drain() for conn in needs_drain),
+                    return_exceptions=True,
+                )

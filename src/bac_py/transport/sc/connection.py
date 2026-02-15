@@ -315,6 +315,21 @@ class SCConnection:
             raise ConnectionError(msg_text)
         await self._ws.send_raw(data)
 
+    def write_raw_no_drain(self, data: bytes) -> bool:
+        """Buffer pre-encoded bytes without draining.
+
+        Returns True if data was buffered.  Call :meth:`drain` afterwards.
+        Used by hub broadcast to batch writes before draining concurrently.
+        """
+        if self._state != SCConnectionState.CONNECTED or self._ws is None:
+            return False
+        return self._ws.write_no_drain(data)
+
+    async def drain(self) -> None:
+        """Drain the write buffer.  Pair with :meth:`write_raw_no_drain`."""
+        if self._ws is not None:
+            await self._ws.drain()
+
     # ------------------------------------------------------------------
     # Disconnect
     # ------------------------------------------------------------------
