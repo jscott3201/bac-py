@@ -112,7 +112,7 @@ class SCHubConnector:
             )
         logger.info("SC hub connector starting")
         self._running = True
-        self._connect_task = asyncio.ensure_future(self._connect_loop())
+        self._connect_task = asyncio.create_task(self._connect_loop())
 
     async def stop(self) -> None:
         """Disconnect from hub and stop reconnection loop."""

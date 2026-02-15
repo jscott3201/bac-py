@@ -26,7 +26,7 @@ async with Client(instance_number=999) as client:
 
 | Category | Highlights |
 |----------|-----------|
-| **Transports** | BACnet/IP (Annex J), BACnet/IPv6 with BBMD and foreign device (Annex U), BACnet Ethernet (Clause 7), BACnet Secure Connect over WebSocket/TLS (Annex AB) |
+| **Transports** | BACnet/IP (Annex J), BACnet/IPv6 with BBMD and foreign device (Annex U), BACnet Ethernet (Clause 7), BACnet Secure Connect over WebSocket/TLS 1.3 (Annex AB) |
 | **Client & Server** | Full-duplex -- serve objects and issue requests from the same application |
 | **Object Model** | 40+ object types with property definitions, priority arrays, and commandable outputs |
 | **Services** | All confirmed and unconfirmed services including COV, alarms, file access, audit logging, and private transfer |
@@ -35,7 +35,8 @@ async with Client(instance_number=999) as client:
 | **Networking** | Multi-port routing, BBMD, foreign device registration, segmented transfers, device info caching |
 | **Convenience API** | String-based addressing (`"ai,1"`, `"pv"`), smart type coercion, auto-discovery |
 | **Serialization** | `to_dict()`/`from_dict()` on all data types; optional `orjson` backend |
-| **Quality** | 6,100+ unit tests, Docker integration tests, type-safe enums and frozen dataclasses throughout |
+| **Conformance** | BIBB declarations and PICS generation per Clause 24 |
+| **Quality** | 6,300+ unit tests, Docker integration tests, local benchmarks, type-safe enums and frozen dataclasses throughout |
 
 ## Installation
 
@@ -314,7 +315,7 @@ from bac_py.services.errors import (
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 21 runnable scripts. See the
+The [`examples/`](examples/) directory contains 22 runnable scripts. See the
 [Examples Guide](https://jscott3201.github.io/bac-py/guide/examples.html) for
 detailed walkthroughs.
 
@@ -340,18 +341,31 @@ detailed walkthroughs.
 | `secure_connect.py` | Connect to a BACnet/SC hub and exchange NPDUs |
 | `secure_connect_hub.py` | Run a BACnet/SC hub with object serving |
 | `ip_to_sc_router.py` | Bridge BACnet/IP and BACnet/SC networks |
+| `ipv6_client_server.py` | BACnet/IPv6 client and server with foreign device |
 | `sc_generate_certs.py` | Generate test PKI and demonstrate TLS-secured SC |
 
 ## Testing
 
 ```bash
-make test          # 6,100+ unit tests
+make test          # 6,300+ unit tests
 make lint          # ruff check + format verification
 make typecheck     # mypy
 make docs          # sphinx-build
 make check         # all of the above
 make coverage      # tests with coverage report
 make fix           # auto-fix lint/format issues
+```
+
+### Local Benchmarks
+
+Single-process benchmarks for all transport types (no Docker required):
+
+```bash
+make bench-bip             # BACnet/IP stress test on localhost
+make bench-router          # Two-network router stress test
+make bench-bbmd            # BBMD + foreign device stress test
+make bench-sc              # BACnet/SC hub + node stress test
+make bench-bip-json        # JSON output for CI integration
 ```
 
 ### Docker Integration Tests

@@ -381,9 +381,9 @@ class SCConnection:
     # ------------------------------------------------------------------
 
     def _start_background_tasks(self) -> None:
-        self._receive_task = asyncio.ensure_future(self._receive_loop())
+        self._receive_task = asyncio.create_task(self._receive_loop())
         if self._role == SCConnectionRole.INITIATING:
-            self._heartbeat_task = asyncio.ensure_future(self._heartbeat_loop())
+            self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
     async def _stop_background_tasks(self) -> None:
         """Cancel and await background tasks for exclusive WebSocket access."""

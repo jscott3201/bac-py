@@ -23,7 +23,7 @@ SC_SUBPROTOCOL = "hub.bsc.bacnet.org"
 
 async def _start_ws_pair():
     """Create a connected client/server WebSocket pair on loopback."""
-    accepted_future: asyncio.Future[SCWebSocket] = asyncio.get_event_loop().create_future()
+    accepted_future: asyncio.Future[SCWebSocket] = asyncio.get_running_loop().create_future()
 
     async def on_connect(reader, writer):
         try:
@@ -60,7 +60,7 @@ class TestInitiatingPeerLifecycle:
             conn.on_disconnected = disconnected_event.set
 
             # Start initiating in background
-            init_task = asyncio.ensure_future(conn.initiate(client_ws))
+            init_task = asyncio.create_task(conn.initiate(client_ws))
 
             # Server side: read Connect-Request, send Connect-Accept
             raw = await asyncio.wait_for(server_ws.recv(), timeout=5)
@@ -86,7 +86,7 @@ class TestInitiatingPeerLifecycle:
             assert conn.peer_max_bvlc == 1600
 
             # Disconnect
-            disconnect_task = asyncio.ensure_future(conn.disconnect())
+            disconnect_task = asyncio.create_task(conn.disconnect())
 
             # Server reads Disconnect-Request, sends Disconnect-ACK
             raw = await asyncio.wait_for(server_ws.recv(), timeout=5)
@@ -127,7 +127,7 @@ class TestInitiatingPeerLifecycle:
             collision_detected = asyncio.Event()
             conn.on_vmac_collision = collision_detected.set
 
-            init_task = asyncio.ensure_future(conn.initiate(client_ws))
+            init_task = asyncio.create_task(conn.initiate(client_ws))
 
             # Server: read Connect-Request, send NAK with NODE_DUPLICATE_VMAC
             raw = await asyncio.wait_for(server_ws.recv(), timeout=5)
@@ -159,7 +159,7 @@ class TestInitiatingPeerLifecycle:
         server, client_ws, server_ws = await _start_ws_pair()
         try:
             conn = SCConnection(SCVMAC.random(), DeviceUUID.generate())
-            init_task = asyncio.ensure_future(conn.initiate(client_ws))
+            init_task = asyncio.create_task(conn.initiate(client_ws))
 
             raw = await asyncio.wait_for(server_ws.recv(), timeout=5)
             msg = SCMessage.decode(raw)
@@ -200,7 +200,7 @@ class TestAcceptingPeerLifecycle:
             conn.on_connected = connected_event.set
 
             # Start accepting in background
-            accept_task = asyncio.ensure_future(conn.accept(server_ws))
+            accept_task = asyncio.create_task(conn.accept(server_ws))
 
             # Client sends Connect-Request
             req_payload = ConnectRequestPayload(remote_vmac, remote_uuid, 1600, 1497).encode()
@@ -254,7 +254,7 @@ class TestAcceptingPeerLifecycle:
             def reject_all(vmac: SCVMAC, uuid: DeviceUUID) -> bool:
                 return False  # Reject everything
 
-            accept_task = asyncio.ensure_future(conn.accept(server_ws, vmac_checker=reject_all))
+            accept_task = asyncio.create_task(conn.accept(server_ws, vmac_checker=reject_all))
 
             # Client sends Connect-Request
             req_payload = ConnectRequestPayload(
@@ -287,7 +287,7 @@ class TestAcceptingPeerLifecycle:
                 DeviceUUID.generate(),
                 config=SCConnectionConfig(connect_wait_timeout=2.0),
             )
-            accept_task = asyncio.ensure_future(conn.accept(server_ws))
+            accept_task = asyncio.create_task(conn.accept(server_ws))
 
             # Send a heartbeat instead of connect request
             msg = SCMessage(BvlcSCFunction.HEARTBEAT_REQUEST, message_id=1)
@@ -317,7 +317,7 @@ class TestMessageForwarding:
             conn.on_message = on_msg
 
             # Do handshake
-            accept_task = asyncio.ensure_future(conn.accept(server_ws))
+            accept_task = asyncio.create_task(conn.accept(server_ws))
             req_payload = ConnectRequestPayload(
                 SCVMAC.random(), DeviceUUID.generate(), 1600, 1497
             ).encode()
@@ -359,7 +359,7 @@ class TestHeartbeat:
             connected_event = asyncio.Event()
             conn.on_connected = connected_event.set
 
-            accept_task = asyncio.ensure_future(conn.accept(server_ws))
+            accept_task = asyncio.create_task(conn.accept(server_ws))
             req_payload = ConnectRequestPayload(
                 SCVMAC.random(), DeviceUUID.generate(), 1600, 1497
             ).encode()
@@ -400,7 +400,7 @@ class TestDisconnectHandling:
             conn.on_connected = connected_event.set
             conn.on_disconnected = disconnected_event.set
 
-            accept_task = asyncio.ensure_future(conn.accept(server_ws))
+            accept_task = asyncio.create_task(conn.accept(server_ws))
             req_payload = ConnectRequestPayload(
                 SCVMAC.random(), DeviceUUID.generate(), 1600, 1497
             ).encode()
@@ -440,7 +440,7 @@ class TestSendMessage:
             connected_event = asyncio.Event()
             conn.on_connected = connected_event.set
 
-            accept_task = asyncio.ensure_future(conn.accept(server_ws))
+            accept_task = asyncio.create_task(conn.accept(server_ws))
             req_payload = ConnectRequestPayload(
                 SCVMAC.random(), DeviceUUID.generate(), 1600, 1497
             ).encode()
@@ -495,7 +495,7 @@ class TestConnectionCallbackCleanup:
             conn.on_vmac_collision = lambda: None
 
             # Accept a connection
-            accept_task = asyncio.ensure_future(conn.accept(server_ws))
+            accept_task = asyncio.create_task(conn.accept(server_ws))
             req_payload = ConnectRequestPayload(
                 SCVMAC.random(), DeviceUUID.generate(), 1600, 1497
             ).encode()

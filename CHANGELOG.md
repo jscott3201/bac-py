@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.4.4] - 2026-02-14
+
+### Changed
+
+- **TLS X.509 strict verification**: SSL contexts for BACnet/SC now enable
+  `VERIFY_X509_STRICT` flag for stricter certificate validation per RFC 5280.
+- **System CA store blocked**: BACnet/SC SSL contexts no longer fall back to the
+  system certificate store.  Only explicitly configured CA certificates are
+  trusted, preventing accidental trust of arbitrary CAs on the host.
+- **Deprecated asyncio APIs replaced**: All `asyncio.ensure_future()` calls
+  replaced with `asyncio.create_task()` and all `asyncio.get_event_loop()`
+  calls replaced with `asyncio.get_running_loop()` across the entire codebase
+  (source, tests, examples, docker).
+- **Fire-and-forget task error logging**: Background tasks in
+  `BACnetApplication._spawn_task()` and SC transport task schedulers now log
+  exceptions via done callbacks instead of silently dropping them.
+- **WebSocket client handshake timeout**: `SCWebSocket.connect()` now accepts a
+  `handshake_timeout` parameter (default 10s), matching the server-side
+  `accept()` pattern.  Prevents indefinite hangs on unresponsive peers.
+
+### Added
+
+- **Private key passphrase support**: `SCTLSConfig.key_password` parameter
+  allows passphrase-protected PEM private keys (accepts `bytes` or `str`).
+  Passphrase values are redacted in `repr()` alongside `private_key_path`.
+- **Transport setup guide**: New comprehensive documentation page covering all
+  five transport types (BACnet/IP, IPv6, BBMD, Router, Ethernet, SC) with
+  setup examples for common deployment topologies.
+- **Documentation restructure**: Moved changelog to its own sidebar section,
+  added introductory text to all API reference pages, documented the IPv6
+  example script, and fixed the example count.
+
 ## [1.4.3] - 2026-02-14
 
 ### Changed

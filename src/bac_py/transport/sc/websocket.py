@@ -112,6 +112,7 @@ class SCWebSocket:
         ssl_ctx: ssl.SSLContext | None,
         subprotocol: str,
         *,
+        handshake_timeout: float = 10.0,
         max_size: int | None = None,
     ) -> SCWebSocket:
         """Initiate a WebSocket client connection.
@@ -119,6 +120,7 @@ class SCWebSocket:
         :param uri: WebSocket URI (``wss://host:port/path``).
         :param ssl_ctx: TLS context, or None for plaintext ``ws://``.
         :param subprotocol: WebSocket subprotocol to negotiate.
+        :param handshake_timeout: Maximum seconds for the WebSocket handshake.
         :param max_size: Maximum WebSocket message size.  Passed to the
             protocol layer so oversized frames are rejected early.
         """
@@ -155,27 +157,32 @@ class SCWebSocket:
             writer.write(outgoing)
             await writer.drain()
 
-        # Read HTTP response
-        while True:
-            data = await reader.read(_READ_SIZE)
-            if not data:
-                msg = "Connection closed during WebSocket handshake"
-                raise ConnectionError(msg)
-            protocol.receive_data(data)
+        # Read HTTP response (with timeout to prevent indefinite hangs)
+        try:
+            async with asyncio.timeout(handshake_timeout):
+                while True:
+                    data = await reader.read(_READ_SIZE)
+                    if not data:
+                        msg = "Connection closed during WebSocket handshake"
+                        raise ConnectionError(msg)
+                    protocol.receive_data(data)
 
-            if protocol.handshake_exc is not None:
-                raise protocol.handshake_exc
+                    if protocol.handshake_exc is not None:
+                        raise protocol.handshake_exc
 
-            # Check for events that indicate handshake completion
-            events = protocol.events_received()
-            if events:
-                break
+                    # Check for events that indicate handshake completion
+                    events = protocol.events_received()
+                    if events:
+                        break
 
-            # Also check if there's data to send (e.g. during upgrade)
-            outgoing = _drain_to_send(protocol)
-            if outgoing:
-                writer.write(outgoing)
-                await writer.drain()
+                    # Also check if there's data to send (e.g. during upgrade)
+                    outgoing = _drain_to_send(protocol)
+                    if outgoing:
+                        writer.write(outgoing)
+                        await writer.drain()
+        except BaseException:
+            writer.close()
+            raise
 
         logger.debug("SC WebSocket client connected to %s:%d", host, port)
         return cls(reader, writer, protocol)

@@ -10,7 +10,7 @@ from bac_py.transport.sc.websocket import SCWebSocket
 
 async def _start_ws_server(subprotocol: str = SC_HUB_SUBPROTOCOL, **accept_kwargs):
     """Start a loopback WebSocket server, return (server, port, accepted_ws_future)."""
-    accepted_future: asyncio.Future[SCWebSocket] = asyncio.get_event_loop().create_future()
+    accepted_future: asyncio.Future[SCWebSocket] = asyncio.get_running_loop().create_future()
 
     async def on_connect(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         try:
@@ -415,3 +415,33 @@ class TestWebSocketWriteNoDrain:
         finally:
             server.close()
             await server.wait_closed()
+
+
+class TestWebSocketClientHandshakeTimeout:
+    async def test_connect_handshake_timeout(self):
+        """Client connect should raise TimeoutError if server never completes handshake."""
+
+        async def stall_handler(reader, writer):
+            # Accept TCP but never send HTTP response — hangs the handshake
+            await asyncio.sleep(60)
+
+        server = await asyncio.start_server(stall_handler, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            with pytest.raises(TimeoutError):
+                await SCWebSocket.connect(
+                    f"ws://127.0.0.1:{port}",
+                    ssl_ctx=None,
+                    subprotocol=SC_HUB_SUBPROTOCOL,
+                    handshake_timeout=0.1,
+                )
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    async def test_connect_default_handshake_timeout(self):
+        """Default handshake_timeout should be 10 seconds."""
+        import inspect
+
+        sig = inspect.signature(SCWebSocket.connect)
+        assert sig.parameters["handshake_timeout"].default == 10.0

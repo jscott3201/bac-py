@@ -3,7 +3,7 @@
 Example Scripts
 ===============
 
-The ``examples/`` directory contains 21 runnable scripts demonstrating bac-py's
+The ``examples/`` directory contains 22 runnable scripts demonstrating bac-py's
 capabilities. Each script is self-contained and uses the high-level
 :class:`~bac_py.client.Client` API with ``asyncio.run()``.
 
@@ -437,6 +437,33 @@ Query audit log records with target-based filtering and pagination:
            start_at_sequence_number=last_seq + 1,
            requested_count=50,
        )
+
+
+.. _examples-ipv6:
+
+BACnet/IPv6
+-----------
+
+ipv6_client_server.py
+^^^^^^^^^^^^^^^^^^^^^
+
+Discover devices and read properties over BACnet/IPv6 (Annex U) with multicast
+discovery using the ``ff02::bac0`` multicast group:
+
+.. code-block:: python
+
+   from bac_py import Client
+
+   async with Client(ipv6=True) as client:
+       devices = await client.discover(timeout=5.0)
+       for dev in devices:
+           print(f"  {dev.instance} at {dev.address_str}")
+
+       if devices:
+           value = await client.read(devices[0].address_str, "dev,*", "object-name")
+           print(f"Device name: {value}")
+
+See :ref:`transport-ipv6` for IPv6 transport configuration details.
 
 
 .. _examples-secure-connect:

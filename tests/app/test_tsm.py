@@ -1735,7 +1735,7 @@ class TestClientFillWindowNoSender:
     def network(self):
         return FakeNetworkLayer()
 
-    def test_fill_window_no_sender_is_noop(self, network):
+    async def test_fill_window_no_sender_is_noop(self, network):
         """_fill_and_send_request_window returns early if sender is None (line 406)."""
         from bac_py.app.tsm import ClientTransaction
 
@@ -1745,7 +1745,7 @@ class TestClientFillWindowNoSender:
             destination=PEER,
             service_choice=12,
             request_data=b"\x01",
-            future=asyncio.get_event_loop().create_future(),
+            future=asyncio.get_running_loop().create_future(),
         )
         txn.segment_sender = None
         network.clear()
@@ -1760,7 +1760,7 @@ class TestClientSegmentAckNoReceiver:
     def network(self):
         return FakeNetworkLayer()
 
-    def test_send_segment_ack_no_receiver_is_noop(self, network):
+    async def test_send_segment_ack_no_receiver_is_noop(self, network):
         """_send_client_segment_ack returns early if receiver is None (line 435)."""
         from bac_py.app.tsm import ClientTransaction
 
@@ -1770,7 +1770,7 @@ class TestClientSegmentAckNoReceiver:
             destination=PEER,
             service_choice=12,
             request_data=b"\x01",
-            future=asyncio.get_event_loop().create_future(),
+            future=asyncio.get_running_loop().create_future(),
         )
         txn.segment_receiver = None
         tsm._send_client_segment_ack(txn, seq=0, negative=False)
@@ -1784,12 +1784,12 @@ class TestClientAbortTransactionAlreadyDone:
     def network(self):
         return FakeNetworkLayer()
 
-    def test_abort_done_future_only_sends_pdu(self, network):
+    async def test_abort_done_future_only_sends_pdu(self, network):
         """_abort_transaction with done future still sends abort but does not set exception (line 453)."""
         from bac_py.app.tsm import ClientTransaction
 
         tsm = ClientTSM(network, apdu_timeout=0.1, apdu_retries=0)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         future = loop.create_future()
         future.set_result(b"")  # Mark as done
         txn = ClientTransaction(

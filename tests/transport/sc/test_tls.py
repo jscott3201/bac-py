@@ -7,6 +7,7 @@ import pytest
 
 from bac_py.transport.sc.tls import (
     SCTLSConfig,
+    _resolve_password,
     build_client_ssl_context,
     build_server_ssl_context,
 )
@@ -20,15 +21,21 @@ class TestSCTLSConfig:
         assert cfg.ca_certificates_path is None
         assert cfg.allow_plaintext is False
         assert cfg.extra_ca_paths == []
+        assert cfg.key_password is None
+        assert cfg.verify_depth == 4
 
     def test_custom_values(self):
         cfg = SCTLSConfig(
             private_key_path="/path/to/key.pem",
             certificate_path="/path/to/cert.pem",
             ca_certificates_path="/path/to/ca.pem",
+            key_password=b"secret",
+            verify_depth=2,
         )
         assert cfg.private_key_path == "/path/to/key.pem"
         assert cfg.certificate_path == "/path/to/cert.pem"
+        assert cfg.key_password == b"secret"
+        assert cfg.verify_depth == 2
 
 
 class TestBuildClientSSLContext:
@@ -202,3 +209,112 @@ class TestPlaintextWarnings:
         with caplog.at_level(logging.WARNING, logger="bac_py.transport.sc.tls"):
             build_client_ssl_context(cfg)
         assert any("no ca certificates" in m.lower() for m in caplog.messages)
+
+
+# ---------------------------------------------------------------------------
+# Verify depth limit
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyDepth:
+    def test_config_default_verify_depth(self):
+        cfg = SCTLSConfig()
+        assert cfg.verify_depth == 4
+
+    def test_config_custom_verify_depth(self):
+        cfg = SCTLSConfig(verify_depth=2)
+        assert cfg.verify_depth == 2
+
+
+# ---------------------------------------------------------------------------
+# X509 strict verification flag
+# ---------------------------------------------------------------------------
+
+
+class TestX509Strict:
+    def test_client_verify_x509_strict(self):
+        cfg = SCTLSConfig()
+        ctx = build_client_ssl_context(cfg)
+        assert ctx is not None
+        assert ctx.verify_flags & ssl.VERIFY_X509_STRICT
+
+    def test_server_verify_x509_strict(self):
+        cfg = SCTLSConfig()
+        ctx = build_server_ssl_context(cfg)
+        assert ctx is not None
+        assert ctx.verify_flags & ssl.VERIFY_X509_STRICT
+
+
+# ---------------------------------------------------------------------------
+# System CA store is NOT trusted (no load_default_certs)
+# ---------------------------------------------------------------------------
+
+
+class TestSystemCABlocked:
+    def test_no_system_cas_loaded_client(self):
+        """Client context with no CAs should have empty cert store."""
+        cfg = SCTLSConfig()
+        ctx = build_client_ssl_context(cfg)
+        assert ctx is not None
+        stats = ctx.cert_store_stats()
+        assert stats["x509_ca"] == 0
+
+    def test_no_system_cas_loaded_server(self):
+        """Server context with no CAs should have empty cert store."""
+        cfg = SCTLSConfig()
+        ctx = build_server_ssl_context(cfg)
+        assert ctx is not None
+        stats = ctx.cert_store_stats()
+        assert stats["x509_ca"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Key password handling
+# ---------------------------------------------------------------------------
+
+
+class TestKeyPassword:
+    def test_resolve_password_none(self):
+        assert _resolve_password(None) is None
+
+    def test_resolve_password_bytes(self):
+        result = _resolve_password(b"secret")
+        assert result == b"secret"
+        assert isinstance(result, bytes)
+
+    def test_resolve_password_str(self):
+        result = _resolve_password("secret")
+        assert result == b"secret"
+        assert isinstance(result, bytes)
+
+    def test_resolve_password_str_unicode(self):
+        result = _resolve_password("p\u00e4ssw\u00f6rd")
+        assert result == "p\u00e4ssw\u00f6rd".encode()
+
+
+# ---------------------------------------------------------------------------
+# Repr redaction for key_password
+# ---------------------------------------------------------------------------
+
+
+class TestKeyPasswordRepr:
+    def test_repr_redacts_key_password(self):
+        cfg = SCTLSConfig(key_password=b"my-secret-passphrase")
+        r = repr(cfg)
+        assert "my-secret-passphrase" not in r
+        assert "key_password='<REDACTED>'" in r
+
+    def test_repr_no_password_shows_none(self):
+        cfg = SCTLSConfig()
+        r = repr(cfg)
+        assert "key_password=None" in r
+
+    def test_repr_str_password_redacted(self):
+        cfg = SCTLSConfig(key_password="string-secret")
+        r = repr(cfg)
+        assert "string-secret" not in r
+        assert "key_password='<REDACTED>'" in r
+
+    def test_str_also_redacts_password(self):
+        cfg = SCTLSConfig(key_password=b"secret")
+        assert b"secret".decode() not in str(cfg)

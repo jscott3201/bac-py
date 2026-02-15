@@ -1,6 +1,10 @@
 Types
 =====
 
+BACnet type system: enumerations, primitive types, constructed (compound)
+types, and string parsing utilities. These types are used throughout the
+library for service parameters, object properties, and protocol encoding.
+
 .. automodule:: bac_py.types
    :no-members:
 

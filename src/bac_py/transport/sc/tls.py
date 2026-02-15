@@ -28,6 +28,14 @@ class SCTLSConfig:
         files) containing the trusted CA certificates.
     :param allow_plaintext: If True, allow ``ws://`` connections (testing
         only — production BACnet/SC requires TLS 1.3).
+    :param key_password: Optional passphrase for the private key PEM file.
+        Use ``bytes`` or a callable returning ``bytes`` for programmatic
+        retrieval (e.g., from a vault or environment variable).
+    :param verify_depth: Desired maximum certificate chain verification depth.
+        BACnet PKI chains are typically short (device → issuing CA → root).
+        Default 4 allows one intermediate plus some headroom.  Reserved for
+        future use — Python's ``ssl`` module does not yet expose OpenSSL's
+        ``SSL_CTX_set_verify_depth``.
     """
 
     private_key_path: str | None = None
@@ -35,15 +43,19 @@ class SCTLSConfig:
     ca_certificates_path: str | None = None
     allow_plaintext: bool = False
     extra_ca_paths: list[str] = field(default_factory=list)
+    key_password: bytes | str | None = None
+    verify_depth: int = 4
 
     def __repr__(self) -> str:
-        """Redact private_key_path to prevent credential leak in logs/tracebacks."""
+        """Redact secrets to prevent credential leak in logs/tracebacks."""
         key_display = "'<REDACTED>'" if self.private_key_path else "None"
+        pw_display = "'<REDACTED>'" if self.key_password else "None"
         return (
             f"SCTLSConfig(private_key_path={key_display}, "
             f"certificate_path={self.certificate_path!r}, "
             f"ca_certificates_path={self.ca_certificates_path!r}, "
-            f"allow_plaintext={self.allow_plaintext!r})"
+            f"allow_plaintext={self.allow_plaintext!r}, "
+            f"key_password={pw_display})"
         )
 
 
@@ -63,10 +75,12 @@ def build_client_ssl_context(config: SCTLSConfig) -> ssl.SSLContext | None:
 
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
+    ctx.verify_flags |= ssl.VERIFY_X509_STRICT
 
     if config.certificate_path and config.private_key_path:
         logger.debug("SC TLS loading client cert: %s", config.certificate_path)
-        ctx.load_cert_chain(config.certificate_path, config.private_key_path)
+        password = _resolve_password(config.key_password)
+        ctx.load_cert_chain(config.certificate_path, config.private_key_path, password=password)
     elif config.certificate_path and not config.private_key_path:
         logger.warning(
             "SC TLS certificate_path is set but private_key_path is missing — "
@@ -100,10 +114,12 @@ def build_server_ssl_context(config: SCTLSConfig) -> ssl.SSLContext | None:
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_3
     ctx.verify_mode = ssl.CERT_REQUIRED
+    ctx.verify_flags |= ssl.VERIFY_X509_STRICT
 
     if config.certificate_path and config.private_key_path:
         logger.debug("SC TLS loading server cert: %s", config.certificate_path)
-        ctx.load_cert_chain(config.certificate_path, config.private_key_path)
+        password = _resolve_password(config.key_password)
+        ctx.load_cert_chain(config.certificate_path, config.private_key_path, password=password)
     elif config.certificate_path and not config.private_key_path:
         logger.warning(
             "SC TLS certificate_path is set but private_key_path is missing — "
@@ -120,8 +136,23 @@ def build_server_ssl_context(config: SCTLSConfig) -> ssl.SSLContext | None:
     return ctx
 
 
+def _resolve_password(key_password: bytes | str | None) -> bytes | None:
+    """Convert key_password to bytes for ssl.SSLContext.load_cert_chain()."""
+    if key_password is None:
+        return None
+    if isinstance(key_password, str):
+        return key_password.encode("utf-8")
+    return key_password
+
+
 def _load_ca_certs(ctx: ssl.SSLContext, config: SCTLSConfig) -> None:
-    """Load CA certificates from config into the SSL context."""
+    """Load CA certificates from config into the SSL context.
+
+    BACnet/SC devices must only trust explicitly configured CAs — never the
+    system certificate store.  When no CA paths are provided we log a warning
+    but intentionally do **not** call ``ctx.load_default_certs()`` so that
+    peer verification will fail rather than silently trusting arbitrary CAs.
+    """
     paths: list[str] = []
     if config.ca_certificates_path:
         paths.extend(config.ca_certificates_path.split(":"))
@@ -130,7 +161,8 @@ def _load_ca_certs(ctx: ssl.SSLContext, config: SCTLSConfig) -> None:
     if not paths:
         logger.warning(
             "SC TLS no CA certificates configured — peer certificate "
-            "verification will fail unless system CAs are trusted"
+            "verification will fail. BACnet/SC requires explicitly configured "
+            "CA certificates; system CAs are intentionally not trusted."
         )
 
     for ca_path in paths:

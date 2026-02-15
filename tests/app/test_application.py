@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import struct
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -1479,7 +1480,7 @@ class TestLifecycle:
         with patch("bac_py.app.application.BIPTransport", return_value=mock_t):
             await app.start()
             # Add a fake pending transaction
-            mock_future = asyncio.get_event_loop().create_future()
+            mock_future = asyncio.get_running_loop().create_future()
             mock_txn = MagicMock()
             mock_txn.future = mock_future
             app._client_tsm._transactions = {1: mock_txn}
@@ -1653,6 +1654,21 @@ class TestCOVAndTaskManagement:
         assert completed
         # Task should clean up via done callback
         assert len(app._background_tasks) == 0
+
+    async def test_spawn_task_logs_exception(self, caplog):
+        """_spawn_task logs errors from failed background tasks."""
+        app = BACnetApplication(DeviceConfig(instance_number=1))
+
+        async def failing_coro():
+            msg = "test background failure"
+            raise RuntimeError(msg)
+
+        with caplog.at_level(logging.ERROR, logger="bac_py.app.application"):
+            app._spawn_task(failing_coro())
+            await asyncio.sleep(0.05)
+
+        assert len(app._background_tasks) == 0
+        assert any("Background task failed" in m for m in caplog.messages)
 
     async def test_dispatch_cov_notification_invokes_callback(self):
         """_dispatch_cov_notification calls registered callback."""

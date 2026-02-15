@@ -5,7 +5,8 @@ Asynchronous BACnet/IP protocol library for Python 3.13+.
 
 bac-py implements ASHRAE Standard 135-2020 (BACnet) with an async-first
 architecture built on Python's native ``asyncio`` framework. It provides both
-client and server capabilities for BACnet/IP networks with zero required
+client and server capabilities across five transport types -- BACnet/IP (UDP),
+IPv6, Ethernet 802.3, BBMD, and BACnet Secure Connect -- with zero required
 dependencies.
 
 .. code-block:: python
@@ -21,8 +22,9 @@ dependencies.
    asyncio.run(main())
 
 Head to :doc:`getting-started` for installation and first steps, or browse
-the :doc:`guide/reading-writing` to see what bac-py can do. For a high-level overview of
-capabilities, see :doc:`features`.
+the :doc:`guide/reading-writing` to see what bac-py can do. For transport
+configuration (BBMD, routers, IPv6, Secure Connect), see
+:doc:`guide/transport-setup`.
 
 .. toctree::
    :caption: Getting Started
@@ -30,7 +32,6 @@ capabilities, see :doc:`features`.
 
    getting-started
    features
-   changelog
 
 .. toctree::
    :caption: User Guide
@@ -39,13 +40,14 @@ capabilities, see :doc:`features`.
    guide/client-guide
    guide/reading-writing
    guide/discovery-networking
-   guide/events-alarms
+   guide/transport-setup
    guide/server-mode
+   guide/events-alarms
    guide/device-management
    guide/secure-connect
    guide/debugging-logging
-   guide/benchmarks
    guide/security
+   guide/benchmarks
    guide/examples
 
 .. toctree::
@@ -62,6 +64,12 @@ capabilities, see :doc:`features`.
    api/segmentation
    api/conformance
    api/serialization
+
+.. toctree::
+   :caption: Project
+   :maxdepth: 1
+
+   changelog
 
 
 Indices and tables

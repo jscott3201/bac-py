@@ -900,7 +900,13 @@ class BACnetApplication:
         """Create a background task and track it to prevent GC."""
         task = asyncio.create_task(coro)
         self._background_tasks.add(task)
-        task.add_done_callback(self._background_tasks.discard)
+        task.add_done_callback(self._on_background_task_done)
+
+    def _on_background_task_done(self, task: asyncio.Task[None]) -> None:
+        """Clean up a finished background task and log unexpected errors."""
+        self._background_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.error("Background task failed: %s", task.exception(), exc_info=task.exception())
 
     def _dcc_timer_expired(self) -> None:
         """Re-enable communication after DCC timer expires."""

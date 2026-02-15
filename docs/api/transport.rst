@@ -1,6 +1,14 @@
 Transport
 =========
 
+Transport implementations for all supported BACnet data links. Each transport
+provides ``start()``, ``stop()``, ``send_unicast()``, ``send_broadcast()``,
+and ``on_receive()`` methods conforming to the
+:class:`~bac_py.transport.port.TransportPort` protocol.
+
+For setup guides and configuration examples, see :doc:`/guide/transport-setup`.
+For BACnet/SC specifics (TLS, hub, failover), see :doc:`/guide/secure-connect`.
+
 .. automodule:: bac_py.transport
    :no-members:
 

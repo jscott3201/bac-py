@@ -24,7 +24,7 @@ from bac_py.transport.sc.types import BvlcSCFunction
 from bac_py.transport.sc.vmac import SCVMAC, DeviceUUID
 
 if TYPE_CHECKING:
-    from collections.abc import Awaitable, Callable
+    from collections.abc import Callable, Coroutine
 
 logger = logging.getLogger(__name__)
 
@@ -249,11 +249,17 @@ class SCTransport:
         logger.debug("SC send broadcast: %d bytes", len(npdu))
         self._schedule_send(self._send_raw_via_hub(self._broadcast_header + npdu))
 
-    def _schedule_send(self, coro: Awaitable[None]) -> None:
+    def _schedule_send(self, coro: Coroutine[object, object, None]) -> None:
         """Schedule an async send and track the task."""
-        task = asyncio.ensure_future(coro)
+        task = asyncio.create_task(coro)
         self._send_tasks.add(task)
-        task.add_done_callback(self._send_tasks.discard)
+        task.add_done_callback(self._on_send_task_done)
+
+    def _on_send_task_done(self, task: asyncio.Task[None]) -> None:
+        """Clean up a finished send task and log unexpected errors."""
+        self._send_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.debug("SC send task failed: %s", task.exception())
 
     # ------------------------------------------------------------------
     # Internal send helpers

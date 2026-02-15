@@ -187,7 +187,7 @@ class SCNodeSwitch:
         if dest in self._pending_resolutions:
             return await self._pending_resolutions[dest]
 
-        fut: asyncio.Future[list[str]] = asyncio.get_event_loop().create_future()
+        fut: asyncio.Future[list[str]] = asyncio.get_running_loop().create_future()
         self._pending_resolutions[dest] = fut
 
         msg = SCMessage(
@@ -294,9 +294,15 @@ class SCNodeSwitch:
         conn.on_connected = lambda: self._on_inbound_connected(conn)
         conn.on_disconnected = lambda: self._on_direct_disconnected(conn)
 
-        task = asyncio.ensure_future(conn.accept(ws))
+        task = asyncio.create_task(conn.accept(ws))
         self._client_tasks.add(task)
-        task.add_done_callback(self._client_tasks.discard)
+        task.add_done_callback(self._on_client_task_done)
+
+    def _on_client_task_done(self, task: asyncio.Task[None]) -> None:
+        """Clean up a finished client task and log unexpected errors."""
+        self._client_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.debug("SC direct connection task failed: %s", task.exception())
 
     def _make_disconnect_cb(self, conn: SCConnection) -> Callable[[], None]:
         """Create a disconnect callback bound to a specific connection."""

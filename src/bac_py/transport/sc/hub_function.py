@@ -155,9 +155,15 @@ class SCHubFunction:
 
         conn.on_message = _route
 
-        task = asyncio.ensure_future(conn.accept(ws, vmac_checker=self._check_vmac))
+        task = asyncio.create_task(conn.accept(ws, vmac_checker=self._check_vmac))
         self._client_tasks.add(task)
-        task.add_done_callback(self._client_tasks.discard)
+        task.add_done_callback(self._on_client_task_done)
+
+    def _on_client_task_done(self, task: asyncio.Task[None]) -> None:
+        """Clean up a finished client task and log unexpected errors."""
+        self._client_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.debug("SC hub client task failed: %s", task.exception())
 
     def _check_vmac(self, vmac: SCVMAC, uuid: DeviceUUID) -> bool:
         """Check if VMAC/UUID pair is acceptable (no collision)."""
@@ -177,9 +183,9 @@ class SCHubFunction:
             old_vmac = self._uuid_map[conn.peer_uuid]
             if old_vmac != conn.peer_vmac and old_vmac in self._connections:
                 old_conn = self._connections.pop(old_vmac)
-                task = asyncio.ensure_future(old_conn.disconnect())
+                task = asyncio.create_task(old_conn.disconnect())
                 self._client_tasks.add(task)
-                task.add_done_callback(self._client_tasks.discard)
+                task.add_done_callback(self._on_client_task_done)
 
         self._connections[conn.peer_vmac] = conn
         self._uuid_map[conn.peer_uuid] = conn.peer_vmac

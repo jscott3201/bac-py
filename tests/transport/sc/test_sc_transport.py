@@ -313,8 +313,8 @@ class TestSCTransportMemoryCleanup:
         await transport.start()
 
         # Inject dummy send tasks
-        dummy1 = asyncio.ensure_future(asyncio.sleep(999))
-        dummy2 = asyncio.ensure_future(asyncio.sleep(999))
+        dummy1 = asyncio.create_task(asyncio.sleep(999))
+        dummy2 = asyncio.create_task(asyncio.sleep(999))
         transport._send_tasks.add(dummy1)
         transport._send_tasks.add(dummy2)
         assert len(transport._send_tasks) == 2
@@ -330,7 +330,7 @@ class TestSCTransportMemoryCleanup:
         await transport.start()
 
         # Create a task that finishes immediately
-        done_task = asyncio.ensure_future(asyncio.sleep(0))
+        done_task = asyncio.create_task(asyncio.sleep(0))
         await asyncio.sleep(0.05)  # Let it complete
         transport._send_tasks.add(done_task)
 

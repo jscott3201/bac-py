@@ -1,6 +1,13 @@
 Network
 =======
 
+The network layer handles NPDU encoding/decoding, address parsing, and
+multi-port routing. It sits between the application layer (APDUs) and the
+transport layer (raw datagrams).
+
+For address format details, see :ref:`addressing`. For router configuration,
+see :ref:`transport-router`.
+
 .. automodule:: bac_py.network
    :no-members:
 
