@@ -16,7 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      id-token: write
+    outputs:
+      new_release: ${{ steps.check_tag.outputs.exists == 'false' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -76,29 +77,63 @@ jobs:
           draft: false
           prerelease: false
 
-      # ──────────────────────────────────────────────────────────
-      # PyPI Publish (disabled until repo is public)
-      #
-      # Prerequisites before enabling:
-      #   1. Create a PyPI project at https://pypi.org/manage/projects/
-      #   2. Add GitHub as a trusted publisher:
-      #      PyPI → Project → Settings → Publishing → Add Publisher
-      #      - Owner: jscott3201
-      #      - Repository: bac-py
-      #      - Workflow: release.yml
-      #      - Environment: (leave blank)
-      #   3. Uncomment the step below
-      #   4. Ensure `hatchling` build-backend is configured in pyproject.toml (already done)
-      #
-      # - name: Build package
-      #   if: steps.check_tag.outputs.exists == 'false'
-      #   run: |
-      #     pip install build
-      #     python -m build
-      #
-      # - name: Publish to PyPI
-      #   if: steps.check_tag.outputs.exists == 'false'
-      #   uses: pypa/gh-action-pypi-publish@release/v1
-      #   with:
-      #     print-hash: true
-      # ──────────────────────────────────────────────────────────
+  build:
+    needs: release
+    if: needs.release.outputs.new_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build package
+        run: |
+          pip install build
+          python -m build
+
+      - name: Upload distributions
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  # ──────────────────────────────────────────────────────────
+  # PyPI Publish
+  #
+  # Prerequisites (one-time setup):
+  #   1. Go to https://pypi.org/manage/account/publishing/
+  #   2. Add a pending publisher:
+  #      - Package name: bac-py
+  #      - Owner: jscott3201
+  #      - Repository: bac-py
+  #      - Workflow: release.yml
+  #      - Environment: pypi
+  #   3. In GitHub repo Settings → Environments, create a "pypi"
+  #      environment. Optionally enable required reviewers for
+  #      manual approval before each publish.
+  # ──────────────────────────────────────────────────────────
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/bac-py
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          print-hash: true

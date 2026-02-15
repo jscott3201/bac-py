@@ -1,6 +1,6 @@
 [project]
 name = "bac-py"
-version = "1.4.9"
+version = "1.5.0"
 description = "Asynchronous BACnet protocol library for Python — BACnet/IP, IPv6, Ethernet, and Secure Connect"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -40,6 +40,7 @@ secure = ["websockets>=14.0", "cryptography>=42.0"]
 Repository = "https://github.com/jscott3201/bac-py"
 Documentation = "https://jscott3201.github.io/bac-py"
 Issues = "https://github.com/jscott3201/bac-py/issues"
+Changelog = "https://github.com/jscott3201/bac-py/blob/main/CHANGELOG.md"
 
 [dependency-groups]
 test = ["pytest>=8.0", "pytest-asyncio>=0.24", "pytest-cov>=6.0", "coverage>=7.0"]
@@ -71,6 +72,18 @@ required-version = ">=0.5"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/bac_py"]
+
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "docker/",
+    "scripts/",
+    "docs/",
+    ".github/",
+    "Makefile",
+    "ruff.toml",
+    "uv.lock",
+    ".python-version",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

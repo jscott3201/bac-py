@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-02-15
+
+### Added
+
+- **CONTRIBUTING.md**: Contributing guidelines covering development setup, code
+  standards, quality gates, and pull request process.
+- **SECURITY.md**: Security policy with vulnerability reporting instructions,
+  supported versions, and security considerations for BACnet deployments.
+- **CODE_OF_CONDUCT.md**: Contributor Covenant 3.0 Code of Conduct.
+- **GitHub issue templates**: Structured bug report and feature request forms
+  (`.github/ISSUE_TEMPLATE/bug_report.yml`, `feature_request.yml`).
+- **GitHub PR template**: Pull request template with quality gate checklist
+  (`.github/PULL_REQUEST_TEMPLATE.md`).
+- **README badges**: Added PyPI version, Python version, license, and CI status
+  badges. Added Contributing section linking to CONTRIBUTING.md and SECURITY.md.
+- **Changelog project URL**: Added `Changelog` link to `[project.urls]` in
+  `pyproject.toml` for display on PyPI.
+
+### Changed
+
+- **Release workflow**: Restructured `.github/workflows/release.yml` into three
+  separate jobs (release, build, publish) per the official Python packaging guide.
+  The publish job uses a dedicated `pypi` GitHub Environment with `id-token: write`
+  and `attestations: write` permissions for trusted publishing with PEP 740
+  attestations. Build artifacts pass between jobs via `actions/upload-artifact`.
+- **sdist exclusions**: Configured `[tool.hatch.build.targets.sdist]` to exclude
+  `docker/`, `scripts/`, `docs/`, `.github/`, `Makefile`, `ruff.toml`, `uv.lock`,
+  and `.python-version` from source distributions. Reduces sdist from 397 to 314
+  files. Wheel contents unchanged (only `bac_py/` package).
+
+### Fixed
+
+- **README test count**: Reconciled inconsistent test counts ("6,380+" vs
+  "6,300+") in the Testing section.
+
 ## [1.4.9] - 2026-02-14
 
 ### Added

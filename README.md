@@ -1,5 +1,10 @@
 # bac-py
 
+[![PyPI](https://img.shields.io/pypi/v/bac-py)](https://pypi.org/project/bac-py/)
+[![Python](https://img.shields.io/pypi/pyversions/bac-py)](https://pypi.org/project/bac-py/)
+[![License](https://img.shields.io/github/license/jscott3201/bac-py)](LICENSE)
+[![CI](https://github.com/jscott3201/bac-py/actions/workflows/ci.yml/badge.svg)](https://github.com/jscott3201/bac-py/actions/workflows/ci.yml)
+
 Asynchronous BACnet/IP protocol library for Python 3.13+, implementing ASHRAE Standard 135-2020. Zero required runtime dependencies, built on native `asyncio`.
 
 [Documentation](https://jscott3201.github.io/bac-py/) | [Getting Started](https://jscott3201.github.io/bac-py/getting-started.html) | [API Reference](https://jscott3201.github.io/bac-py/api/app/index.html) | [Changelog](https://jscott3201.github.io/bac-py/changelog.html)
@@ -351,7 +356,7 @@ detailed walkthroughs.
 ## Testing
 
 ```bash
-make test          # 6,300+ unit tests
+make test          # 6,380+ unit tests
 make lint          # ruff check + format verification
 make typecheck     # mypy
 make docs          # sphinx-build
@@ -405,6 +410,13 @@ make docker-clean                # Cleanup
 - Optional: `orjson` for JSON serialization (`pip install bac-py[serialization]`)
 - Optional: `websockets` + `cryptography` for BACnet Secure Connect (`pip install bac-py[secure]`)
 - Docker and Docker Compose for integration tests
+
+## Contributing
+
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for
+development setup, code standards, and the pull request process.
+
+For security vulnerabilities, see [SECURITY.md](SECURITY.md).
 
 ## License
 
