@@ -12,10 +12,6 @@ All transports share the same application layer -- services, objects, and
 encoding work identically regardless of the underlying transport. Switching
 transports requires only configuration changes, not application code changes.
 
-.. contents::
-   :local:
-   :depth: 2
-
 
 .. _transport-bip:
 

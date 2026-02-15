@@ -48,6 +48,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--sustain", type=int, default=30, help="Sustained test seconds (default: 30)")
     p.add_argument("--port", type=int, default=0, help="Server port (0=auto, default: 0)")
     p.add_argument("--json", action="store_true", help="Output JSON report to stdout")
+    p.add_argument("--profile", action="store_true", help="Enable pyinstrument profiling")
+    p.add_argument("--profile-html", metavar="PATH", help="Save interactive HTML profile to file")
     return p.parse_args()
 
 
@@ -728,7 +730,23 @@ def main() -> None:
 
     logging.basicConfig(level=logging.WARNING)
 
+    profiler = None
+    if args.profile or args.profile_html:
+        from pyinstrument import Profiler
+
+        profiler = Profiler(async_mode="enabled")
+
+    if profiler:
+        profiler.start()
     result = asyncio.run(_run(args))
+    if profiler:
+        profiler.stop()
+        if args.profile:
+            profiler.print(file=sys.stderr, unicode=True, color=True)
+        if args.profile_html:
+            profiler.write_html(args.profile_html)
+            print(f"Profile saved to {args.profile_html}", file=sys.stderr)
+
     error_rate = result["sustained"]["error_rate"]
     if error_rate >= 0.005:
         print(f"FAIL: Error rate {error_rate:.2%} exceeds 0.5%", file=sys.stderr)

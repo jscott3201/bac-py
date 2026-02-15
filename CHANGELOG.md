@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.5] - 2026-02-14
+
+### Added
+
+- **Benchmark profiling**: All local benchmark scripts (`bench_bip`, `bench_router`,
+  `bench_bbmd`, `bench_sc`) accept `--profile` and `--profile-html` flags for
+  pyinstrument profiling of async hot paths.  `pyinstrument` added as a dev
+  dependency.  Makefile targets: `make bench-{bip,router,bbmd,sc}-profile`.
+
+### Changed
+
+- **Docs dependency group**: Added `websockets`, `cryptography`, and `orjson` to
+  the `docs` dependency group so Sphinx autodoc builds with real imports instead
+  of mock stubs, fixing SC transport API documentation warnings.
+- **Transport setup guide**: Removed redundant `.. contents::` TOC directive
+  (Furo theme provides sidebar navigation).
+
 ## [1.4.4] - 2026-02-14
 
 ### Changed

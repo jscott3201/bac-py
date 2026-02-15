@@ -613,3 +613,42 @@ thresholds.
    WebSocket frame queuing (SC). The error backoff parameter is critical for
    BIP stability -- without it, failed requests retry instantly and flood the
    socket, causing cascade failures.
+
+
+.. _profiling:
+
+Profiling
+---------
+
+All local benchmark scripts support `pyinstrument <https://github.com/joerick/pyinstrument>`_
+profiling via two flags:
+
+- ``--profile`` — print a text call-tree summary to stderr after the benchmark
+- ``--profile-html PATH`` — save an interactive HTML profile to a file
+
+Both flags can be combined. Profiling output goes to stderr so it does not
+interfere with ``--json`` output on stdout.
+
+**Quick profiling with Make targets:**
+
+.. code-block:: bash
+
+   make bench-bip-profile       # BIP with --profile --sustain 10
+   make bench-router-profile    # Router
+   make bench-bbmd-profile      # BBMD
+   make bench-sc-profile        # SC
+
+**HTML report for deeper analysis:**
+
+.. code-block:: bash
+
+   uv run python scripts/bench_bip.py --profile-html /tmp/bip.html --sustain 10
+
+Open ``/tmp/bip.html`` in a browser for an interactive flame graph showing
+where time is spent inside bac-py during the benchmark workload.
+
+.. note::
+
+   ``pyinstrument`` is a dev dependency — it is not required at runtime or in
+   Docker images.  The ``--profile`` / ``--profile-html`` flags use a lazy
+   import so the scripts still work without it installed.

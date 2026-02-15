@@ -1,6 +1,8 @@
 .PHONY: lint typecheck test docs check fix format coverage coverage-html \
-       bench-bip bench-bip-json bench-router bench-router-json \
-       bench-bbmd bench-bbmd-json bench-sc bench-sc-json \
+       bench-bip bench-bip-json bench-bip-profile \
+       bench-router bench-router-json bench-router-profile \
+       bench-bbmd bench-bbmd-json bench-bbmd-profile \
+       bench-sc bench-sc-json bench-sc-profile \
        docker-build docker-test docker-stress docker-test-client docker-test-bbmd \
        docker-test-router docker-test-device-mgmt docker-test-cov-advanced \
        docker-test-events docker-test-sc docker-test-sc-stress docker-sc-stress \
@@ -64,6 +66,18 @@ bench-sc:
 
 bench-sc-json:
 	uv run python scripts/bench_sc.py --json
+
+bench-bip-profile:
+	uv run python scripts/bench_bip.py --profile --sustain 10
+
+bench-router-profile:
+	uv run python scripts/bench_router.py --profile --sustain 10
+
+bench-bbmd-profile:
+	uv run python scripts/bench_bbmd.py --profile --sustain 10
+
+bench-sc-profile:
+	uv run python scripts/bench_sc.py --profile --sustain 10
 
 # ---------------------------------------------------------------------------
 # Docker integration tests

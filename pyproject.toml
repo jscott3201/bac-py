@@ -1,6 +1,6 @@
 [project]
 name = "bac-py"
-version = "1.4.4"
+version = "1.4.5"
 description = "Asynchronous BACnet protocol library for Python — BACnet/IP, IPv6, Ethernet, and Secure Connect"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -45,13 +45,21 @@ Issues = "https://github.com/jscott3201/bac-py/issues"
 test = ["pytest>=8.0", "pytest-asyncio>=0.24", "pytest-cov>=6.0", "coverage>=7.0"]
 lint = ["ruff>=0.8"]
 type-check = ["mypy>=1.13"]
-docs = ["sphinx>=8.0", "furo>=2024.8", "sphinx-autodoc-typehints>=2.0"]
+docs = [
+    "sphinx>=8.0",
+    "furo>=2024.8",
+    "sphinx-autodoc-typehints>=2.0",
+    "websockets>=14.0",
+    "cryptography>=42.0",
+    "orjson>=3.10",
+]
 dev = [
     { include-group = "test" },
     { include-group = "lint" },
     { include-group = "type-check" },
     { include-group = "docs" },
     "myst-parser>=5.0.0",
+    "pyinstrument>=5.0",
 ]
 
 [build-system]

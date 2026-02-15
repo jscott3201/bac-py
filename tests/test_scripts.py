@@ -164,6 +164,28 @@ class TestBenchSCHelpers:
         finally:
             sys.argv = old_argv
 
+    def test_parse_args_profile_defaults(self) -> None:
+        mod = self._import_bench_sc()
+        old_argv = sys.argv
+        sys.argv = ["bench_sc.py"]
+        try:
+            args = mod._parse_args()
+            assert args.profile is False
+            assert args.profile_html is None
+        finally:
+            sys.argv = old_argv
+
+    def test_parse_args_profile_flags(self) -> None:
+        mod = self._import_bench_sc()
+        old_argv = sys.argv
+        sys.argv = ["bench_sc.py", "--profile", "--profile-html", "report.html"]
+        try:
+            args = mod._parse_args()
+            assert args.profile is True
+            assert args.profile_html == "report.html"
+        finally:
+            sys.argv = old_argv
+
 
 class TestBenchBIPHelpers:
     """Test pure helper functions from bench_bip.py without networking."""
@@ -280,6 +302,28 @@ class TestBenchBIPHelpers:
         finally:
             sys.argv = old_argv
 
+    def test_parse_args_profile_defaults(self) -> None:
+        mod = self._import_bench_bip()
+        old_argv = sys.argv
+        sys.argv = ["bench_bip.py"]
+        try:
+            args = mod._parse_args()
+            assert args.profile is False
+            assert args.profile_html is None
+        finally:
+            sys.argv = old_argv
+
+    def test_parse_args_profile_flags(self) -> None:
+        mod = self._import_bench_bip()
+        old_argv = sys.argv
+        sys.argv = ["bench_bip.py", "--profile", "--profile-html", "report.html"]
+        try:
+            args = mod._parse_args()
+            assert args.profile is True
+            assert args.profile_html == "report.html"
+        finally:
+            sys.argv = old_argv
+
     def test_create_stress_objects(self) -> None:
         mod = self._import_bench_bip()
         from unittest.mock import MagicMock
@@ -364,6 +408,28 @@ class TestBenchRouterHelpers:
             assert args.pools == 3
             assert args.sustain == 60
             assert args.json is True
+        finally:
+            sys.argv = old_argv
+
+    def test_parse_args_profile_defaults(self) -> None:
+        mod = self._import_bench_router()
+        old_argv = sys.argv
+        sys.argv = ["bench_router.py"]
+        try:
+            args = mod._parse_args()
+            assert args.profile is False
+            assert args.profile_html is None
+        finally:
+            sys.argv = old_argv
+
+    def test_parse_args_profile_flags(self) -> None:
+        mod = self._import_bench_router()
+        old_argv = sys.argv
+        sys.argv = ["bench_router.py", "--profile", "--profile-html", "report.html"]
+        try:
+            args = mod._parse_args()
+            assert args.profile is True
+            assert args.profile_html == "report.html"
         finally:
             sys.argv = old_argv
 
@@ -469,6 +535,28 @@ class TestBenchBBMDHelpers:
             assert args.bdt_workers == 2
             assert args.sustain == 60
             assert args.json is True
+        finally:
+            sys.argv = old_argv
+
+    def test_parse_args_profile_defaults(self) -> None:
+        mod = self._import_bench_bbmd()
+        old_argv = sys.argv
+        sys.argv = ["bench_bbmd.py"]
+        try:
+            args = mod._parse_args()
+            assert args.profile is False
+            assert args.profile_html is None
+        finally:
+            sys.argv = old_argv
+
+    def test_parse_args_profile_flags(self) -> None:
+        mod = self._import_bench_bbmd()
+        old_argv = sys.argv
+        sys.argv = ["bench_bbmd.py", "--profile", "--profile-html", "report.html"]
+        try:
+            args = mod._parse_args()
+            assert args.profile is True
+            assert args.profile_html == "report.html"
         finally:
             sys.argv = old_argv
 
