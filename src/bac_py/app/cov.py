@@ -213,6 +213,10 @@ class COVManager:
         """Remove a subscription (cancellation).
 
         Silently ignores if no matching subscription exists.
+
+        :param subscriber: Address of the subscribing device.
+        :param process_id: Subscriber-assigned process identifier.
+        :param monitored_object: Object identifier being unsubscribed.
         """
         key = (subscriber, process_id, monitored_object)
         sub = self._subscriptions.pop(key, None)
@@ -666,6 +670,10 @@ class COVManager:
         - Analog objects: ``|new_value - last_reported| >= COV_INCREMENT``
         - Binary/multistate: any change in Present_Value
         - Any: change in Status_Flags
+
+        :param sub: The subscription to evaluate.
+        :param obj: The monitored object.
+        :returns: ``True`` if a notification should be sent.
         """
         current_pv = self._read_present_value(obj)
         current_sf = self._read_status_flags(obj)
@@ -700,6 +708,9 @@ class COVManager:
 
         Builds the notification with Present_Value and Status_Flags,
         then sends via the application layer.
+
+        :param sub: The subscription triggering the notification.
+        :param obj: The monitored object.
         """
         logger.debug("COV notification for %s to %s", sub.monitored_object, sub.subscriber)
         # Build list_of_values with Present_Value and Status_Flags

@@ -103,7 +103,6 @@ _PROPERTY_ID_VENDOR_CACHE: dict[int, object] = {}
 class PropertyIdentifier(IntEnum):
     """BACnet property identifiers per ASHRAE 135-2020 Clause 21.
 
-    Values match the numerical order reference in the standard (pp. 933-942).
     Gaps (18, 51, 55, 95, 101, etc.) are properties deleted from the standard.
 
     Vendor-proprietary property IDs (512+) and any other values in the

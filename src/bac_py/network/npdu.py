@@ -366,3 +366,148 @@ def _make_npdu(
     object.__setattr__(obj, "apdu", apdu)
     object.__setattr__(obj, "network_message_data", network_message_data)
     return obj
+
+
+def encode_npdu_local_delivery(
+    npdu: NPDU,
+    source_network: int,
+    source_mac: bytes,
+) -> bytes:
+    """Fast-path encode for router local delivery (no destination).
+
+    Combines NPDU construction and encoding into a single operation,
+    skipping intermediate :class:`NPDU` object creation.  Used by the
+    router when delivering to a directly-connected network: strips the
+    destination and injects the source address in one step.
+
+    :param npdu: The original routed :class:`NPDU` (destination is stripped).
+    :param source_network: SNET to inject (arrival port's network number).
+    :param source_mac: SADR to inject (data-link source MAC).
+    :returns: Encoded NPDU bytes ready for transport.
+    """
+    slen = len(source_mac)
+
+    # Build control octet: has source (0x08), no destination
+    control = npdu.priority & 0x03
+    if npdu.is_network_message:
+        control |= 0x80
+    control |= 0x08  # has source
+    if npdu.expecting_reply:
+        control |= 0x04
+
+    if npdu.is_network_message:
+        msg_type = npdu.message_type
+        nmd = npdu.network_message_data
+        total = 5 + slen + 1 + len(nmd)  # ver+ctrl + SNET+SLEN+SADR + msg_type + data
+        if msg_type is not None and msg_type >= 0x80:
+            total += 2  # vendor_id
+        buf = bytearray(total)
+        buf[0] = BACNET_PROTOCOL_VERSION
+        buf[1] = control
+        struct.pack_into("!HB", buf, 2, source_network, slen)
+        offset = 5 + slen
+        buf[5:offset] = source_mac
+        buf[offset] = msg_type  # type: ignore[assignment]
+        offset += 1
+        if msg_type is not None and msg_type >= 0x80:
+            struct.pack_into("!H", buf, offset, npdu.vendor_id or 0)
+            offset += 2
+        buf[offset:] = nmd
+    else:
+        apdu = npdu.apdu
+        total = 5 + slen + len(apdu)  # ver+ctrl + SNET+SLEN+SADR + apdu
+        buf = bytearray(total)
+        buf[0] = BACNET_PROTOCOL_VERSION
+        buf[1] = control
+        struct.pack_into("!HB", buf, 2, source_network, slen)
+        buf[5 : 5 + slen] = source_mac
+        buf[5 + slen :] = apdu
+
+    return bytes(buf)
+
+
+def encode_npdu_with_source(
+    npdu: NPDU,
+    source_network: int,
+    source_mac: bytes,
+) -> bytes:
+    """Fast-path encode preserving destination, injecting source.
+
+    Combines source injection and NPDU encoding for the forwarding case
+    (e.g. global broadcast, next-hop forwarding).  Preserves the
+    destination and uses the given hop count from the NPDU.
+
+    :param npdu: The original :class:`NPDU` (destination is preserved).
+    :param source_network: SNET to inject.
+    :param source_mac: SADR to inject.
+    :returns: Encoded NPDU bytes ready for transport.
+    """
+    dest = npdu.destination
+    slen = len(source_mac)
+
+    # Build control octet
+    control = npdu.priority & 0x03
+    if npdu.is_network_message:
+        control |= 0x80
+    if dest is not None:
+        control |= 0x20
+    control |= 0x08  # has source
+    if npdu.expecting_reply:
+        control |= 0x04
+
+    # Calculate total size
+    total = 2 + 3 + slen  # ver+ctrl + SNET+SLEN+SADR
+    dadr: bytes = b""
+    if dest is not None:
+        dadr = dest.mac_address
+        total += 3 + len(dadr)  # DNET+DLEN+DADR
+        total += 1  # hop count
+
+    if npdu.is_network_message:
+        total += 1  # message_type
+        if npdu.message_type is not None and npdu.message_type >= 0x80:
+            total += 2
+        total += len(npdu.network_message_data)
+    else:
+        total += len(npdu.apdu)
+
+    buf = bytearray(total)
+    buf[0] = BACNET_PROTOCOL_VERSION
+    buf[1] = control
+    offset = 2
+
+    # Destination (if present)
+    if dest is not None:
+        dnet = dest.network if dest.network is not None else 0xFFFF
+        dlen = len(dadr)
+        struct.pack_into("!HB", buf, offset, dnet, dlen)
+        offset += 3
+        if dlen > 0:
+            buf[offset : offset + dlen] = dadr
+            offset += dlen
+
+    # Source
+    struct.pack_into("!HB", buf, offset, source_network, slen)
+    offset += 3
+    buf[offset : offset + slen] = source_mac
+    offset += slen
+
+    # Hop count (only if destination present)
+    if dest is not None:
+        buf[offset] = npdu.hop_count
+        offset += 1
+
+    # Payload
+    if npdu.is_network_message:
+        buf[offset] = npdu.message_type  # type: ignore[assignment]
+        offset += 1
+        if npdu.message_type is not None and npdu.message_type >= 0x80:
+            struct.pack_into("!H", buf, offset, npdu.vendor_id or 0)
+            offset += 2
+        nmd = npdu.network_message_data
+        buf[offset : offset + len(nmd)] = nmd
+    else:
+        apdu = npdu.apdu
+        buf[offset : offset + len(apdu)] = apdu
+
+    return bytes(buf)

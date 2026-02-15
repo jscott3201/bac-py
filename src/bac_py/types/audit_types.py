@@ -1,6 +1,6 @@
 """BACnet audit constructed types per ASHRAE 135-2020 Clause 19.6.
 
-BACnetAuditNotification (Table 19-4), BACnetAuditLogRecord,
+BACnetAuditNotification, BACnetAuditLogRecord,
 AuditQueryByTarget, AuditQueryBySource.
 """
 
@@ -35,7 +35,7 @@ from bac_py.types.primitives import ObjectIdentifier
 
 @dataclass(frozen=True, slots=True)
 class BACnetAuditNotification:
-    """BACnetAuditNotification per Table 19-4 (pp. 821-822).
+    """BACnetAuditNotification per Clause 19.6.
 
     ::
 

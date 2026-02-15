@@ -79,7 +79,7 @@ class RouterAvailableToNetwork:
 
 @dataclass(frozen=True, slots=True)
 class RoutingTablePort:
-    """A single port entry within an Initialize-Routing-Table message (Figure 6-11)."""
+    """A single port entry within an Initialize-Routing-Table message (Clause 6.5.5)."""
 
     network: int
     port_id: int
@@ -243,7 +243,7 @@ def _encode_reject_message(msg: RejectMessageToNetwork) -> bytes:
 
 
 def _encode_routing_table(ports: tuple[RoutingTablePort, ...]) -> bytes:
-    """Encode a routing table per Figure 6-11: count + repeated port entries."""
+    """Encode a routing table per Clause 6.5.5: count + repeated port entries."""
     buf = bytearray()
     buf.append(len(ports))
     for port in ports:
@@ -369,7 +369,7 @@ def _decode_reject_message(data: bytes) -> RejectMessageToNetwork:
 
 
 def _decode_routing_table(data: bytes) -> tuple[RoutingTablePort, ...]:
-    """Decode a routing table per Figure 6-11: count + repeated port entries."""
+    """Decode a routing table per Clause 6.5.5: count + repeated port entries."""
     if len(data) < 1:
         msg = "Routing table data too short"
         raise ValueError(msg)

@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     from bac_py.transport.port import TransportPort
 
 logger = logging.getLogger(__name__)
+_DEBUG = logging.DEBUG
 
 
 @dataclass(slots=True)
@@ -277,9 +278,12 @@ class NetworkLayer:
             )
 
         if self._receive_callback:
-            logger.debug(
-                "Dispatching APDU (%d bytes) to application from %s", len(npdu.apdu), src_addr
-            )
+            if __debug__ and logger.isEnabledFor(_DEBUG):
+                logger.debug(
+                    "Dispatching APDU (%d bytes) to application from %s",
+                    len(npdu.apdu),
+                    src_addr,
+                )
             try:
                 self._receive_callback(npdu.apdu, src_addr)
             except Exception:
@@ -478,9 +482,12 @@ class NetworkLayer:
             raise ValueError(msg)
         router_mac = self.get_router_for_network(destination.network)
         if router_mac is not None:
-            logger.debug(
-                "Sending to network %d via cached router %s", destination.network, router_mac.hex()
-            )
+            if __debug__ and logger.isEnabledFor(_DEBUG):
+                logger.debug(
+                    "Sending to network %d via cached router %s",
+                    destination.network,
+                    router_mac.hex(),
+                )
             self._transport.send_unicast(npdu_bytes, router_mac)
         else:
             # Cache miss: broadcast NPDU (a router will pick it up)

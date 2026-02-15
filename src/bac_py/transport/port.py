@@ -69,5 +69,5 @@ class TransportPort(Protocol):
 
     @property
     def max_npdu_length(self) -> int:  # pragma: no cover
-        """Maximum NPDU length supported by this data-link (Table 6-1)."""
+        """Maximum NPDU length supported by this data-link per Clause 6."""
         ...

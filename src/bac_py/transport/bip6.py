@@ -325,7 +325,7 @@ class BIP6Transport:
 
     @property
     def max_npdu_length(self) -> int:
-        """Maximum NPDU length for BACnet/IPv6 (Table 6-1)."""
+        """Maximum NPDU length for BACnet/IPv6 per Clause 6."""
         return 1497
 
     @property

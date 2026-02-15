@@ -33,7 +33,13 @@ from bac_py.network.messages import (
     decode_network_message,
     encode_network_message,
 )
-from bac_py.network.npdu import NPDU, _make_npdu, decode_npdu, encode_npdu
+from bac_py.network.npdu import (
+    NPDU,
+    _make_npdu,
+    decode_npdu,
+    encode_npdu,
+    encode_npdu_local_delivery,
+)
 from bac_py.types.enums import (
     NetworkMessageType,
     NetworkPriority,
@@ -47,6 +53,7 @@ if TYPE_CHECKING:
     from bac_py.transport.port import TransportPort
 
 logger = logging.getLogger(__name__)
+_DEBUG = logging.DEBUG
 
 
 # ---------------------------------------------------------------------------
@@ -543,7 +550,7 @@ class NetworkRouter:
             logger.warning("Error processing NPDU on port %d", port_id, exc_info=True)
 
     def _process_npdu(self, port_id: int, npdu: NPDU, source_mac: bytes) -> None:
-        """Route an NPDU per the forwarding flowchart (Figure 6-12).
+        """Route an NPDU per the forwarding flowchart (Clause 6.5).
 
         Decision sequence:
 
@@ -668,17 +675,21 @@ class NetworkRouter:
             return
 
         if entry.next_router_mac is None:
-            logger.debug(
-                "Forwarding to directly-connected network %d on port %d", dnet, dest_port.port_id
-            )
+            if __debug__ and logger.isEnabledFor(_DEBUG):
+                logger.debug(
+                    "Forwarding to directly-connected network %d on port %d",
+                    dnet,
+                    dest_port.port_id,
+                )
             self._deliver_to_directly_connected(arrival_port_id, npdu, source_mac, dest_port)
         else:
-            logger.debug(
-                "Forwarding to network %d via next-hop router %s on port %d",
-                dnet,
-                entry.next_router_mac.hex(),
-                dest_port.port_id,
-            )
+            if __debug__ and logger.isEnabledFor(_DEBUG):
+                logger.debug(
+                    "Forwarding to network %d via next-hop router %s on port %d",
+                    dnet,
+                    entry.next_router_mac.hex(),
+                    dest_port.port_id,
+                )
             self._forward_via_next_hop(arrival_port_id, npdu, source_mac, dest_port, entry)
 
     def _deliver_to_directly_connected(
@@ -692,29 +703,44 @@ class NetworkRouter:
 
         Strips DNET/DLEN/DADR and hop count from the NPCI.
         Injects SNET/SADR if not already present.
+
+        Uses :func:`encode_npdu_local_delivery` to combine NPDU
+        construction and encoding into a single step, avoiding
+        intermediate object creation on the hot path.
         """
         if npdu.destination is None:
             return
 
-        source = self._inject_source(arrival_port_id, npdu, source_mac)
-
-        # Build new NPDU without destination (local delivery on target port)
         dadr = npdu.destination.mac_address
 
-        local_npdu = _make_npdu(
-            version=1,
-            is_network_message=npdu.is_network_message,
-            expecting_reply=npdu.expecting_reply,
-            priority=npdu.priority,
-            destination=None,
-            source=source,
-            hop_count=255,
-            message_type=npdu.message_type,
-            vendor_id=npdu.vendor_id,
-            apdu=npdu.apdu,
-            network_message_data=npdu.network_message_data,
-        )
-        encoded = encode_npdu(local_npdu)
+        if npdu.source is not None and npdu.source.network is not None:
+            # Already has a source — use it directly via combined encode
+            encoded = encode_npdu_local_delivery(
+                npdu,
+                npdu.source.network,
+                npdu.source.mac_address,
+            )
+        else:
+            # Inject source from arrival port
+            port = self._routing_table.get_port(arrival_port_id)
+            if port is not None:
+                encoded = encode_npdu_local_delivery(npdu, port.network_number, source_mac)
+            else:
+                # Rare edge case: port not found, fall back to no source
+                local_npdu = _make_npdu(
+                    version=1,
+                    is_network_message=npdu.is_network_message,
+                    expecting_reply=npdu.expecting_reply,
+                    priority=npdu.priority,
+                    destination=None,
+                    source=None,
+                    hop_count=255,
+                    message_type=npdu.message_type,
+                    vendor_id=npdu.vendor_id,
+                    apdu=npdu.apdu,
+                    network_message_data=npdu.network_message_data,
+                )
+                encoded = encode_npdu(local_npdu)
 
         if len(dadr) == 0:
             # Directed broadcast on the destination network

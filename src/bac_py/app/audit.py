@@ -59,6 +59,26 @@ class AuditManager:
         3. Check auditable_operations bitstring filter
         4. Construct BACnetAuditNotification
         5. Append to local Audit Log buffer
+
+        :param operation: The audit operation being recorded.
+        :param source_device: Object identifier of the device that initiated
+            the operation, or ``None`` if unknown.
+        :param target_object: Object identifier of the affected object.
+        :param target_property: Property identifier value of the affected
+            property, or ``None`` if not property-specific.
+        :param target_array_index: Array index within the property, or
+            ``None`` if not applicable.
+        :param target_priority: Priority level for commandable writes, or
+            ``None`` if not applicable.
+        :param target_value: Encoded bytes of the new value written, or
+            ``None`` if not applicable.
+        :param current_value: Encoded bytes of the value before the
+            operation, or ``None`` if not captured.
+        :param invoke_id: BACnet invoke ID from the request, or ``None``.
+        :param result_error: Error class and code tuple if the operation
+            failed, or ``None`` on success.
+        :param source_comment: Free-text comment from the source device.
+        :param target_comment: Free-text comment about the target.
         """
         reporters = self._find_reporters(target_object)
         if not reporters:

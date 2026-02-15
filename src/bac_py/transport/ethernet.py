@@ -329,7 +329,7 @@ class EthernetTransport:
 
     @property
     def max_npdu_length(self) -> int:
-        """Maximum NPDU length for BACnet Ethernet: 1497 bytes (Table 6-1)."""
+        """Maximum NPDU length for BACnet Ethernet: 1497 bytes per Clause 6."""
         return MAX_NPDU_LENGTH
 
     def _get_fd(self) -> int:

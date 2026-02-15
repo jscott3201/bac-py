@@ -795,7 +795,12 @@ class BACnetApplication:
         service_choice: int,
         service_data: bytes,
     ) -> None:
-        """Send an unconfirmed request."""
+        """Send an unconfirmed request.
+
+        :param destination: Target device address.
+        :param service_choice: Unconfirmed service choice number.
+        :param service_data: Encoded service request bytes.
+        """
         network = self._router or self._network
         if network is None:
             msg = "Application not started"
@@ -832,6 +837,10 @@ class BACnetApplication:
         Unlike ``confirmed_request``, this does not await a response.
         COV notifications are best-effort; failures are logged but
         do not propagate.
+
+        :param service_data: Encoded service request bytes.
+        :param destination: Target device address.
+        :param service_choice: Confirmed service choice number.
         """
         self._spawn_task(self._send_confirmed_cov(service_data, destination, service_choice))
 

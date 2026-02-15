@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.7] - 2026-02-14
+
+### Changed
+
+- **Router local-delivery fast path**: Added `encode_npdu_local_delivery()` that
+  combines NPDU construction and encoding into a single operation, eliminating
+  intermediate `NPDU` and `BACnetAddress` object creation on every routed packet
+  in `_deliver_to_directly_connected()`.
+- **Router forwarding fast path**: Added `encode_npdu_with_source()` combined
+  encode for source-injected NPDUs with destination preserved.
+- **Debug log guards (BIP transport)**: Added `if __debug__ and
+  logger.isEnabledFor()` guards to `send_unicast()` and `_on_datagram_received()`
+  hot paths, preventing string formatting and enum `.name` attribute access on
+  every UDP datagram when DEBUG logging is disabled.
+- **Debug log guards (network layer)**: Guarded `logger.debug` in
+  `_on_npdu_received()` (every APDU dispatch) and `_send_remote()` (every remote
+  send, avoids `.hex()` call).
+- **Debug log guards (router)**: Guarded `logger.debug` in `_forward_to_network()`
+  hot path (every directly-connected and next-hop forwarding decision).
+
+### Docs
+
+- **Docstring cleanup**: Added `:param:` documentation to all server handler methods
+  (`handle_read_property`, `handle_write_property`, `handle_subscribe_cov`, etc.),
+  `AuditManager.record_operation()`, COV manager methods, and `BACnetApplication`
+  request methods.
+- **Removed spec page/table references**: Replaced all page number references
+  (e.g. `pp. 821-822`), table references (e.g. `Table 19-4`, `Table 6-1`,
+  `Table 20.2.9.1`), and figure references (e.g. `Figure 6-11`, `Figure 6-12`)
+  with Clause references throughout the codebase. Clause references are retained.
+
 ## [1.4.6] - 2026-02-14
 
 ### Changed

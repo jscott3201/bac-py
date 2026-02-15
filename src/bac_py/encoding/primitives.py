@@ -36,7 +36,7 @@ _TAG_OBJECT_IDENTIFIER = 12
 # Charset decoders for CharacterString (Clause 20.2.9)
 _CHARSET_DECODERS: dict[int, str] = {
     0x00: "utf-8",
-    0x01: "iso2022_jp",  # JIS X0201 (Clause 20.2.9, Table 20.2.9.1)
+    0x01: "iso2022_jp",  # JIS X0201 (Clause 20.2.9)
     0x02: "iso2022_jp",
     0x03: "utf-32-be",
     0x04: "utf-16-be",

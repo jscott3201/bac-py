@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 logger = logging.getLogger(__name__)
+_DEBUG = logging.DEBUG
 
 
 class BvlcNakError(Exception):
@@ -260,7 +261,8 @@ class BIPTransport:
         host = f"{mac_address[0]}.{mac_address[1]}.{mac_address[2]}.{mac_address[3]}"
         port = (mac_address[4] << 8) | mac_address[5]
         bvll = encode_bvll(BvlcFunction.ORIGINAL_UNICAST_NPDU, npdu)
-        logger.debug("BIP send unicast %d bytes to %s:%d", len(npdu), host, port)
+        if __debug__ and logger.isEnabledFor(_DEBUG):
+            logger.debug("BIP send unicast %d bytes to %s:%d", len(npdu), host, port)
         self._transport.sendto(bvll, (host, port))
 
     def send_broadcast(self, npdu: bytes) -> None:
@@ -310,7 +312,7 @@ class BIPTransport:
 
     @property
     def max_npdu_length(self) -> int:
-        """Maximum NPDU length for BACnet/IP (Table 6-1)."""
+        """Maximum NPDU length for BACnet/IP per Clause 6."""
         return 1497
 
     @property
@@ -640,9 +642,14 @@ class BIPTransport:
             return
 
         source = _cached_bip_address(addr[0], addr[1])
-        logger.debug(
-            "BIP recv %d bytes from %s:%d func=%s", len(data), addr[0], addr[1], msg.function.name
-        )
+        if __debug__ and logger.isEnabledFor(_DEBUG):
+            logger.debug(
+                "BIP recv %d bytes from %s:%d func=%s",
+                len(data),
+                addr[0],
+                addr[1],
+                msg.function.name,
+            )
 
         # --- BBMD intercept ---
         if self._bbmd is not None:

@@ -393,6 +393,9 @@ class DefaultServerHandlers:
         Decodes the request, looks up the object and property in the
         database, and returns the encoded :class:`ReadPropertyACK`.
 
+        :param service_choice: Confirmed service choice code.
+        :param data: Raw service request bytes.
+        :param source: Address of the requesting device.
         :returns: Encoded ReadProperty-ACK service data.
         :raises BACnetError: If the object or property is not found.
         """
@@ -434,8 +437,11 @@ class DefaultServerHandlers:
         """Handle WriteProperty-Request per Clause 15.9.
 
         Decodes the request, looks up the object in the database,
-        and writes the property value. Returns ``None`` for SimpleACK.
+        and writes the property value.  Returns ``None`` for SimpleACK.
 
+        :param service_choice: Confirmed service choice code.
+        :param data: Raw service request bytes.
+        :param source: Address of the requesting device.
         :returns: ``None`` (SimpleACK response).
         :raises BACnetError: If the object or property is not found,
             or the write is not permitted.
@@ -496,6 +502,9 @@ class DefaultServerHandlers:
 
         Returns ``None`` (SimpleACK) on success.
 
+        :param service_choice: Confirmed service choice code.
+        :param data: Raw service request bytes.
+        :param source: Address of the requesting device.
         :raises BACnetError: If the monitored object does not exist or
             COV is not supported.
         """
@@ -531,7 +540,12 @@ class DefaultServerHandlers:
         data: bytes,
         source: BACnetAddress,
     ) -> bytes | None:
-        """Handle SubscribeCOVProperty-Request per Clause 13.15."""
+        """Handle SubscribeCOVProperty-Request per Clause 13.15.
+
+        :param service_choice: Confirmed service choice code.
+        :param data: Raw service request bytes.
+        :param source: Address of the requesting device.
+        """
         request = SubscribeCOVPropertyRequest.decode(data)
         obj_id = self._resolve_object_id(request.monitored_object_identifier)
         logger.debug("handling subscribe_cov_property %s from %s", obj_id, source)
@@ -554,7 +568,12 @@ class DefaultServerHandlers:
         data: bytes,
         source: BACnetAddress,
     ) -> bytes | None:
-        """Handle SubscribeCOVPropertyMultiple-Request per Clause 13.16."""
+        """Handle SubscribeCOVPropertyMultiple-Request per Clause 13.16.
+
+        :param service_choice: Confirmed service choice code.
+        :param data: Raw service request bytes.
+        :param source: Address of the requesting device.
+        """
         request = SubscribeCOVPropertyMultipleRequest.decode(data)
         logger.debug("handling subscribe_cov_property_multiple from %s", source)
         cov_manager = self._app.cov_manager
@@ -572,7 +591,12 @@ class DefaultServerHandlers:
         data: bytes,
         source: BACnetAddress,
     ) -> bytes | None:
-        """Handle ConfirmedCOVNotification-Multiple per Clause 13.17."""
+        """Handle ConfirmedCOVNotification-Multiple per Clause 13.17.
+
+        :param service_choice: Confirmed service choice code.
+        :param data: Raw service request bytes.
+        :param source: Address of the requesting device.
+        """
         request = COVNotificationMultipleRequest.decode(data)
         logger.debug(
             "ConfirmedCOVNotification-Multiple from %s: %d notifications",
@@ -587,7 +611,12 @@ class DefaultServerHandlers:
         data: bytes,
         source: BACnetAddress,
     ) -> None:
-        """Handle UnconfirmedCOVNotification-Multiple per Clause 13.18."""
+        """Handle UnconfirmedCOVNotification-Multiple per Clause 13.18.
+
+        :param service_choice: Unconfirmed service choice code.
+        :param data: Raw service request bytes.
+        :param source: Address of the sending device.
+        """
         request = COVNotificationMultipleRequest.decode(data)
         logger.debug(
             "UnconfirmedCOVNotification-Multiple from %s: %d notifications",
@@ -605,6 +634,10 @@ class DefaultServerHandlers:
 
         Checks if the local device instance is within the requested
         range and responds with an I-Am if so.
+
+        :param service_choice: Unconfirmed service choice code.
+        :param data: Raw service request bytes.
+        :param source: Address of the requesting device.
         """
         request = WhoIsRequest.decode(data)
         logger.debug(
@@ -735,6 +768,9 @@ class DefaultServerHandlers:
         Supports ALL, REQUIRED, and OPTIONAL special property identifiers
         per Clause 15.7.3.2.
 
+        :param service_choice: Confirmed service choice code.
+        :param data: Raw service request bytes.
+        :param source: Address of the requesting device.
         :returns: Encoded ReadPropertyMultiple-ACK service data.
         """
         request = ReadPropertyMultipleRequest.decode(data)
@@ -814,6 +850,9 @@ class DefaultServerHandlers:
         first, then applies them. Either all writes succeed or none
         are applied.
 
+        :param service_choice: Confirmed service choice code.
+        :param data: Raw service request bytes.
+        :param source: Address of the requesting device.
         :returns: ``None`` (SimpleACK response) on full success.
         :raises BACnetError: On first validation or write failure.
         """
