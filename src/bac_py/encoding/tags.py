@@ -287,6 +287,9 @@ def extract_context_value(
                 return bytes(data[value_start:value_end]), new_offset
             offset = new_offset
         else:
+            if new_offset + t.length > len(data):
+                msg = f"Tag data overflows buffer: need {t.length} bytes at offset {new_offset}"
+                raise ValueError(msg)
             offset = new_offset + t.length
     msg = f"Missing closing tag {tag_number}"
     logger.warning(msg)

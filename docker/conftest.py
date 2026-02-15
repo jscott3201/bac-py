@@ -55,11 +55,28 @@ def router_instance() -> int:
 
 
 @pytest.fixture
+def sc_tls_config() -> object | None:
+    """SC TLS config from TLS_CERT_DIR/TLS_CERT_NAME env vars, or None."""
+    cert_dir = os.environ.get("TLS_CERT_DIR", "")
+    cert_name = os.environ.get("TLS_CERT_NAME", "")
+    if cert_dir and cert_name:
+        from bac_py.transport.sc.tls import SCTLSConfig
+
+        return SCTLSConfig(
+            private_key_path=os.path.join(cert_dir, f"{cert_name}.key"),
+            certificate_path=os.path.join(cert_dir, f"{cert_name}.crt"),
+            ca_certificates_path=os.path.join(cert_dir, "ca.crt"),
+        )
+    return None
+
+
+@pytest.fixture
 def sc_hub_uri() -> str:
     """SC hub WebSocket URI from env."""
     host = os.environ.get("SC_HUB_ADDRESS", "172.30.1.120")
     port = os.environ.get("SC_HUB_PORT", "4443")
-    return f"ws://{host}:{port}"
+    scheme = "wss" if os.environ.get("TLS_CERT_DIR") else "ws"
+    return f"{scheme}://{host}:{port}"
 
 
 @pytest.fixture
@@ -79,7 +96,8 @@ def sc_stress_hub_uri() -> str:
     """SC stress hub WebSocket URI from env."""
     host = os.environ.get("SC_STRESS_HUB_ADDRESS", "172.30.1.130")
     port = os.environ.get("SC_STRESS_HUB_PORT", "4443")
-    return f"ws://{host}:{port}"
+    scheme = "wss" if os.environ.get("TLS_CERT_DIR") else "ws"
+    return f"{scheme}://{host}:{port}"
 
 
 @pytest.fixture

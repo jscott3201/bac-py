@@ -25,6 +25,8 @@ class ObjectType(IntEnum):
             cached = _OBJECT_TYPE_VENDOR_CACHE.get(value)
             if cached is not None:
                 return cached  # type: ignore[return-value]
+            if len(_OBJECT_TYPE_VENDOR_CACHE) >= 4096:
+                _OBJECT_TYPE_VENDOR_CACHE.clear()
             member = int.__new__(cls, value)
             member._name_ = f"VENDOR_{value}"
             member._value_ = value

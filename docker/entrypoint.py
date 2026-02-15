@@ -8,8 +8,12 @@ import os
 import signal
 import subprocess
 import sys
+from typing import TYPE_CHECKING
 
 import bac_py
+
+if TYPE_CHECKING:
+    from bac_py.transport.sc.tls import SCTLSConfig
 
 logging.basicConfig(
     level=logging.INFO,
@@ -256,11 +260,25 @@ async def run_router() -> None:
     iface2 = os.environ.get("INTERFACE_2", "0.0.0.0")
     port1 = int(os.environ.get("PORT_1", "47808"))
     port2 = int(os.environ.get("PORT_2", "47809"))
+    bcast1 = os.environ.get("BROADCAST_ADDRESS_1", BROADCAST_ADDRESS)
+    bcast2 = os.environ.get("BROADCAST_ADDRESS_2", BROADCAST_ADDRESS)
 
     router_config = RouterConfig(
         ports=[
-            RouterPortConfig(port_id=1, network_number=net1, interface=iface1, port=port1),
-            RouterPortConfig(port_id=2, network_number=net2, interface=iface2, port=port2),
+            RouterPortConfig(
+                port_id=1,
+                network_number=net1,
+                interface=iface1,
+                port=port1,
+                broadcast_address=bcast1,
+            ),
+            RouterPortConfig(
+                port_id=2,
+                network_number=net2,
+                interface=iface2,
+                port=port2,
+                broadcast_address=bcast2,
+            ),
         ],
         application_port_id=1,
     )
@@ -269,7 +287,6 @@ async def run_router() -> None:
         instance_number=instance,
         name=f"Docker-Router-{instance}",
         router_config=router_config,
-        broadcast_address=BROADCAST_ADDRESS,
     )
     app = BACnetApplication(config)
     await app.start()
@@ -607,14 +624,50 @@ async def run_server_extended() -> None:
     await app.stop()
 
 
+def _build_sc_tls_config() -> SCTLSConfig:
+    """Build an SCTLSConfig from TLS_CERT_DIR/TLS_CERT_NAME env vars.
+
+    Returns a plaintext config if TLS_CERT_DIR is not set.
+    """
+    from bac_py.transport.sc.tls import SCTLSConfig
+
+    cert_dir = os.environ.get("TLS_CERT_DIR", "")
+    cert_name = os.environ.get("TLS_CERT_NAME", "")
+    if cert_dir and cert_name:
+        config = SCTLSConfig(
+            private_key_path=os.path.join(cert_dir, f"{cert_name}.key"),
+            certificate_path=os.path.join(cert_dir, f"{cert_name}.crt"),
+            ca_certificates_path=os.path.join(cert_dir, "ca.crt"),
+        )
+        logger.info("SC TLS: loaded certs for %s from %s", cert_name, cert_dir)
+        return config
+
+    return SCTLSConfig(allow_plaintext=True)
+
+
+def run_sc_cert_gen() -> None:
+    """Generate SC test PKI certificates and exit."""
+    from pathlib import Path
+
+    from docker.lib.sc_pki import generate_test_pki
+
+    cert_dir = Path(os.environ.get("CERT_DIR", "/certs"))
+    cert_names_raw = os.environ.get("CERT_NAMES", "hub,node1,node2,stress")
+    cert_names = [n.strip() for n in cert_names_raw.split(",") if n.strip()]
+
+    logger.info("Generating SC test PKI in %s for: %s", cert_dir, ", ".join(cert_names))
+    generate_test_pki(cert_dir, names=cert_names)
+    logger.info("SC test PKI generated successfully")
+
+
 async def run_sc_hub() -> None:
     """Run a BACnet/SC hub function (WebSocket server)."""
     from bac_py.transport.sc.hub_function import SCHubConfig, SCHubFunction
-    from bac_py.transport.sc.tls import SCTLSConfig
     from bac_py.transport.sc.vmac import SCVMAC, DeviceUUID
 
     bind_address = os.environ.get("BIND_ADDRESS", "0.0.0.0")
     bind_port = int(os.environ.get("BIND_PORT", "4443"))
+    tls_config = _build_sc_tls_config()
 
     hub = SCHubFunction(
         SCVMAC.random(),
@@ -622,12 +675,13 @@ async def run_sc_hub() -> None:
         config=SCHubConfig(
             bind_address=bind_address,
             bind_port=bind_port,
-            tls_config=SCTLSConfig(allow_plaintext=True),
+            tls_config=tls_config,
         ),
     )
     await hub.start()
 
-    logger.info("SC Hub running on %s:%d", bind_address, bind_port)
+    tls_label = "TLS" if not tls_config.allow_plaintext else "plaintext"
+    logger.info("SC Hub running on %s:%d (%s)", bind_address, bind_port, tls_label)
     _write_healthy()
 
     stop = asyncio.Event()
@@ -644,7 +698,6 @@ async def run_sc_node() -> None:
     """Run a BACnet/SC node that connects to a hub and echoes NPDUs."""
     from bac_py.transport.sc import SCTransport, SCTransportConfig
     from bac_py.transport.sc.node_switch import SCNodeSwitchConfig
-    from bac_py.transport.sc.tls import SCTLSConfig
     from bac_py.transport.sc.vmac import SCVMAC
 
     hub_uri = os.environ.get("HUB_URI", "ws://172.30.1.120:4443")
@@ -652,7 +705,7 @@ async def run_sc_node() -> None:
     node_switch_port = int(os.environ.get("NODE_SWITCH_PORT", "0"))
 
     vmac = SCVMAC.from_hex(vmac_hex) if vmac_hex else None
-    tls_config = SCTLSConfig(allow_plaintext=True)
+    tls_config = _build_sc_tls_config()
 
     ns_config = None
     if node_switch_port:
@@ -807,6 +860,8 @@ def main() -> None:
         asyncio.run(run_bbmd())
     elif role == "router":
         asyncio.run(run_router())
+    elif role == "sc-cert-gen":
+        run_sc_cert_gen()
     elif role == "sc-hub":
         asyncio.run(run_sc_hub())
     elif role == "sc-node":
@@ -828,8 +883,8 @@ def main() -> None:
     else:
         logger.error(
             "Unknown ROLE: %r (expected: server, server-ipv6, server-extended, "
-            "stress-server, bbmd, router, sc-hub, sc-node, test, stress, "
-            "sc-stress, router-stress, bbmd-stress, thermostat, demo-client)",
+            "stress-server, bbmd, router, sc-cert-gen, sc-hub, sc-node, test, "
+            "stress, sc-stress, router-stress, bbmd-stress, thermostat, demo-client)",
             role,
         )
         sys.exit(1)

@@ -719,10 +719,16 @@ def _decode_error(data: memoryview) -> ErrorPDU:
     # Error class and code are application-tagged enumerated values
     offset = 3
     tag, offset = decode_tag(data, offset)
+    if offset + tag.length > len(data):
+        msg = f"ErrorPDU truncated at error class: need {tag.length} bytes at offset {offset}"
+        raise ValueError(msg)
     error_class = ErrorClass(decode_enumerated(data[offset : offset + tag.length]))
     offset += tag.length
 
     tag, offset = decode_tag(data, offset)
+    if offset + tag.length > len(data):
+        msg = f"ErrorPDU truncated at error code: need {tag.length} bytes at offset {offset}"
+        raise ValueError(msg)
     error_code = ErrorCode(decode_enumerated(data[offset : offset + tag.length]))
     offset += tag.length
 

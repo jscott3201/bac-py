@@ -5,6 +5,7 @@ VT-Open (Clause 17.1), VT-Close (Clause 17.2), VT-Data (Clause 17.3).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from bac_py.encoding.primitives import (
@@ -17,6 +18,9 @@ from bac_py.encoding.primitives import (
 )
 from bac_py.encoding.tags import as_memoryview, decode_tag
 from bac_py.types.enums import VTClass
+
+_logger = logging.getLogger(__name__)
+_MAX_DECODED_ITEMS = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +117,9 @@ class VTCloseRequest:
             tag, offset = decode_tag(data, offset)
             identifiers.append(decode_unsigned(data[offset : offset + tag.length]))
             offset += tag.length
+            if len(identifiers) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
         return cls(list_of_remote_vt_session_identifiers=identifiers)
 
 

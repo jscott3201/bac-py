@@ -6,6 +6,7 @@ via group addressing.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Self
 
@@ -22,6 +23,9 @@ from bac_py.encoding.tags import (
     encode_opening_tag,
     extract_context_value,
 )
+
+_logger = logging.getLogger(__name__)
+_MAX_DECODED_ITEMS = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +140,9 @@ class WriteGroupRequest:
                 break
             gcv, offset = GroupChannelValue.decode(data, offset)
             change_list.append(gcv)
+            if len(change_list) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(
             group_number=group_number,

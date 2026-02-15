@@ -130,6 +130,7 @@ class Client:
         instance_number: int = 999,
         interface: str = "0.0.0.0",
         port: int = 0xBAC0,
+        broadcast_address: str = "255.255.255.255",
         bbmd_address: str | None = None,
         bbmd_ttl: int = 60,
         ipv6: bool = False,
@@ -145,6 +146,9 @@ class Client:
         :param interface: IP address to bind to (used if *config*
             is not provided). Defaults to ``"::"`` when *ipv6* is ``True``.
         :param port: UDP port (used if *config* is not provided).
+        :param broadcast_address: Directed broadcast address for this
+            subnet (used if *config* is not provided). Set to the subnet
+            broadcast (e.g. ``"192.168.1.255"``) in Docker bridge networks.
         :param bbmd_address: Optional BBMD address for foreign device
             registration (e.g. ``"192.168.1.1"`` or ``"[fd00::1]:47808"``).
             When set, the client registers as a foreign device on startup.
@@ -164,6 +168,7 @@ class Client:
                 instance_number=instance_number,
                 interface=iface,
                 port=port,
+                broadcast_address=broadcast_address,
                 ipv6=ipv6,
                 multicast_address=multicast_address,
                 vmac=vmac,
@@ -207,6 +212,21 @@ class Client:
             msg = "Client not started; use 'async with Client(...) as c:'"
             raise RuntimeError(msg)
         return self._client
+
+    def add_route(self, network: int, router_address: str) -> None:
+        """Pre-populate the router cache for a remote network.
+
+        Allows sending to a remote network without broadcast-based
+        router discovery.  Useful in Docker or test environments.
+
+        :param network: The remote network number.
+        :param router_address: IP address of the router (e.g.
+            ``"172.30.1.150"`` or ``"172.30.1.150:47808"``).
+        """
+        if self._app is None:
+            msg = "Client not started; use 'async with Client(...) as c:'"
+            raise RuntimeError(msg)
+        self._app.add_route(network, router_address)
 
     # --- Convenience API (Phase 4) ---
 

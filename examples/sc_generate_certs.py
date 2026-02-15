@@ -96,6 +96,7 @@ def generate_test_pki(cert_dir: Path) -> None:
     # --- CA key + self-signed certificate ---
     ca_key = ec.generate_private_key(ec.SECP256R1())
     ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "BACnet Test CA")])
+    ca_ski = x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key())
     ca_cert = (
         x509.CertificateBuilder()
         .subject_name(ca_name)
@@ -119,6 +120,7 @@ def generate_test_pki(cert_dir: Path) -> None:
             ),
             critical=True,
         )
+        .add_extension(ca_ski, critical=False)
         .sign(ca_key, hashes.SHA256())
     )
     _write_key(cert_dir / "ca.key", ca_key)
@@ -126,6 +128,7 @@ def generate_test_pki(cert_dir: Path) -> None:
     print(f"  CA certificate:    {cert_dir / 'ca.crt'}")
 
     # --- Device certificates (hub + two nodes) ---
+    ca_aki = x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(ca_ski)
     for name in ("hub", "node1", "node2"):
         device_key = ec.generate_private_key(ec.SECP256R1())
         device_name = x509.Name(
@@ -147,6 +150,11 @@ def generate_test_pki(cert_dir: Path) -> None:
                         x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
                     ]
                 ),
+                critical=False,
+            )
+            .add_extension(ca_aki, critical=False)
+            .add_extension(
+                x509.SubjectKeyIdentifier.from_public_key(device_key.public_key()),
                 critical=False,
             )
             .sign(ca_key, hashes.SHA256())

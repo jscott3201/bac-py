@@ -79,6 +79,7 @@ class TestRouterPortConfig:
         cfg = RouterPortConfig(port_id=1, network_number=100)
         assert cfg.interface == "0.0.0.0"
         assert cfg.port == 0xBAC0
+        assert cfg.broadcast_address == "255.255.255.255"
 
     def test_custom_values(self):
         cfg = RouterPortConfig(port_id=2, network_number=200, interface="10.0.0.1", port=47809)
@@ -86,6 +87,10 @@ class TestRouterPortConfig:
         assert cfg.network_number == 200
         assert cfg.interface == "10.0.0.1"
         assert cfg.port == 47809
+
+    def test_custom_broadcast_address(self):
+        cfg = RouterPortConfig(port_id=1, network_number=100, broadcast_address="192.168.1.255")
+        assert cfg.broadcast_address == "192.168.1.255"
 
 
 class TestRouterConfig:

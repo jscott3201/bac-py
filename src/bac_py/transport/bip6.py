@@ -26,6 +26,9 @@ logger = logging.getLogger(__name__)
 MULTICAST_LINK_LOCAL = "ff02::bac0"
 MULTICAST_SITE_LOCAL = "ff05::bac0"
 
+# Maximum number of concurrent pending address resolutions (defense-in-depth).
+_MAX_PENDING_RESOLUTIONS = 1024
+
 
 @dataclass(slots=True)
 class VMACEntry:
@@ -38,12 +41,19 @@ class VMACEntry:
 class VMACCache:
     """VMAC-to-IPv6 address resolution cache with TTL-based eviction."""
 
-    def __init__(self, ttl: float = 300.0) -> None:
+    def __init__(self, ttl: float = 300.0, max_entries: int = 4096) -> None:
         self._entries: dict[bytes, VMACEntry] = {}
         self._ttl = ttl
+        self._max_entries = max_entries
 
     def put(self, vmac: bytes, address: BIP6Address) -> None:
         """Add or update a VMAC-to-address mapping."""
+        if vmac not in self._entries and len(self._entries) >= self._max_entries:
+            self.evict_stale()
+            if len(self._entries) >= self._max_entries:
+                logger.warning("VMAC cache full (%d entries), dropping oldest", self._max_entries)
+                oldest_key = min(self._entries, key=lambda k: self._entries[k].last_seen)
+                del self._entries[oldest_key]
         self._entries[vmac] = VMACEntry(address=address, last_seen=time.monotonic())
 
     def get(self, vmac: bytes) -> BIP6Address | None:
@@ -244,6 +254,12 @@ class BIP6Transport:
         dest_addr = self._vmac_cache.get(mac_address)
         if dest_addr is None:
             # Queue for address resolution
+            if (
+                mac_address not in self._pending_resolutions
+                and len(self._pending_resolutions) >= _MAX_PENDING_RESOLUTIONS
+            ):
+                logger.warning("BIP6 pending resolution cache full, dropping request")
+                return
             logger.debug("BIP6 VMAC %s not in cache, queuing for resolution", mac_address.hex())
             pending = self._pending_resolutions.setdefault(mac_address, [])
             if len(pending) >= 16:

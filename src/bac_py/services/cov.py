@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from bac_py.encoding.primitives import (
@@ -28,6 +29,10 @@ from bac_py.services.common import BACnetPropertyValue
 from bac_py.types.constructed import BACnetTimeStamp
 from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import ObjectIdentifier
+
+_logger = logging.getLogger(__name__)
+_MAX_DECODED_ITEMS = 10_000
+_MAX_NESTING_DEPTH = 32
 
 # Re-export for backward compatibility
 __all__ = [
@@ -225,6 +230,9 @@ class COVNotificationRequest:
             # Decode next BACnetPropertyValue
             pv, offset = BACnetPropertyValue.decode_from(data, offset)
             list_of_values.append(pv)
+            if len(list_of_values) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(
             subscriber_process_identifier=subscriber_process_identifier,
@@ -526,6 +534,9 @@ class COVSubscriptionSpecification:
                 break
             ref, offset = COVReference.decode(data, offset)
             list_of_cov_references.append(ref)
+            if len(list_of_cov_references) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(
             monitored_object_identifier=monitored_object_identifier,
@@ -620,6 +631,9 @@ class SubscribeCOVPropertyMultipleRequest:
                 break
             spec, offset = COVSubscriptionSpecification.decode(data, offset)
             specs.append(spec)
+            if len(specs) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(
             subscriber_process_identifier=subscriber_process_identifier,
@@ -708,6 +722,9 @@ class COVPropertyValue:
             inner_tag, inner_offset = decode_tag(data, offset)
             if inner_tag.is_opening:
                 depth += 1
+                if depth > _MAX_NESTING_DEPTH:
+                    msg = f"Nesting depth exceeds {_MAX_NESTING_DEPTH}"
+                    raise ValueError(msg)
                 offset = inner_offset
             elif inner_tag.is_closing:
                 depth -= 1
@@ -799,6 +816,9 @@ class COVObjectNotification:
                 break
             pv, offset = COVPropertyValue.decode(data, offset)
             list_of_values.append(pv)
+            if len(list_of_values) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(
             monitored_object_identifier=monitored_object_identifier,
@@ -897,6 +917,9 @@ class COVNotificationMultipleRequest:
                 break
             notification, offset = COVObjectNotification.decode(data, offset)
             list_of_cov_notifications.append(notification)
+            if len(list_of_cov_notifications) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(
             subscriber_process_identifier=subscriber_process_identifier,

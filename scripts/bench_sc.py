@@ -6,9 +6,13 @@ two echo nodes, and configurable unicast/broadcast workers.  All traffic
 stays on localhost (127.0.0.1), eliminating network overhead so the benchmark
 measures pure library throughput.
 
+By default, all WebSocket connections use mutual TLS 1.3 with a mock CA
+(EC P-256 certificates generated at startup).  Use ``--no-tls`` to fall back
+to plaintext ``ws://`` for comparison.
+
 Usage::
 
-    # Default: 8 unicast + 2 broadcast workers, 5s warmup, 30s sustained
+    # Default: TLS enabled, 8 unicast + 2 broadcast workers, 5s warmup, 30s sustained
     uv run python scripts/bench_sc.py
 
     # Custom: 16 unicast, 4 broadcast, 60s sustained
@@ -16,6 +20,9 @@ Usage::
 
     # Quick smoke test
     uv run python scripts/bench_sc.py --sustain 5 --warmup 2
+
+    # Plaintext mode (no TLS overhead)
+    uv run python scripts/bench_sc.py --no-tls
 
     # JSON output for CI/dashboards
     uv run python scripts/bench_sc.py --json
@@ -26,12 +33,16 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import datetime
+import ipaddress
 import json
 import random
 import statistics
 import struct
 import sys
+import tempfile
 import time
+from pathlib import Path
 from typing import Any
 
 
@@ -42,10 +53,111 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--warmup", type=int, default=5, help="Warmup seconds (default: 5)")
     p.add_argument("--sustain", type=int, default=30, help="Sustained test seconds (default: 30)")
     p.add_argument("--port", type=int, default=0, help="Hub port (0=auto, default: 0)")
+    p.add_argument("--no-tls", action="store_true", help="Disable TLS (plaintext ws://)")
     p.add_argument("--json", action="store_true", help="Output JSON report to stdout")
     p.add_argument("--profile", action="store_true", help="Enable pyinstrument profiling")
     p.add_argument("--profile-html", metavar="PATH", help="Save interactive HTML profile to file")
     return p.parse_args()
+
+
+# ---------------------------------------------------------------------------
+# Inline PKI generation (scripts must not import docker.lib)
+# ---------------------------------------------------------------------------
+
+
+def _generate_test_pki(cert_dir: Path) -> None:
+    """Generate a self-signed CA and device certs for TLS benchmarking."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import ec
+    from cryptography.x509.oid import NameOID
+
+    cert_dir.mkdir(parents=True, exist_ok=True)
+    now = datetime.datetime.now(tz=datetime.UTC)
+    validity = datetime.timedelta(days=1)
+
+    # CA
+    ca_key = ec.generate_private_key(ec.SECP256R1())
+    ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "BACnet Bench CA")])
+    ca_ski = x509.SubjectKeyIdentifier.from_public_key(ca_key.public_key())
+    ca_cert = (
+        x509.CertificateBuilder()
+        .subject_name(ca_name)
+        .issuer_name(ca_name)
+        .public_key(ca_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now)
+        .not_valid_after(now + validity)
+        .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                key_cert_sign=True,
+                crl_sign=True,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(ca_ski, critical=False)
+        .sign(ca_key, hashes.SHA256())
+    )
+    _write_pem(cert_dir / "ca.key", ca_key)
+    _write_crt(cert_dir / "ca.crt", ca_cert)
+
+    ca_aki = x509.AuthorityKeyIdentifier.from_issuer_subject_key_identifier(ca_ski)
+    for name in ("hub", "node1", "node2", "stress"):
+        dk = ec.generate_private_key(ec.SECP256R1())
+        dn = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, f"BACnet SC {name.title()}")])
+        dc = (
+            x509.CertificateBuilder()
+            .subject_name(dn)
+            .issuer_name(ca_name)
+            .public_key(dk.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now)
+            .not_valid_after(now + validity)
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(
+                x509.SubjectAlternativeName(
+                    [
+                        x509.DNSName("localhost"),
+                        x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
+                    ]
+                ),
+                critical=False,
+            )
+            .add_extension(ca_aki, critical=False)
+            .add_extension(
+                x509.SubjectKeyIdentifier.from_public_key(dk.public_key()),
+                critical=False,
+            )
+            .sign(ca_key, hashes.SHA256())
+        )
+        _write_pem(cert_dir / f"{name}.key", dk)
+        _write_crt(cert_dir / f"{name}.crt", dc)
+
+
+def _write_pem(path: Path, key: Any) -> None:
+    from cryptography.hazmat.primitives import serialization
+
+    path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+
+
+def _write_crt(path: Path, cert: Any) -> None:
+    from cryptography.hazmat.primitives import serialization
+
+    path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
 
 
 # ---------------------------------------------------------------------------
@@ -269,6 +381,46 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         sys.exit(1)
 
     log = sys.stderr.write
+    use_tls = not args.no_tls
+
+    # -- Generate TLS certificates --
+    cert_tmpdir = None
+    if use_tls:
+        cert_tmpdir = tempfile.TemporaryDirectory()
+        cert_dir = Path(cert_tmpdir.name)
+        _generate_test_pki(cert_dir)
+        ca_path = str(cert_dir / "ca.crt")
+        hub_tls = SCTLSConfig(
+            private_key_path=str(cert_dir / "hub.key"),
+            certificate_path=str(cert_dir / "hub.crt"),
+            ca_certificates_path=ca_path,
+        )
+        node_tls_configs = {
+            "node1": SCTLSConfig(
+                private_key_path=str(cert_dir / "node1.key"),
+                certificate_path=str(cert_dir / "node1.crt"),
+                ca_certificates_path=ca_path,
+            ),
+            "node2": SCTLSConfig(
+                private_key_path=str(cert_dir / "node2.key"),
+                certificate_path=str(cert_dir / "node2.crt"),
+                ca_certificates_path=ca_path,
+            ),
+        }
+        stress_tls = SCTLSConfig(
+            private_key_path=str(cert_dir / "stress.key"),
+            certificate_path=str(cert_dir / "stress.crt"),
+            ca_certificates_path=ca_path,
+        )
+        log("  TLS: mock CA generated (EC P-256, mutual TLS 1.3)\n")
+    else:
+        hub_tls = SCTLSConfig(allow_plaintext=True)
+        node_tls_configs = {
+            "node1": SCTLSConfig(allow_plaintext=True),
+            "node2": SCTLSConfig(allow_plaintext=True),
+        }
+        stress_tls = SCTLSConfig(allow_plaintext=True)
+        log("  TLS: disabled (plaintext mode)\n")
 
     # -- Start hub --
     hub_vmac = SCVMAC.random()
@@ -281,14 +433,15 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         config=SCHubConfig(
             bind_address="127.0.0.1",
             bind_port=hub_port,
-            tls_config=SCTLSConfig(allow_plaintext=True),
+            tls_config=hub_tls,
         ),
     )
     await hub.start()
 
     # Get the actual port (when 0 was requested)
     actual_port = hub._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
-    hub_uri = f"ws://127.0.0.1:{actual_port}"
+    scheme = "wss" if use_tls else "ws"
+    hub_uri = f"{scheme}://127.0.0.1:{actual_port}"
     log(f"  Hub started on {hub_uri} (vmac={hub_vmac})\n")
 
     # -- Start echo nodes --
@@ -296,11 +449,11 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     node2_vmac = SCVMAC(b"\x02\xbb\x00\x00\x00\x02")
     nodes: list[SCTransport] = []
 
-    for vmac in (node1_vmac, node2_vmac):
+    for vmac, name in ((node1_vmac, "node1"), (node2_vmac, "node2")):
         node = SCTransport(
             SCTransportConfig(
                 primary_hub_uri=hub_uri,
-                tls_config=SCTLSConfig(allow_plaintext=True),
+                tls_config=node_tls_configs[name],
                 vmac=vmac,
                 min_reconnect_time=0.5,
                 max_reconnect_time=5.0,
@@ -326,7 +479,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     stress_transport = SCTransport(
         SCTransportConfig(
             primary_hub_uri=hub_uri,
-            tls_config=SCTLSConfig(allow_plaintext=True),
+            tls_config=stress_tls,
             min_reconnect_time=0.5,
             max_reconnect_time=5.0,
         )
@@ -353,6 +506,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     target_vmacs = [node1_vmac.address, node2_vmac.address]
     total_workers = args.unicast + args.broadcast
 
+    tls_label = "TLS 1.3 (mutual)" if use_tls else "plaintext"
     if not args.json:
         log(
             f"\n{'=' * 70}\n"
@@ -360,7 +514,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
             f"{args.broadcast} broadcast workers\n"
             f"  Total workers: {total_workers}  |  "
             f"Warmup: {args.warmup}s  |  Sustained: {args.sustain}s\n"
-            f"  Hub: {hub_uri}  |  Nodes: 2 echo\n"
+            f"  Hub: {hub_uri}  |  Nodes: 2 echo  |  {tls_label}\n"
             f"{'=' * 70}\n"
         )
 
@@ -445,8 +599,10 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
 
         result = {
             "mode": "local",
+            "tls": use_tls,
             "config": {
                 "hub_uri": hub_uri,
+                "tls": use_tls,
                 "unicast_workers": args.unicast,
                 "broadcast_workers": args.broadcast,
                 "total_workers": total_workers,
@@ -503,6 +659,8 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
         for node in nodes:
             await node.stop()
         await hub.stop()
+        if cert_tmpdir is not None:
+            cert_tmpdir.cleanup()
 
 
 def main() -> None:

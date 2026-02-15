@@ -154,13 +154,25 @@ class NetworkLayer:
         :param message_type: Network message type code.
         :param data: Encoded message payload.
         :param destination: Target address. If ``None``, broadcasts locally.
+            A local-network address (no DNET) sends a unicast without
+            NPDU destination routing.
         """
+        # Local unicast: destination on the same network (no DNET set).
+        # Send directly without NPDU destination header to avoid the
+        # "Destination network must be set" requirement in the NPDU encoder.
+        is_local_unicast = (
+            destination is not None
+            and not destination.is_broadcast
+            and not destination.is_global_broadcast
+            and destination.network is None
+        )
+        npdu_dest = None if is_local_unicast else destination
         npdu = NPDU(
             is_network_message=True,
             message_type=message_type,
             network_message_data=data,
-            destination=destination,
-            hop_count=255 if destination is not None else 0,
+            destination=npdu_dest,
+            hop_count=255 if npdu_dest is not None else 0,
         )
         npdu_bytes = encode_npdu(npdu)
         if destination is None or destination.is_broadcast or destination.is_global_broadcast:
@@ -218,6 +230,25 @@ class NetworkLayer:
         :class:`~bac_py.network.address.BIP6Address` for BACnet/IPv6).
         """
         return self._transport.local_address  # type: ignore[attr-defined]
+
+    def add_route(self, network: int, router_mac: bytes) -> None:
+        """Pre-populate the router cache for a remote network.
+
+        Allows sending to a remote network without broadcast-based router
+        discovery.  Useful in environments (e.g. Docker bridge networks)
+        where broadcast-based discovery is unreliable.
+
+        :param network: The remote network number.
+        :param router_mac: 6-byte MAC address of the router that
+            reaches the target network.
+        """
+        self._ensure_cache_capacity()
+        self._router_cache[network] = RouterCacheEntry(
+            network=network,
+            router_mac=router_mac,
+            last_seen=time.monotonic(),
+        )
+        logger.debug("Route added: network %d via %s", network, router_mac.hex())
 
     def get_router_for_network(self, dnet: int) -> bytes | None:
         """Look up the cached router MAC for a remote network.

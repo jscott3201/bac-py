@@ -52,6 +52,20 @@ async def main() -> None:
     sustain_seconds = int(os.environ.get("SUSTAIN_SECONDS", "60"))
     connect_timeout = float(os.environ.get("CONNECT_TIMEOUT", "30"))
 
+    # Build TLS config from env vars
+    cert_dir = os.environ.get("TLS_CERT_DIR", "")
+    cert_name = os.environ.get("TLS_CERT_NAME", "")
+    if cert_dir and cert_name:
+        tls_config = SCTLSConfig(
+            private_key_path=os.path.join(cert_dir, f"{cert_name}.key"),
+            certificate_path=os.path.join(cert_dir, f"{cert_name}.crt"),
+            ca_certificates_path=os.path.join(cert_dir, "ca.crt"),
+        )
+        tls_label = "TLS 1.3"
+    else:
+        tls_config = SCTLSConfig(allow_plaintext=True)
+        tls_label = "plaintext"
+
     target_vmacs = [
         SCVMAC.from_hex(node1_vmac_hex).address,
         SCVMAC.from_hex(node2_vmac_hex).address,
@@ -60,7 +74,7 @@ async def main() -> None:
 
     print(
         f"SC Stress test: {unicast_workers} unicast + {broadcast_workers} "
-        f"broadcast = {total_workers} workers against {hub_uri}",
+        f"broadcast = {total_workers} workers against {hub_uri} ({tls_label})",
         file=sys.stderr,
     )
     print(
@@ -76,7 +90,7 @@ async def main() -> None:
     transport = SCTransport(
         SCTransportConfig(
             primary_hub_uri=hub_uri,
-            tls_config=SCTLSConfig(allow_plaintext=True),
+            tls_config=tls_config,
             min_reconnect_time=0.5,
             max_reconnect_time=5.0,
         )

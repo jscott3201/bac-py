@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -61,6 +62,7 @@ class SCHubFunction:
         self._hub_uuid = hub_uuid
         self._connections: dict[SCVMAC, SCConnection] = {}
         self._uuid_map: dict[DeviceUUID, SCVMAC] = {}
+        self._pending_vmacs: dict[SCVMAC, float] = {}
         self._server: asyncio.Server | None = None
         self._client_tasks: set[asyncio.Task[None]] = set()
 
@@ -114,6 +116,7 @@ class SCHubFunction:
         self._client_tasks.clear()
         self._connections.clear()
         self._uuid_map.clear()
+        self._pending_vmacs.clear()
 
         if self._server:
             self._server.close()
@@ -156,9 +159,20 @@ class SCHubFunction:
 
         conn.on_message = _route
 
-        task = asyncio.create_task(conn.accept(ws, vmac_checker=self._check_vmac))
+        task = asyncio.create_task(self._accept_with_cleanup(conn, ws))
         self._client_tasks.add(task)
         task.add_done_callback(self._on_client_task_done)
+
+    async def _accept_with_cleanup(self, conn: SCConnection, ws: SCWebSocket) -> None:
+        """Run the accept handshake, releasing any pending VMAC on failure."""
+        try:
+            await conn.accept(ws, vmac_checker=self._check_vmac)
+        finally:
+            # If the handshake failed before on_connected, the VMAC is still
+            # in _pending_vmacs.  discard() is idempotent so this is safe
+            # even when on_connected already cleaned it up.
+            if conn.peer_vmac:
+                self._pending_vmacs.pop(conn.peer_vmac, None)
 
     def _on_client_task_done(self, task: asyncio.Task[None]) -> None:
         """Clean up a finished client task and log unexpected errors."""
@@ -167,17 +181,39 @@ class SCHubFunction:
             logger.debug("SC hub client task failed: %s", task.exception())
 
     def _check_vmac(self, vmac: SCVMAC, uuid: DeviceUUID) -> bool:
-        """Check if VMAC/UUID pair is acceptable (no collision)."""
+        """Check if VMAC/UUID pair is acceptable (no collision).
+
+        Atomically reserves the VMAC in ``_pending_vmacs`` to prevent a
+        TOCTOU race between the check and the registration in
+        ``_on_node_connected``.  The reservation is released by
+        ``_on_node_connected`` on success or ``_accept_with_cleanup``
+        on failure.
+
+        Stale pending entries (older than 30s) are purged on each call.
+        The pending set is capped at ``max_connections``.
+        """
+        # Purge stale pending entries (30-second TTL)
+        now = time.monotonic()
+        stale = [k for k, ts in self._pending_vmacs.items() if now - ts > 30.0]
+        for k in stale:
+            self._pending_vmacs.pop(k, None)
+
         if vmac in self._connections:
             existing = self._connections[vmac]
             if existing.peer_uuid != uuid:
                 return False
+        if vmac in self._pending_vmacs:
+            return False
+        if len(self._pending_vmacs) >= self._config.max_connections:
+            return False
+        self._pending_vmacs[vmac] = now
         return True
 
     def _on_node_connected(self, conn: SCConnection) -> None:
         """Register a newly connected node."""
         if conn.peer_vmac is None or conn.peer_uuid is None:
             return
+        self._pending_vmacs.pop(conn.peer_vmac, None)
 
         # If this UUID was previously connected with a different VMAC, clean up
         if conn.peer_uuid in self._uuid_map:
@@ -194,6 +230,8 @@ class SCHubFunction:
 
     def _on_node_disconnected(self, conn: SCConnection) -> None:
         """Remove a disconnected node from the connection table."""
+        if conn.peer_vmac:
+            self._pending_vmacs.pop(conn.peer_vmac, None)
         if (
             conn.peer_vmac
             and conn.peer_vmac in self._connections

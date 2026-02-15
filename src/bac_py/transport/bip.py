@@ -186,6 +186,9 @@ class BIPTransport:
         sock = self._transport.get_extra_info("socket")
         addr: tuple[str, int] = sock.getsockname()
         host = addr[0]
+        # Update port to actual bound value (matters when port=0 was passed
+        # to let the OS pick an ephemeral port).
+        self._port = addr[1]
         # Resolve wildcard to actual interface IP so that BBMD BDT
         # self-comparison and Forwarded-NPDU originating addresses work.
         if host == "0.0.0.0":

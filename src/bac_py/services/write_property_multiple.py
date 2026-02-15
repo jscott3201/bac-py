@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from bac_py.encoding.primitives import (
@@ -12,6 +13,9 @@ from bac_py.encoding.tags import as_memoryview, decode_tag, encode_closing_tag, 
 from bac_py.services.common import BACnetPropertyValue
 from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import ObjectIdentifier
+
+_logger = logging.getLogger(__name__)
+_MAX_DECODED_ITEMS = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +76,9 @@ class WriteAccessSpecification:
                 break
             pv, offset = BACnetPropertyValue.decode_from(data, offset)
             props.append(pv)
+            if len(props) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(
             object_identifier=object_identifier,
@@ -116,5 +123,8 @@ class WritePropertyMultipleRequest:
         while offset < len(data):
             spec, offset = WriteAccessSpecification.decode(data, offset)
             specs.append(spec)
+            if len(specs) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(list_of_write_access_specs=specs)

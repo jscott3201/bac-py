@@ -5,6 +5,7 @@ CreateObject (Clause 15.3), DeleteObject (Clause 15.4).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from bac_py.encoding.primitives import (
@@ -25,6 +26,9 @@ from bac_py.encoding.tags import (
 from bac_py.services.common import BACnetPropertyValue
 from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import ObjectIdentifier
+
+_logger = logging.getLogger(__name__)
+_MAX_DECODED_ITEMS = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,6 +125,9 @@ class CreateObjectRequest:
                         break
                     pv, offset = BACnetPropertyValue.decode_from(data, offset)
                     list_of_initial_values.append(pv)
+                    if len(list_of_initial_values) >= _MAX_DECODED_ITEMS:
+                        msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                        raise ValueError(msg)
 
         return cls(
             object_type=object_type,

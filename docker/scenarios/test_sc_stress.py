@@ -36,6 +36,9 @@ HUB_URI = os.environ.get("SC_STRESS_HUB_URI", "")
 NODE1_VMAC = os.environ.get("SC_STRESS_NODE1_VMAC", "02BB00000001")
 NODE2_VMAC = os.environ.get("SC_STRESS_NODE2_VMAC", "02BB00000002")
 
+TLS_CERT_DIR = os.environ.get("TLS_CERT_DIR", "")
+TLS_CERT_NAME = os.environ.get("TLS_CERT_NAME", "")
+
 UNICAST_WORKERS = int(os.environ.get("UNICAST_WORKERS", "8"))
 BROADCAST_WORKERS = int(os.environ.get("BROADCAST_WORKERS", "2"))
 WARMUP_SECONDS = int(os.environ.get("WARMUP_SECONDS", "15"))
@@ -57,6 +60,18 @@ async def test_sc_sustained_throughput(
     node1_vmac_hex = NODE1_VMAC or sc_stress_node1_vmac
     node2_vmac_hex = NODE2_VMAC or sc_stress_node2_vmac
 
+    # Build TLS config from env vars
+    if TLS_CERT_DIR and TLS_CERT_NAME:
+        tls_config = SCTLSConfig(
+            private_key_path=os.path.join(TLS_CERT_DIR, f"{TLS_CERT_NAME}.key"),
+            certificate_path=os.path.join(TLS_CERT_DIR, f"{TLS_CERT_NAME}.crt"),
+            ca_certificates_path=os.path.join(TLS_CERT_DIR, "ca.crt"),
+        )
+        tls_label = "TLS 1.3"
+    else:
+        tls_config = SCTLSConfig(allow_plaintext=True)
+        tls_label = "plaintext"
+
     target_vmacs = [
         SCVMAC.from_hex(node1_vmac_hex).address,
         SCVMAC.from_hex(node2_vmac_hex).address,
@@ -69,7 +84,7 @@ async def test_sc_sustained_throughput(
         f"{BROADCAST_WORKERS} broadcast workers"
         f"\n  Total workers: {total_workers}  |  "
         f"Warmup: {WARMUP_SECONDS}s  |  Sustained: {SUSTAIN_SECONDS}s"
-        f"\n  Hub: {hub_uri}"
+        f"\n  Hub: {hub_uri}  |  {tls_label}"
         f"\n  Echo nodes: {node1_vmac_hex}, {node2_vmac_hex}"
         f"\n{'=' * 70}"
     )
@@ -78,7 +93,7 @@ async def test_sc_sustained_throughput(
     transport = SCTransport(
         SCTransportConfig(
             primary_hub_uri=hub_uri,
-            tls_config=SCTLSConfig(allow_plaintext=True),
+            tls_config=tls_config,
             min_reconnect_time=0.5,
             max_reconnect_time=5.0,
         )

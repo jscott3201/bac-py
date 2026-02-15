@@ -120,8 +120,10 @@ BACnet/SC (Local)
 ^^^^^^^^^^^^^^^^^
 
 An in-process SC hub, two echo nodes, and a test client all connected via
-``ws://127.0.0.1``.  Echo nodes receive NPDUs and echo them back with an
-``ECHO:`` prefix for round-trip latency measurement.
+``wss://127.0.0.1`` with mutual TLS 1.3 (mock CA, EC P-256 certificates
+generated at startup).  Echo nodes receive NPDUs and echo them back with an
+``ECHO:`` prefix for round-trip latency measurement.  Use ``--no-tls`` to fall
+back to plaintext ``ws://`` for comparison.
 
 **Worker mix (10 total):** 8 unicast, 2 broadcast.
 
@@ -342,12 +344,31 @@ with all requests routed through the router.
 plus a route health-check worker that periodically verifies the router is
 advertising the remote network via Who-Is-Router-To-Network.
 
+**Reference results (Docker, Alpine Linux, single host):**
+
+.. list-table::
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Metric
+     - Value
+   * - Sustained throughput
+     - ~8,000 req/s
+   * - Error rate
+     - ~0.7%
+   * - Overall latency (p50 / p95 / p99)
+     - 0.2ms / 0.3ms / 0.3ms
+   * - Duration
+     - 60s sustained + 15s warmup
+
 .. note::
 
-   The Docker router stress test requires the router container to properly
-   forward broadcast discovery messages between Docker bridge networks.
-   Subnet-directed broadcast addresses must be configured correctly via the
-   ``BROADCAST_ADDRESS`` environment variable for each network interface.
+   The Docker router stress test uses pre-populated router caches
+   (``add_route()``) and a direct server address (``SERVER_ADDRESS``) to bypass
+   broadcast-based discovery, which is unreliable for ephemeral-port clients
+   in Docker bridge networks.  Confirmed services (Read, Write, RPM, WPM) work
+   reliably via unicast through the router.  The error threshold is 1% (vs.
+   0.5% for direct BIP) due to the additional routing hop.
 
 
 .. _bbmd-stress-benchmark:
@@ -413,8 +434,8 @@ Results Comparison
    * - Router
      - ~8,500
      - ~0.7%
-     - --
-     - --
+     - ~8,000
+     - ~0.7%
    * - BBMD
      - ~13,500
      - ~0.4%
@@ -428,6 +449,9 @@ Results Comparison
   is limited by Python's GIL and event-loop scheduling.
 - **SC Local >> Docker:** WebSocket connections within a single event loop avoid
   inter-container TCP overhead, Docker bridge NAT, and process context switching.
+- **Router Local ≈ Docker:** Unlike BIP/BBMD, router throughput is similar in
+  both environments because the routing overhead (two UDP hops, NPDU
+  decode/re-encode at each hop) dominates over the multi-process benefit.
 - **Router overhead:** Routing adds ~40% latency vs. direct BIP.  Each request
   traverses two UDP hops and requires NPDU decode/re-encode at each hop.
 
@@ -495,7 +519,8 @@ Running Benchmarks
    # Run all Docker integration tests including stress
    make docker-test
 
-The pytest variants assert ``error_rate < 0.5%`` and exit non-zero on failure.
+The pytest variants assert ``error_rate < 0.5%`` (< 1% for router) and exit
+non-zero on failure.
 The standalone runners output a structured JSON report suitable for CI pipelines
 or historical tracking.
 
@@ -544,6 +569,9 @@ and ``--json`` flags.  Transport-specific options:
    * - ``--bdt-workers``
      - 1
      - BDT read workers (BBMD only)
+   * - ``--no-tls``
+     - off
+     - Disable TLS, use plaintext WebSocket (SC only)
    * - ``--unicast``
      - 8
      - Unicast NPDU workers (SC only)

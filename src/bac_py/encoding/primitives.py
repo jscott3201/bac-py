@@ -187,7 +187,11 @@ def decode_real(data: memoryview | bytes) -> float:
 
     :param data: At least 4 bytes of big-endian IEEE-754 single-precision data.
     :returns: The decoded floating-point value.
+    :raises ValueError: If *data* contains fewer than 4 bytes.
     """
+    if len(data) < 4:
+        msg = f"decode_real requires at least 4 bytes, got {len(data)}"
+        raise ValueError(msg)
     result: float = struct.unpack_from(">f", data)[0]
     return result
 
@@ -209,7 +213,11 @@ def decode_double(data: memoryview | bytes) -> float:
 
     :param data: At least 8 bytes of big-endian IEEE-754 double-precision data.
     :returns: The decoded floating-point value.
+    :raises ValueError: If *data* contains fewer than 8 bytes.
     """
+    if len(data) < 8:
+        msg = f"decode_double requires at least 8 bytes, got {len(data)}"
+        raise ValueError(msg)
     result: float = struct.unpack_from(">d", data)[0]
     return result
 
@@ -448,7 +456,11 @@ def decode_boolean(data: memoryview | bytes) -> bool:
 
     :param data: At least 1 byte; the first byte is interpreted as the boolean value.
     :returns: ``True`` if the first byte is non-zero, ``False`` otherwise.
+    :raises ValueError: If *data* is empty.
     """
+    if len(data) < 1:
+        msg = f"decode_boolean requires at least 1 byte, got {len(data)}"
+        raise ValueError(msg)
     return bool(data[0])
 
 

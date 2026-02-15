@@ -102,6 +102,7 @@ class SCWebSocket:
         # WebSocket frames arrive in one TCP segment, events_received()
         # returns all of them but recv() processes only one at a time.
         self._pending_events: list[Frame] = []
+        self._oversize_count = 0  # consecutive oversized frame counter
 
     # -- Client factory --
 
@@ -292,7 +293,7 @@ class SCWebSocket:
                     if result is not None:
                         # Stash remaining events for subsequent recv() calls
                         for remaining in events[i + 1 :]:
-                            if isinstance(remaining, Frame):
+                            if isinstance(remaining, Frame) and len(self._pending_events) < 64:
                                 self._pending_events.append(remaining)
                         return result
 
@@ -316,12 +317,17 @@ class SCWebSocket:
         """
         if event.opcode == Opcode.BINARY:
             if self._max_frame_size and len(event.data) > self._max_frame_size:
+                self._oversize_count += 1
                 logger.warning(
-                    "SC WebSocket frame too large: %d bytes (max %d), dropping",
+                    "SC WebSocket frame too large: %d bytes (max %d), dropping (%d consecutive)",
                     len(event.data),
                     self._max_frame_size,
+                    self._oversize_count,
                 )
+                if self._oversize_count >= 3:
+                    raise ConnectionClosedError(None, None, rcvd_then_sent=None)
                 return None
+            self._oversize_count = 0
             logger.debug("SC WebSocket recv: %d bytes", len(event.data))
             return bytes(event.data)
         if event.opcode == Opcode.CLOSE:

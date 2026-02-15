@@ -858,7 +858,11 @@ class ObjectDatabase:
         :param callback: Function to call on value change.
         """
         key = (object_id, prop_id)
-        self._change_callbacks.setdefault(key, []).append(callback)
+        cbs = self._change_callbacks.setdefault(key, [])
+        if len(cbs) >= 100:
+            msg = f"Too many change callbacks for {object_id}/{prop_id} (max 100)"
+            raise ValueError(msg)
+        cbs.append(callback)
         # Wire the object's write notification so it fans out to our callbacks
         obj = self._objects.get(object_id)
         if obj is not None and obj._on_property_written is None:

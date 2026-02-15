@@ -126,6 +126,7 @@ class BBMDManager:
         local_broadcast_callback: Callable[[bytes, BIPAddress], None] | None = None,
         broadcast_address: BIPAddress | None = None,
         max_fdt_entries: int = 128,
+        max_bdt_entries: int = 128,
         accept_fd_registrations: bool = True,
         allow_write_bdt: bool = False,
         global_address: BIPAddress | None = None,
@@ -149,6 +150,9 @@ class BBMDManager:
             entries. New registrations are NAKed when the limit
             is reached. Re-registrations of existing entries are
             always accepted regardless of the limit.
+        :param max_bdt_entries: Maximum number of broadcast distribution table
+            entries accepted via Write-BDT. Protects against
+            oversized BDT payloads from the network.
         :param accept_fd_registrations: Whether to accept foreign device
             registrations. When ``False``, all registration
             requests are NAKed. Defaults to ``True``.
@@ -175,6 +179,7 @@ class BBMDManager:
         self._local_broadcast = local_broadcast_callback
         self._broadcast_address = broadcast_address
         self._max_fdt_entries = max_fdt_entries
+        self._max_bdt_entries = max_bdt_entries
         self._accept_fd_registrations = accept_fd_registrations
         self._allow_write_bdt = allow_write_bdt
         self._global_address = global_address
@@ -517,6 +522,9 @@ class BBMDManager:
             self._send(result, source)
             return
 
+        # Cap TTL to 1 hour (3600s) to prevent unreasonable registration durations
+        ttl = min(ttl, 3600)
+
         # S1: Reject new registrations when FDT is full.
         # Re-registrations (same address) are always accepted.
         if source not in self._fdt and len(self._fdt) >= self._max_fdt_entries:
@@ -569,6 +577,19 @@ class BBMDManager:
             return
 
         if len(data) % BDT_ENTRY_SIZE != 0:
+            result = _encode_bvlc_result(BvlcResultCode.WRITE_BROADCAST_DISTRIBUTION_TABLE_NAK)
+            self._send(result, source)
+            return
+
+        entry_count = len(data) // BDT_ENTRY_SIZE
+        if entry_count > self._max_bdt_entries:
+            logger.warning(
+                "Write-BDT rejected: %d entries exceeds limit %d (from %s:%d)",
+                entry_count,
+                self._max_bdt_entries,
+                source.host,
+                source.port,
+            )
             result = _encode_bvlc_result(BvlcResultCode.WRITE_BROADCAST_DISTRIBUTION_TABLE_NAK)
             self._send(result, source)
             return

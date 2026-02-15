@@ -6,6 +6,7 @@ UnconfirmedAuditNotification (Clause 13.21).
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Self
 
@@ -34,6 +35,10 @@ from bac_py.types.audit_types import (
 )
 from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import ObjectIdentifier
+
+_logger = logging.getLogger(__name__)
+_MAX_DECODED_ITEMS = 10_000
+_MAX_NESTING_DEPTH = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +107,9 @@ class AuditLogQueryRequest:
                 t, t_offset = decode_tag(data, scan)
                 if t.is_opening:
                     depth += 1
+                    if depth > _MAX_NESTING_DEPTH:
+                        msg = f"Nesting depth exceeds {_MAX_NESTING_DEPTH}"
+                        raise ValueError(msg)
                     scan = t_offset
                 elif t.is_closing:
                     depth -= 1
@@ -125,6 +133,9 @@ class AuditLogQueryRequest:
                 t, t_offset = decode_tag(data, scan)
                 if t.is_opening:
                     depth += 1
+                    if depth > _MAX_NESTING_DEPTH:
+                        msg = f"Nesting depth exceeds {_MAX_NESTING_DEPTH}"
+                        raise ValueError(msg)
                     scan = t_offset
                 elif t.is_closing:
                     depth -= 1
@@ -234,6 +245,9 @@ class AuditLogQueryACK:
                     t, t_offset = decode_tag(data, scan)
                     if t.is_opening:
                         depth += 1
+                        if depth > _MAX_NESTING_DEPTH:
+                            msg = f"Nesting depth exceeds {_MAX_NESTING_DEPTH}"
+                            raise ValueError(msg)
                         scan = t_offset
                     elif t.is_closing:
                         depth -= 1
@@ -242,6 +256,9 @@ class AuditLogQueryACK:
                         scan = t_offset + t.length
             record = BACnetAuditLogRecord.decode(data[rec_start:scan])
             records.append(record)
+            if len(records) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
             offset = scan
 
         # [2] no-more-items
@@ -323,6 +340,9 @@ class ConfirmedAuditNotificationRequest:
                         inner, inner_off = decode_tag(data, scan)
                         if inner.is_opening:
                             depth += 1
+                            if depth > _MAX_NESTING_DEPTH:
+                                msg = f"Nesting depth exceeds {_MAX_NESTING_DEPTH}"
+                                raise ValueError(msg)
                             scan = inner_off
                         elif inner.is_closing:
                             depth -= 1
@@ -339,6 +359,9 @@ class ConfirmedAuditNotificationRequest:
 
             notification = BACnetAuditNotification.decode(data[notif_start:scan])
             notifications.append(notification)
+            if len(notifications) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
             offset = scan
 
         return cls(notifications=notifications)

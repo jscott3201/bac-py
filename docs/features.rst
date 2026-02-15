@@ -627,7 +627,7 @@ sockets between separate application instances running in containers. The
 infrastructure lives under ``docker/`` and uses Docker Compose with isolated
 bridge networks to simulate realistic BACnet/IP topologies.
 
-Ten scenarios are provided:
+Thirteen scenarios are provided:
 
 - **Client/Server** -- ReadProperty, WriteProperty, ReadPropertyMultiple,
   WritePropertyMultiple, Who-Is discovery, and object list enumeration over
@@ -653,11 +653,18 @@ Ten scenarios are provided:
   GetEnrollmentSummary queries.
 - **Secure Connect** -- BACnet/SC hub function and hub connector with TLS,
   VMAC addressing, and BVLC-SC message exchange over WebSocket connections.
+- **IPv6** -- BACnet/IPv6 client and server communication with foreign device
+  registration (Annex U).
 - **Demo** -- Interactive demonstration of client/server capabilities
   including reads, writes, discovery, and COV subscriptions.
 - **SC Stress** -- Sustained WebSocket throughput testing with varied-size
   NPDU payloads through an SC hub, measuring unicast and broadcast latency
   with echo correlation. See :ref:`benchmarks` for details.
+- **Router Stress** -- Cross-network routing throughput with mixed workloads
+  (reads, writes, RPM, WPM, object-list queries, route checks) through a
+  multi-port BACnet router. See :ref:`benchmarks` for details.
+- **BBMD Stress** -- Foreign device throughput stress testing through a BBMD
+  with sustained mixed workloads. See :ref:`benchmarks` for details.
 
 Run with ``make docker-test`` (all scenarios) or individual targets like
 ``make docker-test-client``, ``make docker-test-sc``, etc.

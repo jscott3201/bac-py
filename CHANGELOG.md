@@ -5,7 +5,119 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.5.1] - 2026-02-15
+
+### Added
+
+- **SC TLS stress testing**: All BACnet/SC stress tests and benchmarks now use
+  mutual TLS 1.3 with a mock CA (EC P-256) by default, matching production
+  requirements (Annex AB.7.4). A shared `docker/lib/sc_pki.py` module generates
+  the test PKI. Docker SC scenarios use init containers to generate certificates
+  into shared volumes. The local `bench_sc.py` benchmark accepts `--no-tls` to
+  fall back to plaintext for comparison.
+
+- **`add_route()` API**: Added `add_route(network, router_address)` to `Client`,
+  `BACnetApplication`, and `NetworkLayer` for pre-populating the router cache.
+  Enables communication with devices on remote networks without broadcast-based
+  router discovery — required in Docker bridge networks where ephemeral-port
+  clients cannot receive broadcast responses on the standard BACnet port.
+
+### Fixed
+
+- **Router per-port broadcast address**: Added `broadcast_address` field to
+  `RouterPortConfig` and pass it to `BIPTransport` in router mode. Previously,
+  all router ports used the default global broadcast (`255.255.255.255`), which
+  fails in Docker bridge networks where directed subnet broadcasts are required.
+  Docker router services now use `BROADCAST_ADDRESS_1`/`BROADCAST_ADDRESS_2`
+  environment variables for per-port configuration.
+- **BIPTransport ephemeral port broadcast**: Fixed `BIPTransport.send_broadcast()`
+  sending to port 0 when the transport was created with `port=0` (ephemeral).
+  The bound port is now stored after socket binding so broadcasts and BBMD
+  advertisements use the correct port.
+- **Docker router stress test**: Fixed the pre-existing router stress test failure
+  caused by three compounding issues: (1) per-port broadcast addresses not being
+  passed to the router's BIPTransport, (2) ephemeral port clients unable to
+  receive broadcast I-Am responses forwarded by the router, and (3) missing
+  router cache pre-population. The test now uses `add_route()` and a direct
+  server address (`SERVER_ADDRESS`) to bypass all broadcast-dependent discovery.
+
+### Security
+
+- **SC hub VMAC collision race fix**: Added `_pending_vmacs` reservation set to
+  `SCHubFunction` to prevent a TOCTOU race between VMAC collision check and
+  connection registration during the handshake window (Annex AB.6.2).
+- **SC URI scheme validation**: `SCNodeSwitch.establish_direct()` now validates
+  that hub-provided peer URIs use `ws://` or `wss://` schemes before
+  connecting, preventing SSRF-like redirection to non-WebSocket endpoints.
+- **SC header options count cap**: BVLC-SC header option decoding now limits
+  lists to 32 options per message (defense-in-depth against malformed payloads).
+- **SC pending resolution cache cap**: `SCNodeSwitch.resolve_address()` now
+  rejects new resolution requests when the cache reaches `max_connections`,
+  preventing unbounded memory growth from address resolution flooding.
+- **BBMD max BDT entries**: Added `max_bdt_entries` parameter (default 128) to
+  `BBMDManager`. Write-BDT requests exceeding the limit are NAKed, preventing
+  oversized BDT payloads from consuming unbounded memory.
+- **IPv6 VMAC cache size limit**: `VMACCache` now accepts a `max_entries`
+  parameter (default 4096). When full, stale entries are evicted first; if still
+  full, the oldest entry is dropped.
+- **IPv6 pending resolution cap**: `BIP6Transport.send_unicast()` now limits
+  the pending VMAC resolution cache to 1024 entries, preventing unbounded growth
+  from resolution requests to many unknown VMACs.
+- **H1: `decode_real`/`decode_double` buffer validation**: Added explicit length
+  checks before `struct.unpack_from` in `encoding/primitives.py`, raising
+  `ValueError` instead of the opaque `struct.error` on truncated input.
+- **H2: ErrorPDU bounds check**: Added bounds checks after each `decode_tag()` in
+  `_decode_error()` (`encoding/apdu.py`) to reject truncated error class/code
+  fields before slicing.
+- **H3: `extract_context_value` overflow check**: Added bounds validation in
+  `encoding/tags.py` to reject primitive tags whose length extends past the
+  buffer end, preventing silent reads of stale/adjacent memory.
+- **H4: Ethernet 802.3 minimum length**: `_decode_frame()` in
+  `transport/ethernet.py` now rejects frames with length field < LLC header
+  size (3 bytes), preventing underflow in NPDU extraction.
+- **C1: Service decoder list caps**: Added `_MAX_DECODED_ITEMS = 10,000` cap to
+  all unbounded decode loops across 8 service files (19 loops total):
+  `read_property_multiple`, `write_property_multiple`, `alarm_summary`, `cov`,
+  `write_group`, `virtual_terminal`, `object_mgmt`, and `audit`.
+- **C2: `ObjectType` vendor cache cap**: `ObjectType._missing_()` now clears the
+  vendor cache at 4096 entries, matching the `PropertyIdentifier` pattern and
+  preventing unbounded growth from vendor-proprietary object types.
+- **C3: Segmentation reassembly size cap**: `SegmentReceiver` now tracks total
+  reassembly bytes and returns `ABORT` when the cumulative size exceeds 1 MiB.
+  Added `created_at` timestamp field for stale receiver detection.
+- **C4: Audit nesting depth enforcement**: Added depth checks (max 32) to all
+  manual tag-nesting loops in `services/audit.py` (4 loops), preventing stack
+  exhaustion from deeply nested opening tags in audit decode paths.
+- **S1: Hub pending VMAC TTL and cap**: Converted `_pending_vmacs` from `set` to
+  `dict[SCVMAC, float]` with 30-second TTL purge and `max_connections` cap in
+  `transport/sc/hub_function.py`, preventing unbounded growth from slow or
+  abandoned handshakes.
+- **S2: SC header option data size cap**: Added `_MAX_OPTION_DATA_SIZE = 512`
+  limit to `SCHeaderOption.decode_list()` in `transport/sc/bvlc.py`, rejecting
+  oversized option data (up to 65535 per option) early in the decode path.
+- **S3: SC WebSocket oversized frame rate limit**: `SCWebSocket._process_frame()`
+  now tracks consecutive oversized frames and raises `ConnectionClosedError`
+  after 3 in a row, preventing log flooding from misbehaving peers.
+- **S4: SC WebSocket pending events cap**: Capped `_pending_events` buffer at 64
+  entries in `transport/sc/websocket.py`, silently dropping excess frames when a
+  single TCP segment delivers many WebSocket frames.
+- **S5: SC address resolution URI cap**: `AddressResolutionAckPayload.decode()`
+  now truncates the URI list to 16 entries, preventing unbounded allocations
+  from malformed address resolution responses.
+- **B1: FDT TTL upper bound**: Foreign device registration TTL is now capped at
+  3600 seconds (1 hour) in `transport/bbmd.py`, preventing unreasonably long
+  registration durations.
+- **A1: Change callback cap**: `ObjectDatabase.register_change_callback()` now
+  raises `ValueError` when a single property exceeds 100 registered callbacks,
+  preventing unbounded list growth.
+- **COV nesting depth enforcement**: Added depth check (max 32) to the manual
+  tag-nesting loop in `COVPropertyValue.decode()` (`services/cov.py`),
+  preventing stack exhaustion from deeply nested opening tags in COV value
+  decode paths.
+- **`decode_boolean` buffer validation**: Added explicit length check before
+  accessing `data[0]` in `decode_boolean()` (`encoding/primitives.py`),
+  raising `ValueError` on empty input for consistency with `decode_real` and
+  `decode_double`.
 
 ## [1.5.0] - 2026-02-15
 

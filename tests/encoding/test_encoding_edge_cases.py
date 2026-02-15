@@ -1,7 +1,6 @@
 """Tests for encoding edge cases: untested functions and boundary conditions."""
 
 import math
-import struct
 
 import pytest
 
@@ -735,13 +734,13 @@ class TestMalformedDataHandling:
             encode_tag(0, TagClass.APPLICATION, -1)
 
     def test_decode_real_truncated(self):
-        """decode_real with < 4 bytes should raise from struct.unpack."""
-        with pytest.raises(struct.error):
+        """decode_real with < 4 bytes should raise ValueError."""
+        with pytest.raises(ValueError, match="decode_real requires at least 4 bytes"):
             decode_real(b"\x00\x00")
 
     def test_decode_double_truncated(self):
-        """decode_double with < 8 bytes should raise from struct.unpack."""
-        with pytest.raises(struct.error):
+        """decode_double with < 8 bytes should raise ValueError."""
+        with pytest.raises(ValueError, match="decode_double requires at least 8 bytes"):
             decode_double(b"\x00\x00\x00\x00")
 
     def test_decode_character_string_memoryview(self):

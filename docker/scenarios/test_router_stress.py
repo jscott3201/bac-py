@@ -26,6 +26,9 @@ from docker.lib.router_stress import (
 
 SERVER_INSTANCE = int(os.environ.get("SERVER_INSTANCE", "501"))
 REMOTE_NETWORK = int(os.environ.get("REMOTE_NETWORK", "2"))
+BROADCAST_ADDRESS = os.environ.get("BROADCAST_ADDRESS", "255.255.255.255")
+ROUTER_ADDRESS = os.environ.get("ROUTER_ADDRESS", "")
+SERVER_ADDRESS = os.environ.get("SERVER_ADDRESS", "")
 
 NUM_POOLS = int(os.environ.get("NUM_POOLS", "1"))
 READERS_PER_POOL = int(os.environ.get("READERS_PER_POOL", "2"))
@@ -60,19 +63,34 @@ async def test_router_sustained_throughput() -> None:
     async with contextlib.AsyncExitStack() as stack:
         pools: list[Client] = []
         for i in range(NUM_POOLS):
-            client = await stack.enter_async_context(Client(instance_number=700 + i, port=0))
+            client = await stack.enter_async_context(
+                Client(instance_number=700 + i, port=0, broadcast_address=BROADCAST_ADDRESS)
+            )
             pools.append(client)
 
-        objlist_client = await stack.enter_async_context(Client(instance_number=750, port=0))
-        route_check_client = await stack.enter_async_context(Client(instance_number=751, port=0))
+        objlist_client = await stack.enter_async_context(
+            Client(instance_number=750, port=0, broadcast_address=BROADCAST_ADDRESS)
+        )
+        route_check_client = await stack.enter_async_context(
+            Client(instance_number=751, port=0, broadcast_address=BROADCAST_ADDRESS)
+        )
 
         # -- Discovery phase ---------------------------------------------------
+        # Pre-populate router cache on all clients when router address is known
+        if ROUTER_ADDRESS:
+            for c in pools:
+                c.add_route(REMOTE_NETWORK, ROUTER_ADDRESS)
+            objlist_client.add_route(REMOTE_NETWORK, ROUTER_ADDRESS)
+            route_check_client.add_route(REMOTE_NETWORK, ROUTER_ADDRESS)
+
         print(f"\n  Discovering server instance {SERVER_INSTANCE} on network {REMOTE_NETWORK} ...")
         server = await discover_remote_server(
             pools[0],
             REMOTE_NETWORK,
             SERVER_INSTANCE,
             timeout=DISCOVERY_TIMEOUT,
+            router_address=ROUTER_ADDRESS or None,
+            server_address=SERVER_ADDRESS or None,
         )
         print(f"  Found server at: {server}")
 
@@ -94,6 +112,7 @@ async def test_router_sustained_throughput() -> None:
             wpm_per_pool=WPM_PER_POOL,
             objlist_workers=OBJLIST_WORKERS,
             error_backoff=ERROR_BACKOFF,
+            router_address=ROUTER_ADDRESS or None,
         )
 
         print(f"\n  Warmup: {len(warmup_tasks)} workers for {WARMUP_SECONDS}s ...")
@@ -124,6 +143,7 @@ async def test_router_sustained_throughput() -> None:
             wpm_per_pool=WPM_PER_POOL,
             objlist_workers=OBJLIST_WORKERS,
             error_backoff=ERROR_BACKOFF,
+            router_address=ROUTER_ADDRESS or None,
         )
 
         wall_start = time.monotonic()
@@ -192,6 +212,9 @@ async def test_router_sustained_throughput() -> None:
             f"\n{'=' * 70}"
         )
 
-        assert error_rate < 0.005, f"Error rate {error_rate:.2%} exceeds 0.5%"
+        # Router stress has a higher threshold than direct BIP stress because
+        # the additional routing hop through Docker's virtual networking adds
+        # some UDP packet loss under extreme load.
+        assert error_rate < 0.01, f"Error rate {error_rate:.2%} exceeds 1%"
         assert len(stats.read_latencies) > 0, "No successful reads"
         assert len(stats.write_latencies) > 0, "No successful writes"

@@ -83,6 +83,8 @@ class RouterPortConfig:
     network_number: int
     interface: str = "0.0.0.0"
     port: int = 0xBAC0
+    broadcast_address: str = "255.255.255.255"
+    """Directed broadcast address for this port's subnet."""
     bbmd_config: BBMDConfig | None = None
     ipv6: bool = False
     """Use BACnet/IPv6 (Annex U) transport for this port."""
@@ -417,7 +419,11 @@ class BACnetApplication:
                     vmac=pc.vmac,
                 )
             else:
-                transport = BIPTransport(interface=pc.interface, port=pc.port)
+                transport = BIPTransport(
+                    interface=pc.interface,
+                    port=pc.port,
+                    broadcast_address=pc.broadcast_address,
+                )
             await transport.start()
             self._transports.append(transport)
 
@@ -690,6 +696,26 @@ class BACnetApplication:
             msg = "Network layer not available"
             raise RuntimeError(msg)
         self._network.send_network_message(message_type, data, destination)
+
+    def add_route(self, network: int, router_address: str) -> None:
+        """Pre-populate the router cache for a remote network.
+
+        Allows sending to a remote network without broadcast-based
+        router discovery.  Useful in Docker or test environments
+        where broadcast delivery is unreliable.
+
+        :param network: The remote network number.
+        :param router_address: IP address of the router (e.g.
+            ``"172.30.1.150"`` or ``"172.30.1.150:47808"``).
+        :raises RuntimeError: If the application is not started.
+        """
+        if self._network is None:
+            msg = "Network layer not available"
+            raise RuntimeError(msg)
+        from bac_py.network.address import parse_address
+
+        addr = parse_address(router_address)
+        self._network.add_route(network, addr.mac_address)
 
     def register_network_message_handler(
         self,

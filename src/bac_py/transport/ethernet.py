@@ -96,6 +96,10 @@ def _decode_frame(raw: bytes) -> tuple[bytes, bytes] | None:
     if length > 1500:
         return None
 
+    # Minimum length must cover the LLC header
+    if length < LLC_HEADER_SIZE:
+        return None
+
     # Check LLC header (single slice comparison instead of 3 individual checks)
     llc_offset = ETHERNET_HEADER_SIZE
     if raw[llc_offset : llc_offset + LLC_HEADER_SIZE] != LLC_HEADER:

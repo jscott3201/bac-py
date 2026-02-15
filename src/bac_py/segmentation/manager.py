@@ -7,11 +7,14 @@ TSMs drive instances of SegmentSender/SegmentReceiver via method calls.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
 from bac_py.types.enums import AbortReason
+
+_MAX_REASSEMBLY_SIZE = 1_048_576  # 1 MiB cap on total reassembly size
 
 logger = logging.getLogger(__name__)
 
@@ -283,6 +286,8 @@ class SegmentReceiver:
     _final_idx: int | None = None
     _last_ack_seq: int = 0
     _window_start_idx: int = 0
+    _total_bytes: int = 0
+    created_at: float = field(default_factory=time.monotonic)
 
     @classmethod
     def create(
@@ -312,6 +317,7 @@ class SegmentReceiver:
             _final_idx=0 if not more_follows else None,
             _last_ack_seq=0,
             _window_start_idx=1,
+            _total_bytes=len(first_segment_data),
         )
         return receiver
 
@@ -340,6 +346,10 @@ class SegmentReceiver:
             # Map sequence to absolute index
             abs_idx = self._seq_to_abs_idx(seq_num)
             self._segments[abs_idx] = data
+            self._total_bytes += len(data)
+            if self._total_bytes > _MAX_REASSEMBLY_SIZE:
+                logger.warning("Reassembly size exceeds %d bytes, aborting", _MAX_REASSEMBLY_SIZE)
+                return (SegmentAction.ABORT, -1)
             logger.debug(
                 f"segment {seq_num}/{self.actual_window_size} received, "
                 f"idx={abs_idx}, more_follows={more_follows}"

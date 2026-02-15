@@ -11,6 +11,7 @@ connects to the hub and echoes received NPDUs back with a b"ECHO:" prefix.
 from __future__ import annotations
 
 import asyncio
+import os
 
 import pytest
 
@@ -25,7 +26,16 @@ CONNECT_TIMEOUT = 15
 ECHO_TIMEOUT = 10
 
 
-def _plaintext_tls() -> SCTLSConfig:
+def _get_tls_config() -> SCTLSConfig:
+    """Build TLS config from env vars, falling back to plaintext."""
+    cert_dir = os.environ.get("TLS_CERT_DIR", "")
+    cert_name = os.environ.get("TLS_CERT_NAME", "")
+    if cert_dir and cert_name:
+        return SCTLSConfig(
+            private_key_path=os.path.join(cert_dir, f"{cert_name}.key"),
+            certificate_path=os.path.join(cert_dir, f"{cert_name}.crt"),
+            ca_certificates_path=os.path.join(cert_dir, "ca.crt"),
+        )
     return SCTLSConfig(allow_plaintext=True)
 
 
@@ -34,7 +44,7 @@ async def _make_transport(hub_uri: str) -> SCTransport:
     transport = SCTransport(
         SCTransportConfig(
             primary_hub_uri=hub_uri,
-            tls_config=_plaintext_tls(),
+            tls_config=_get_tls_config(),
             min_reconnect_time=0.5,
             max_reconnect_time=5.0,
         )

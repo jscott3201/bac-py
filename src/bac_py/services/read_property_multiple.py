@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from bac_py.encoding.primitives import (
@@ -22,6 +23,9 @@ from bac_py.encoding.tags import (
 )
 from bac_py.types.enums import ErrorClass, ErrorCode, ObjectType, PropertyIdentifier
 from bac_py.types.primitives import ObjectIdentifier
+
+_logger = logging.getLogger(__name__)
+_MAX_DECODED_ITEMS = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -147,6 +151,9 @@ class ReadAccessSpecification:
                 break
             ref, offset = PropertyReference.decode(data, offset)
             refs.append(ref)
+            if len(refs) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(
             object_identifier=object_identifier,
@@ -191,6 +198,9 @@ class ReadPropertyMultipleRequest:
         while offset < len(data):
             spec, offset = ReadAccessSpecification.decode(data, offset)
             specs.append(spec)
+            if len(specs) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(list_of_read_access_specs=specs)
 
@@ -363,6 +373,9 @@ class ReadAccessResult:
                 break
             elem, offset = ReadResultElement.decode(data, offset)
             results.append(elem)
+            if len(results) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(
             object_identifier=object_identifier,
@@ -407,5 +420,8 @@ class ReadPropertyMultipleACK:
         while offset < len(data):
             result, offset = ReadAccessResult.decode(data, offset)
             results.append(result)
+            if len(results) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(list_of_read_access_results=results)

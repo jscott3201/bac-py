@@ -31,6 +31,10 @@
 #   make docker-clean             # remove all containers/images
 # =============================================================================
 
+volumes:
+  sc-certs:
+  sc-stress-certs:
+
 networks:
   bacnet-main:
     driver: bridge
@@ -172,7 +176,8 @@ services:
       INTERFACE_2: "172.30.2.50"
       PORT_1: "47808"
       PORT_2: "47808"
-      BROADCAST_ADDRESS: "172.30.1.255"
+      BROADCAST_ADDRESS_1: "172.30.1.255"
+      BROADCAST_ADDRESS_2: "172.30.2.255"
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.50
@@ -410,6 +415,17 @@ services:
   # Scenario 9: BACnet Secure Connect (SC hub + node WebSocket communication)
   # ===========================================================================
 
+  sc-cert-gen:
+    <<: *build
+    container_name: bacnet-sc-cert-gen
+    environment:
+      ROLE: sc-cert-gen
+      CERT_DIR: /certs
+      CERT_NAMES: "hub,node1,node2,stress"
+    volumes:
+      - sc-certs:/certs
+    profiles: ["secure-connect", "all"]
+
   sc-hub:
     <<: [*build, *healthcheck]
     container_name: bacnet-sc-hub
@@ -417,9 +433,16 @@ services:
       ROLE: sc-hub
       BIND_ADDRESS: "0.0.0.0"
       BIND_PORT: "4443"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: hub
+    volumes:
+      - sc-certs:/certs:ro
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.120
+    depends_on:
+      sc-cert-gen:
+        condition: service_completed_successfully
     profiles: ["secure-connect", "all"]
 
   sc-node1:
@@ -427,9 +450,13 @@ services:
     container_name: bacnet-sc-node1
     environment:
       ROLE: sc-node
-      HUB_URI: "ws://172.30.1.120:4443"
+      HUB_URI: "wss://172.30.1.120:4443"
       VMAC: "02AA00000001"
       NODE_SWITCH_PORT: "4444"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: node1
+    volumes:
+      - sc-certs:/certs:ro
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.121
@@ -443,9 +470,13 @@ services:
     container_name: bacnet-sc-node2
     environment:
       ROLE: sc-node
-      HUB_URI: "ws://172.30.1.120:4443"
+      HUB_URI: "wss://172.30.1.120:4443"
       VMAC: "02AA00000002"
       NODE_SWITCH_PORT: "4445"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: node2
+    volumes:
+      - sc-certs:/certs:ro
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.122
@@ -464,6 +495,10 @@ services:
       SC_HUB_PORT: "4443"
       SC_NODE1_VMAC: "02AA00000001"
       SC_NODE2_VMAC: "02AA00000002"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: stress
+    volumes:
+      - sc-certs:/certs:ro
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.123
@@ -478,6 +513,17 @@ services:
   # Scenario 10: SC Stress (WebSocket hub/node throughput)
   # ===========================================================================
 
+  sc-stress-cert-gen:
+    <<: *build
+    container_name: bacnet-sc-stress-cert-gen
+    environment:
+      ROLE: sc-cert-gen
+      CERT_DIR: /certs
+      CERT_NAMES: "hub,node1,node2,stress"
+    volumes:
+      - sc-stress-certs:/certs
+    profiles: ["sc-stress", "sc-stress-runner"]
+
   sc-stress-hub:
     <<: [*build, *healthcheck]
     container_name: bacnet-sc-stress-hub
@@ -486,9 +532,16 @@ services:
       ROLE: sc-hub
       BIND_ADDRESS: "0.0.0.0"
       BIND_PORT: "4443"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: hub
+    volumes:
+      - sc-stress-certs:/certs:ro
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.130
+    depends_on:
+      sc-stress-cert-gen:
+        condition: service_completed_successfully
     profiles: ["sc-stress", "sc-stress-runner"]
 
   sc-stress-node1:
@@ -497,8 +550,12 @@ services:
     mem_limit: 1g
     environment:
       ROLE: sc-node
-      HUB_URI: "ws://172.30.1.130:4443"
+      HUB_URI: "wss://172.30.1.130:4443"
       VMAC: "02BB00000001"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: node1
+    volumes:
+      - sc-stress-certs:/certs:ro
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.131
@@ -513,8 +570,12 @@ services:
     mem_limit: 1g
     environment:
       ROLE: sc-node
-      HUB_URI: "ws://172.30.1.130:4443"
+      HUB_URI: "wss://172.30.1.130:4443"
       VMAC: "02BB00000002"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: node2
+    volumes:
+      - sc-stress-certs:/certs:ro
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.132
@@ -534,6 +595,10 @@ services:
       SC_STRESS_HUB_PORT: "4443"
       SC_STRESS_NODE1_VMAC: "02BB00000001"
       SC_STRESS_NODE2_VMAC: "02BB00000002"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: stress
+    volumes:
+      - sc-stress-certs:/certs:ro
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.133
@@ -550,13 +615,17 @@ services:
     mem_limit: 2g
     environment:
       ROLE: sc-stress
-      SC_STRESS_HUB_URI: "ws://172.30.1.130:4443"
+      SC_STRESS_HUB_URI: "wss://172.30.1.130:4443"
       SC_STRESS_NODE1_VMAC: "02BB00000001"
       SC_STRESS_NODE2_VMAC: "02BB00000002"
       UNICAST_WORKERS: "8"
       BROADCAST_WORKERS: "2"
       WARMUP_SECONDS: "15"
       SUSTAIN_SECONDS: "60"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: stress
+    volumes:
+      - sc-stress-certs:/certs:ro
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.134
@@ -584,7 +653,8 @@ services:
       INTERFACE_2: "172.30.2.50"
       PORT_1: "47808"
       PORT_2: "47808"
-      BROADCAST_ADDRESS: "172.30.1.255"
+      BROADCAST_ADDRESS_1: "172.30.1.255"
+      BROADCAST_ADDRESS_2: "172.30.2.255"
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.150
@@ -618,6 +688,9 @@ services:
       TEST_FILE: test_router_stress.py
       SERVER_INSTANCE: "501"
       REMOTE_NETWORK: "2"
+      BROADCAST_ADDRESS: "172.30.1.255"
+      ROUTER_ADDRESS: "172.30.1.150"
+      SERVER_ADDRESS: "2:172.30.2.60"
     networks:
       bacnet-main:
         ipv4_address: 172.30.1.160
@@ -636,6 +709,9 @@ services:
       ROLE: router-stress
       SERVER_INSTANCE: "501"
       REMOTE_NETWORK: "2"
+      BROADCAST_ADDRESS: "172.30.1.255"
+      ROUTER_ADDRESS: "172.30.1.150"
+      SERVER_ADDRESS: "2:172.30.2.60"
       NUM_POOLS: "1"
       READERS_PER_POOL: "2"
       WRITERS_PER_POOL: "1"

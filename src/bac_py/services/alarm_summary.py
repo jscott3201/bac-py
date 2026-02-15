@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from bac_py.encoding.primitives import (
@@ -37,6 +38,9 @@ from bac_py.types.enums import (
     ObjectType,
 )
 from bac_py.types.primitives import BitString, ObjectIdentifier
+
+_logger = logging.getLogger(__name__)
+_MAX_DECODED_ITEMS = 10_000
 
 # ---------------------------------------------------------------------------
 # GetAlarmSummary (Clause 13.6)
@@ -148,6 +152,9 @@ class GetAlarmSummaryACK:
                     acknowledged_transitions=acked,
                 )
             )
+            if len(summaries) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(list_of_alarm_summaries=summaries)
 
@@ -389,6 +396,9 @@ class GetEnrollmentSummaryACK:
                     notification_class=notification_class,
                 )
             )
+            if len(summaries) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         return cls(list_of_enrollment_summaries=summaries)
 
@@ -543,6 +553,9 @@ class GetEventInformationACK:
             # Decode one EventSummary
             summary, offset = cls._decode_event_summary(data, offset)
             summaries.append(summary)
+            if len(summaries) >= _MAX_DECODED_ITEMS:
+                msg = f"Decoded item count exceeds limit ({_MAX_DECODED_ITEMS})"
+                raise ValueError(msg)
 
         # [1] moreEvents
         tag, offset = decode_tag(data, offset)

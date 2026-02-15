@@ -22,17 +22,44 @@ before processing:
    Every ``decode_tag()`` call validates that the buffer contains enough bytes
    for the tag number, length field, and content before reading. Truncated
    packets raise ``ValueError`` immediately rather than reading past the buffer
-   boundary.
+   boundary. Context-tag extraction (``extract_context_value``) additionally
+   validates that primitive tag lengths do not extend past the buffer end.
+
+**Primitive type buffer checks**
+   ``decode_real()`` and ``decode_double()`` validate the input buffer is at
+   least 4 or 8 bytes before calling ``struct.unpack_from()``, raising a clear
+   ``ValueError`` instead of an opaque ``struct.error`` on truncated data.
+   ErrorPDU decoding performs bounds checks after each ``decode_tag()`` call to
+   reject truncated error class and error code fields.
 
 **Allocation caps**
    Tag lengths exceeding 1 MB (1,048,576 bytes) are rejected to prevent memory
    exhaustion from malformed length fields. This catches both corrupted packets
    and deliberate attempts to trigger large allocations.
 
+**Service decoder list caps**
+   All service decode loops (ReadPropertyMultiple, WritePropertyMultiple,
+   alarm summary, COV, write group, virtual terminal, object management, and
+   audit services) enforce a maximum of 10,000 decoded items per message.
+   This prevents crafted payloads with thousands of repeated elements from
+   consuming excessive memory during decoding.
+
 **Context nesting depth**
    Nested context tags are limited to a depth of 32. Deeply nested or recursive
    structures that exceed this limit raise ``ValueError``, preventing stack
-   exhaustion from crafted payloads.
+   exhaustion from crafted payloads. This is enforced in the core tag decoder,
+   the audit service decode paths, COV property value decoding, and all
+   service decoders with manual nesting loops.
+
+**Segmentation reassembly cap**
+   ``SegmentReceiver`` tracks cumulative reassembly size and aborts the
+   transaction when the total exceeds 1 MiB (1,048,576 bytes), preventing a
+   peer from consuming unbounded memory with many small segments.
+
+**Ethernet frame validation**
+   The Ethernet transport rejects 802.3 frames whose length field is below the
+   minimum LLC header size (3 bytes), preventing underflow when extracting the
+   NPDU payload.
 
 **APDU size constraints**
    Maximum APDU sizes are enforced per Clause 20.1.2.5 (50--1476 bytes). When
@@ -60,6 +87,13 @@ Transport Security
    transport startup. These warnings make it immediately visible when
    encryption is disabled.
 
+**Stress test TLS coverage**
+   All BACnet/SC stress tests and benchmarks (both local and Docker) exercise
+   mutual TLS 1.3 by default using a mock CA with EC P-256 certificates.  This
+   ensures that TLS handshake overhead and encrypted data paths are included in
+   performance measurements. The local benchmark accepts ``--no-tls`` to fall
+   back to plaintext for comparison.
+
 **VMAC origin validation**
    The hub function validates the source VMAC address on every received BVLC-SC
    message against the connection's registered VMAC. This prevents a connected
@@ -67,8 +101,38 @@ Transport Security
 
 **WebSocket frame size limits**
    SC WebSocket connections support a configurable ``max_frame_size`` parameter.
-   Frames exceeding the limit are logged and discarded, preventing a peer from
-   consuming unbounded memory with oversized messages.
+   Frames exceeding the limit are logged and discarded.  After 3 consecutive
+   oversized frames, the connection is closed to prevent log flooding from
+   misbehaving peers.  The internal pending events buffer is capped at 64
+   entries to bound memory when a single TCP segment delivers many WebSocket
+   frames.
+
+**VMAC collision atomicity**
+   The hub function reserves a VMAC address in a ``_pending_vmacs`` dictionary
+   when the collision check passes during the BACnet/SC handshake.  This
+   prevents a time-of-check/time-of-use (TOCTOU) race where two connections
+   with the same VMAC could both pass the check before either is registered.
+   Reservations expire after 30 seconds and the pending set is capped at
+   ``max_connections`` to prevent growth from abandoned handshakes.
+
+**URI scheme validation**
+   When a hub provides peer WebSocket URIs via Address-Resolution-ACK, the node
+   switch validates that each URI uses a ``ws://`` or ``wss://`` scheme before
+   connecting.  URIs with other schemes are logged and skipped, preventing a
+   malicious hub from redirecting the node to non-WebSocket endpoints.
+
+**SC header options count and size limits**
+   BVLC-SC header option decoding enforces a maximum of 32 options per list
+   and a maximum of 512 bytes per individual option data field.  The BACnet/SC
+   spec defines only two option types (Secure Path and Proprietary), so
+   legitimate messages never approach these limits.  This prevents crafted
+   payloads from causing excessive allocations via option count or oversized
+   option data (up to 65,535 bytes per the wire format).
+
+**SC address resolution URI cap**
+   ``AddressResolutionAckPayload`` decoding truncates the URI list to 16
+   entries, preventing unbounded allocations from malformed address resolution
+   responses.
 
 **Credential redaction**
    The ``SCTLSConfig.__repr__()`` method redacts ``private_key_path`` as
@@ -116,6 +180,32 @@ Memory Safety
    configurable maximum sizes. When a buffer reaches capacity, the oldest
    entries are overwritten. This prevents unbounded memory growth from
    long-running data collection.
+
+**Transport resource caps**
+   All transport layers enforce size limits on network-facing data structures to
+   prevent memory exhaustion from malicious or misbehaving peers:
+
+   - **BBMD** -- Foreign device tables are capped by ``max_fdt_entries``
+     (default 128) and broadcast distribution tables by ``max_bdt_entries``
+     (default 128).  Requests exceeding either limit are NAKed.  Foreign device
+     registration TTLs are capped at 3600 seconds (1 hour).
+   - **BACnet/IPv6** -- The VMAC resolution cache enforces a ``max_entries``
+     limit (default 4096) with automatic stale-entry eviction.  Pending address
+     resolutions are capped at 1024 concurrent VMACs.
+   - **BACnet/SC** -- The node switch caps pending address resolutions to
+     ``max_connections``.  The hub function caps active connections via
+     ``max_connections``.
+
+**Enum vendor caches**
+   The ``ObjectType._missing_()`` and ``PropertyIdentifier._missing_()``
+   vendor-proprietary enum caches are both capped at 4,096 entries.  When the
+   cap is reached the cache is cleared, preventing unbounded memory growth from
+   protocol traffic containing many distinct vendor-proprietary type codes.
+
+**Change callback cap**
+   ``ObjectDatabase.register_change_callback()`` limits each property to 100
+   registered callbacks, raising ``ValueError`` if the limit is exceeded.  This
+   prevents accidental unbounded growth from repeated registrations.
 
 **Constant-time secret comparison**
    Password verification in server handlers uses ``hmac.compare_digest()``

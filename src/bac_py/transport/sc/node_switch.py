@@ -187,6 +187,10 @@ class SCNodeSwitch:
         if dest in self._pending_resolutions:
             return await self._pending_resolutions[dest]
 
+        if len(self._pending_resolutions) >= self._config.max_connections:
+            logger.warning("SC address resolution cache full, dropping request")
+            return []
+
         fut: asyncio.Future[list[str]] = asyncio.get_running_loop().create_future()
         self._pending_resolutions[dest] = fut
 
@@ -227,6 +231,12 @@ class SCNodeSwitch:
 
         logger.debug("SC establishing direct connection to %s via %s", dest, uris)
         for uri in uris:
+            if not uri.startswith(("ws://", "wss://")):
+                logger.warning(
+                    "SC ignoring non-WebSocket URI in address resolution: %s",
+                    uri,
+                )
+                continue
             try:
                 ws = await SCWebSocket.connect(
                     uri,

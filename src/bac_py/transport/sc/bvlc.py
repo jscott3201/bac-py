@@ -53,6 +53,15 @@ _MARKER_MUST_UNDERSTAND = 0x40
 _MARKER_HAS_DATA = 0x20
 _MARKER_TYPE_MASK = 0x1F
 
+# Maximum number of header options per list (defense-in-depth).
+# The spec defines only two option types (Secure Path, Proprietary);
+# a well-formed message should never approach this limit.
+_MAX_HEADER_OPTIONS = 32
+
+# Maximum data size per header option (defense-in-depth).
+# Spec-defined options are small; reject excessively large options.
+_MAX_OPTION_DATA_SIZE = 512
+
 
 @dataclass(frozen=True, slots=True)
 class SCHeaderOption:
@@ -95,6 +104,9 @@ class SCHeaderOption:
         options: list[SCHeaderOption] = []
         offset = 0
         while offset < len(data):
+            if len(options) >= _MAX_HEADER_OPTIONS:
+                msg = f"Too many header options ({_MAX_HEADER_OPTIONS})"
+                raise ValueError(msg)
             marker = data[offset]
             offset += 1
 
@@ -110,6 +122,12 @@ class SCHeaderOption:
                     raise ValueError(msg)
                 (data_len,) = struct.unpack_from("!H", data, offset)
                 offset += 2
+                if data_len > _MAX_OPTION_DATA_SIZE:
+                    msg = (
+                        f"Header option data too large: {data_len} bytes "
+                        f"exceeds limit ({_MAX_OPTION_DATA_SIZE})"
+                    )
+                    raise ValueError(msg)
                 if offset + data_len > len(data):
                     msg = (
                         f"Header option data truncated: need {data_len} bytes, "
@@ -477,11 +495,12 @@ class AddressResolutionAckPayload:
 
     @staticmethod
     def decode(data: bytes | memoryview) -> AddressResolutionAckPayload:
-        """Decode URI list from payload bytes."""
+        """Decode URI list from payload bytes (max 16 URIs)."""
         text = bytes(data).decode("utf-8")
         if not text:
             return AddressResolutionAckPayload(())
-        return AddressResolutionAckPayload(tuple(text.split(" ")))
+        uris = text.split(" ")
+        return AddressResolutionAckPayload(tuple(uris[:16]))
 
 
 @dataclass(frozen=True, slots=True)
