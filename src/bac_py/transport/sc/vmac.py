@@ -28,6 +28,13 @@ class SCVMAC:
     # -- Factories --
 
     @classmethod
+    def _from_trusted(cls, data: bytes) -> SCVMAC:
+        """Fast-path: skip validation (caller guarantees 6 bytes)."""
+        obj = object.__new__(cls)
+        object.__setattr__(obj, "address", data)
+        return obj
+
+    @classmethod
     def random(cls) -> SCVMAC:
         """Generate a random locally-administered unicast VMAC.
 

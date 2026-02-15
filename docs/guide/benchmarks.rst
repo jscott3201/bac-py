@@ -134,11 +134,11 @@ An in-process SC hub, two echo nodes, and a test client all connected via
    * - Metric
      - Value
    * - Sustained throughput
-     - ~10,200 msg/s
+     - ~11,500 msg/s
    * - Error rate
      - 0%
    * - Unicast latency (p50 / p95 / p99)
-     - 0.7ms / 0.8ms / 0.9ms
+     - 0.6ms / 0.7ms / 0.9ms
    * - Duration
      - 30s sustained + 5s warmup
 
@@ -406,7 +406,7 @@ Results Comparison
      - ~17,600
      - ~0.3%
    * - BACnet/SC
-     - ~10,200 msg/s
+     - ~11,500 msg/s
      - 0%
      - ~1,100 msg/s
      - < 0.1%

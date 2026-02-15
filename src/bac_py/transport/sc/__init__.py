@@ -27,6 +27,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Coroutine
 
 logger = logging.getLogger(__name__)
+_DEBUG = logging.DEBUG
 
 
 @dataclass
@@ -212,7 +213,8 @@ class SCTransport:
         Uses a per-destination header cache to avoid SCVMAC/SCMessage
         creation and encoding overhead on the hot path.
         """
-        logger.debug("SC send unicast: %d bytes to %s", len(npdu), mac_address.hex())
+        if __debug__ and logger.isEnabledFor(_DEBUG):
+            logger.debug("SC send unicast: %d bytes to %s", len(npdu), mac_address.hex())
 
         # Try direct connection first (rare path — most traffic goes via hub)
         if self._node_switch:
@@ -246,7 +248,8 @@ class SCTransport:
 
         Uses a pre-computed broadcast header to skip encoding overhead.
         """
-        logger.debug("SC send broadcast: %d bytes", len(npdu))
+        if __debug__ and logger.isEnabledFor(_DEBUG):
+            logger.debug("SC send broadcast: %d bytes", len(npdu))
         self._schedule_send(self._send_raw_via_hub(self._broadcast_header + npdu))
 
     def _schedule_send(self, coro: Coroutine[object, object, None]) -> None:
@@ -295,7 +298,10 @@ class SCTransport:
         """Handle a message received from the hub connection."""
         if msg.function == BvlcSCFunction.ENCAPSULATED_NPDU and msg.payload:
             source_mac = msg.originating.address if msg.originating else b"\x00" * 6
-            logger.debug("SC recv from hub: %d bytes from %s", len(msg.payload), msg.originating)
+            if __debug__ and logger.isEnabledFor(_DEBUG):
+                logger.debug(
+                    "SC recv from hub: %d bytes from %s", len(msg.payload), msg.originating
+                )
             if self._receive_callback:
                 try:
                     self._receive_callback(msg.payload, source_mac)
@@ -308,9 +314,10 @@ class SCTransport:
         """Handle a message received from a direct connection."""
         if msg.function == BvlcSCFunction.ENCAPSULATED_NPDU and msg.payload:
             source_mac = msg.originating.address if msg.originating else b"\x00" * 6
-            logger.debug(
-                "SC recv from direct: %d bytes from %s", len(msg.payload), msg.originating
-            )
+            if __debug__ and logger.isEnabledFor(_DEBUG):
+                logger.debug(
+                    "SC recv from direct: %d bytes from %s", len(msg.payload), msg.originating
+                )
             if self._receive_callback:
                 try:
                     self._receive_callback(msg.payload, source_mac)

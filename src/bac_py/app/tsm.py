@@ -110,6 +110,7 @@ class ClientTSM:
         self._proposed_window_size = proposed_window_size
         self._transactions: dict[tuple[BACnetAddress, int], ClientTransaction] = {}
         self._next_invoke_id = 0
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def _allocate_invoke_id(self, destination: BACnetAddress) -> int:
         """Allocate the next available invoke ID (0-255) for the given peer."""
@@ -150,7 +151,9 @@ class ClientTSM:
         :raises BACnetTimeoutError: On timeout after all retries.
         """
         effective_max_apdu = max_apdu_override or self._max_apdu_length
-        loop = asyncio.get_running_loop()
+        loop = self._loop
+        if loop is None:
+            loop = self._loop = asyncio.get_running_loop()
         invoke_id = self._allocate_invoke_id(destination)
         future: asyncio.Future[bytes] = loop.create_future()
 
@@ -462,7 +465,7 @@ class ClientTSM:
         """Start or restart the APDU timeout timer (T_arr)."""
         if txn.timeout_handle:
             txn.timeout_handle.cancel()
-        loop = asyncio.get_running_loop()
+        loop = self._loop or asyncio.get_running_loop()
         key = (txn.destination, txn.invoke_id)
         txn.timeout_handle = loop.call_later(self._timeout, self._on_timeout, key)
 
@@ -479,7 +482,7 @@ class ClientTSM:
         if txn.timeout_handle:
             txn.timeout_handle.cancel()
         timeout = 4 * self._segment_timeout if wait_for_seg else self._segment_timeout
-        loop = asyncio.get_running_loop()
+        loop = self._loop or asyncio.get_running_loop()
         key = (txn.destination, txn.invoke_id)
         txn.timeout_handle = loop.call_later(timeout, self._on_segment_timeout, key)
 
@@ -609,6 +612,7 @@ class ServerTSM:
         self._max_segments = max_segments
         self._proposed_window_size = proposed_window_size
         self._transactions: dict[tuple[BACnetAddress, int], ServerTransaction] = {}
+        self._loop: asyncio.AbstractEventLoop | None = None
 
     def receive_confirmed_request(
         self,
@@ -866,7 +870,9 @@ class ServerTSM:
 
     def _start_timeout(self, txn: ServerTransaction) -> None:
         """Start the cleanup timer for a transaction."""
-        loop = asyncio.get_running_loop()
+        loop = self._loop
+        if loop is None:
+            loop = self._loop = asyncio.get_running_loop()
         key = (txn.source, txn.invoke_id)
         txn.timeout_handle = loop.call_later(self._timeout, self._on_timeout, key)
 
@@ -880,7 +886,7 @@ class ServerTSM:
         """Start a segment receive timeout (T_seg)."""
         if txn.timeout_handle:
             txn.timeout_handle.cancel()
-        loop = asyncio.get_running_loop()
+        loop = self._loop or asyncio.get_running_loop()
         key = (txn.source, txn.invoke_id)
         txn.timeout_handle = loop.call_later(
             self._segment_timeout, self._on_server_segment_timeout, key
@@ -896,7 +902,7 @@ class ServerTSM:
         """Start T_wait_for_seg timeout (4 * T_seg) for response sending."""
         if txn.timeout_handle:
             txn.timeout_handle.cancel()
-        loop = asyncio.get_running_loop()
+        loop = self._loop or asyncio.get_running_loop()
         key = (txn.source, txn.invoke_id)
         txn.timeout_handle = loop.call_later(
             4 * self._segment_timeout,

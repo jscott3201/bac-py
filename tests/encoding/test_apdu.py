@@ -497,30 +497,13 @@ class TestDecodeAPDUTooShortBranches:
             decode_apdu(data)
 
     def test_decode_apdu_unknown_pdu_type_monkeypatched(self):
-        """Lines 510-512: exercise the match/case default branch directly."""
-        import unittest.mock
-
+        """Unknown PDU type nibble (>7) raises ValueError via tuple lookup."""
         import pytest
 
-        from bac_py.types.enums import PduType
-
-        # Monkeypatch PduType to accept value 9 so we reach the case _ branch
-        original_new = PduType.__new__
-
-        def _permissive_new(cls, value):
-            try:
-                return original_new(cls, value)
-            except ValueError:
-                obj = int.__new__(cls, value)
-                obj._name_ = f"UNKNOWN_{value}"
-                obj._value_ = value
-                return obj
-
-        with unittest.mock.patch.object(PduType, "__new__", _permissive_new):
-            # PDU type 9 in high nibble -> 0x90
-            data = bytes([0x90, 0x00, 0x00])
-            with pytest.raises(TypeError, match="Unknown PDU type"):
-                decode_apdu(data)
+        # PDU type 9 in high nibble -> 0x90 (not in _PDU_TYPES lookup)
+        data = bytes([0x90, 0x00, 0x00])
+        with pytest.raises(ValueError, match="Unknown PDU type"):
+            decode_apdu(data)
 
     def test_confirmed_request_too_short(self):
         """Lines 523-524: ConfirmedRequest with < 4 bytes raises ValueError."""

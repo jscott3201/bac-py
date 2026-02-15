@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.6] - 2026-02-14
+
+### Changed
+
+- **SC BVLC decode performance**: Replaced `SCControlFlag` IntFlag bitwise operations
+  with raw integer constants and `BvlcSCFunction` enum construction with pre-built
+  tuple lookup in the decode hot path, eliminating ~9% CPU overhead per message.
+- **SCVMAC fast construction**: Added `SCVMAC._from_trusted()` classmethod that
+  bypasses length validation on internal decode paths where the caller guarantees
+  6 bytes.
+- **NPDU decode performance**: Added `_make_npdu()` fast constructor bypassing frozen
+  dataclass `__init__` overhead, and `NetworkPriority` tuple lookup replacing enum
+  construction.
+- **BVLL decode performance**: Replaced `BvlcFunction` enum construction with
+  pre-built tuple lookup indexed by byte value.
+- **APDU decode performance**: Replaced `PduType` enum construction with pre-built
+  tuple lookup, added `_make_confirmed_request()` fast constructor for
+  `ConfirmedRequestPDU`, and replaced `dict.get()` in max-segments/max-APDU decoding
+  with direct tuple indexing.
+- **TSM event loop caching**: Cached `asyncio.get_running_loop()` result in both
+  `ClientTSM` and `ServerTSM` to avoid repeated lookups on every timeout start.
+- **Debug log guards**: Added `if __debug__ and logger.isEnabledFor()` guards around
+  debug logging in SC BVLC encode/decode, APDU encode/decode, SC transport send/receive,
+  and SC hub function routing hot paths to avoid string formatting and attribute access
+  when DEBUG is disabled.
+- **NPDU encode performance**: `encode_npdu()` now pre-calculates total buffer size and
+  fills a single pre-sized `bytearray` with slice assignment and `struct.pack_into`,
+  replacing repeated `append()`/`extend()` calls.
+- **SCMessage fast construction**: Added `_make_sc_message()` fast constructor bypassing
+  frozen-dataclass `__init__` overhead, used in `SCMessage.decode()`.
+- **BvllMessage fast construction**: Added `_make_bvll_message()` fast constructor
+  bypassing frozen-dataclass `__init__` overhead, used in `decode_bvll()`.
+- **Router hot-path NPDU construction**: `_deliver_to_directly_connected()` and
+  `_prepare_forwarded_npdu()` now use `_make_npdu()` fast constructor instead of
+  `NPDU(...)`, avoiding frozen-dataclass overhead on every routed packet.
+
 ## [1.4.5] - 2026-02-14
 
 ### Added

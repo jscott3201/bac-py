@@ -26,6 +26,22 @@ from bac_py.transport.sc.types import (
 from bac_py.transport.sc.vmac import SCVMAC, DeviceUUID
 
 logger = logging.getLogger(__name__)
+_DEBUG = logging.DEBUG
+
+# ---------------------------------------------------------------------------
+# Fast-path decode constants (avoid IntFlag/IntEnum overhead per message)
+# ---------------------------------------------------------------------------
+
+# SCControlFlag integer values (AB.2.2)
+_ORIGINATING_VMAC = 0x08
+_DESTINATION_VMAC = 0x04
+_DESTINATION_OPTIONS = 0x02
+_DATA_OPTIONS = 0x01
+
+# Pre-built BvlcSCFunction lookup tuple indexed by byte value
+_SC_FUNCTIONS: tuple[BvlcSCFunction | None, ...] = tuple(
+    BvlcSCFunction(i) if i <= 0x0C else None for i in range(256)
+)
 
 # ---------------------------------------------------------------------------
 # Header Options
@@ -135,7 +151,8 @@ class SCMessage:
 
     def encode(self) -> bytes:
         """Encode this message to wire bytes."""
-        logger.debug("BVLC-SC encode: %s", self.function.name)
+        if __debug__ and logger.isEnabledFor(_DEBUG):
+            logger.debug("BVLC-SC encode: %s", self.function.name)
         flags = SCControlFlag.NONE
         # Pre-calculate total size to avoid bytearray reallocations
         size = SC_HEADER_MIN_LENGTH  # 4 bytes (function + flags + message_id)
@@ -198,50 +215,75 @@ class SCMessage:
             logger.warning("BVLC-SC malformed message: %s", msg)
             raise ValueError(msg)
 
-        function = BvlcSCFunction(data[0])
-        logger.debug("BVLC-SC decode: %s", function.name)
-        flags = SCControlFlag(data[1] & 0x0F)
+        function = _SC_FUNCTIONS[data[0]]
+        if function is None:
+            msg = f"Unknown BVLC-SC function: {data[0]:#x}"
+            raise ValueError(msg)
+        if __debug__ and logger.isEnabledFor(_DEBUG):
+            logger.debug("BVLC-SC decode: %s", function.name)
+        flags = data[1] & 0x0F  # plain int, no enum
         (message_id,) = struct.unpack_from("!H", data, 2)
         offset = SC_HEADER_MIN_LENGTH
 
         originating: SCVMAC | None = None
-        if flags & SCControlFlag.ORIGINATING_VMAC:
+        if flags & _ORIGINATING_VMAC:
             if offset + VMAC_LENGTH > len(data):
                 msg = "Truncated: missing Originating Virtual Address"
                 logger.warning("BVLC-SC malformed message: %s", msg)
                 raise ValueError(msg)
-            originating = SCVMAC(bytes(data[offset : offset + VMAC_LENGTH]))
+            originating = SCVMAC._from_trusted(bytes(data[offset : offset + VMAC_LENGTH]))
             offset += VMAC_LENGTH
 
         destination: SCVMAC | None = None
-        if flags & SCControlFlag.DESTINATION_VMAC:
+        if flags & _DESTINATION_VMAC:
             if offset + VMAC_LENGTH > len(data):
                 msg = "Truncated: missing Destination Virtual Address"
                 logger.warning("BVLC-SC malformed message: %s", msg)
                 raise ValueError(msg)
-            destination = SCVMAC(bytes(data[offset : offset + VMAC_LENGTH]))
+            destination = SCVMAC._from_trusted(bytes(data[offset : offset + VMAC_LENGTH]))
             offset += VMAC_LENGTH
 
         dest_options: tuple[SCHeaderOption, ...] = ()
-        if flags & SCControlFlag.DESTINATION_OPTIONS:
+        if flags & _DESTINATION_OPTIONS:
             dest_options, consumed = SCHeaderOption.decode_list(data[offset:])
             offset += consumed
 
         data_options: tuple[SCHeaderOption, ...] = ()
-        if flags & SCControlFlag.DATA_OPTIONS:
+        if flags & _DATA_OPTIONS:
             data_options, consumed = SCHeaderOption.decode_list(data[offset:])
             offset += consumed
 
         payload = bytes(data[offset:])
-        return SCMessage(
-            function=function,
-            message_id=message_id,
-            originating=originating,
-            destination=destination,
-            dest_options=dest_options,
-            data_options=data_options,
-            payload=payload,
+        return _make_sc_message(
+            function,
+            message_id,
+            originating,
+            destination,
+            dest_options,
+            data_options,
+            payload,
         )
+
+
+def _make_sc_message(
+    function: BvlcSCFunction,
+    message_id: int,
+    originating: SCVMAC | None,
+    destination: SCVMAC | None,
+    dest_options: tuple[SCHeaderOption, ...],
+    data_options: tuple[SCHeaderOption, ...],
+    payload: bytes,
+) -> SCMessage:
+    """Fast SCMessage construction bypassing frozen-dataclass ``__init__``."""
+    obj = object.__new__(SCMessage)
+    object.__setattr__(obj, "function", function)
+    object.__setattr__(obj, "message_id", message_id)
+    object.__setattr__(obj, "originating", originating)
+    object.__setattr__(obj, "destination", destination)
+    object.__setattr__(obj, "dest_options", dest_options)
+    object.__setattr__(obj, "data_options", data_options)
+    object.__setattr__(obj, "payload", payload)
+    return obj
 
 
 def encode_encapsulated_npdu(

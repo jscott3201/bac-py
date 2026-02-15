@@ -10,6 +10,10 @@ from bac_py.encoding.tags import decode_tag
 from bac_py.types.enums import AbortReason, ErrorClass, ErrorCode, PduType, RejectReason
 
 logger = logging.getLogger(__name__)
+_DEBUG = logging.DEBUG
+
+# Pre-built PduType lookup tuple indexed by nibble value (0-15)
+_PDU_TYPES: tuple[PduType | None, ...] = tuple(PduType(i) if i <= 7 else None for i in range(16))
 
 # Max-segments encoding table (Clause 20.1.2.4)
 # B'000' = unspecified, B'001' = 2, ... B'110' = 64, B'111' = >64
@@ -35,6 +39,9 @@ _MAX_SEGMENTS_DECODE: dict[int, int | None] = {
     7: None,  # Greater than 64 (also treated as unlimited)
 }
 
+# Fast tuple lookup for decode (indexed 0-7)
+_MAX_SEGMENTS_DECODE_TUPLE: tuple[int | None, ...] = (None, 2, 4, 8, 16, 32, 64, None)
+
 # Max-APDU-length encoding table (Clause 20.1.2.5)
 _MAX_APDU_ENCODE: dict[int, int] = {
     50: 0,
@@ -53,6 +60,9 @@ _MAX_APDU_DECODE: dict[int, int] = {
     4: 1024,
     5: 1476,
 }
+
+# Fast tuple lookup for decode (indexed 0-5, default 1476 for 6+)
+_MAX_APDU_DECODE_TUPLE: tuple[int, ...] = (50, 128, 206, 480, 1024, 1476)
 
 
 def _encode_max_segments(value: int | None) -> int:
@@ -73,7 +83,7 @@ def _decode_max_segments(value: int) -> int | None:
     :param value: 3-bit field value from the PDU header.
     :returns: Segment count, or ``None`` if unspecified or >64.
     """
-    return _MAX_SEGMENTS_DECODE.get(value)
+    return _MAX_SEGMENTS_DECODE_TUPLE[value]
 
 
 def _encode_max_apdu(value: int) -> int:
@@ -91,7 +101,9 @@ def _decode_max_apdu(value: int) -> int:
     :param value: 4-bit field value from the PDU header.
     :returns: Maximum APDU length in bytes, defaults to 1476.
     """
-    return _MAX_APDU_DECODE.get(value, 1476)
+    if value < len(_MAX_APDU_DECODE_TUPLE):
+        return _MAX_APDU_DECODE_TUPLE[value]
+    return 1476
 
 
 # --- PDU Dataclasses ---
@@ -350,11 +362,12 @@ def _encode_confirmed_request(pdu: ConfirmedRequestPDU) -> bytes:
     :param pdu: Confirmed request to encode.
     :returns: Encoded PDU bytes.
     """
-    logger.debug(
-        "encode confirmed request service=%d invoke_id=%d",
-        pdu.service_choice,
-        pdu.invoke_id,
-    )
+    if __debug__ and logger.isEnabledFor(_DEBUG):
+        logger.debug(
+            "encode confirmed request service=%d invoke_id=%d",
+            pdu.service_choice,
+            pdu.invoke_id,
+        )
     buf = bytearray()
     # Byte 0: PDU type + flags
     byte0 = PduType.CONFIRMED_REQUEST << 4
@@ -497,8 +510,13 @@ def decode_apdu(data: memoryview | bytes) -> APDU:
     if isinstance(data, bytes):
         data = memoryview(data)
 
-    pdu_type = PduType((data[0] >> 4) & 0x0F)
-    logger.debug("decode APDU type=%s", pdu_type)
+    pdu_type = _PDU_TYPES[(data[0] >> 4) & 0x0F]
+    if pdu_type is None:
+        msg = f"Unknown PDU type nibble: {(data[0] >> 4) & 0x0F:#x}"
+        logger.warning(msg)
+        raise ValueError(msg)
+    if __debug__ and logger.isEnabledFor(_DEBUG):
+        logger.debug("decode APDU type=%s", pdu_type)
 
     match pdu_type:
         case PduType.CONFIRMED_REQUEST:
@@ -553,18 +571,45 @@ def _decode_confirmed_request(data: memoryview) -> ConfirmedRequestPDU:
     offset += 1
     service_request = bytes(data[offset:])
 
-    return ConfirmedRequestPDU(
-        segmented=segmented,
-        more_follows=more_follows,
-        segmented_response_accepted=segmented_response_accepted,
-        max_segments=max_segments,
-        max_apdu_length=max_apdu_length,
-        invoke_id=invoke_id,
-        sequence_number=sequence_number,
-        proposed_window_size=proposed_window_size,
-        service_choice=service_choice,
-        service_request=service_request,
+    return _make_confirmed_request(
+        segmented,
+        more_follows,
+        segmented_response_accepted,
+        max_segments,
+        max_apdu_length,
+        invoke_id,
+        sequence_number,
+        proposed_window_size,
+        service_choice,
+        service_request,
     )
+
+
+def _make_confirmed_request(
+    segmented: bool,
+    more_follows: bool,
+    segmented_response_accepted: bool,
+    max_segments: int | None,
+    max_apdu_length: int,
+    invoke_id: int,
+    sequence_number: int | None,
+    proposed_window_size: int | None,
+    service_choice: int,
+    service_request: bytes,
+) -> ConfirmedRequestPDU:
+    """Fast ConfirmedRequestPDU construction bypassing frozen-dataclass ``__init__``."""
+    obj = object.__new__(ConfirmedRequestPDU)
+    object.__setattr__(obj, "segmented", segmented)
+    object.__setattr__(obj, "more_follows", more_follows)
+    object.__setattr__(obj, "segmented_response_accepted", segmented_response_accepted)
+    object.__setattr__(obj, "max_segments", max_segments)
+    object.__setattr__(obj, "max_apdu_length", max_apdu_length)
+    object.__setattr__(obj, "invoke_id", invoke_id)
+    object.__setattr__(obj, "sequence_number", sequence_number)
+    object.__setattr__(obj, "proposed_window_size", proposed_window_size)
+    object.__setattr__(obj, "service_choice", service_choice)
+    object.__setattr__(obj, "service_request", service_request)
+    return obj
 
 
 def _decode_unconfirmed_request(data: memoryview) -> UnconfirmedRequestPDU:

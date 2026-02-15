@@ -33,7 +33,7 @@ from bac_py.network.messages import (
     decode_network_message,
     encode_network_message,
 )
-from bac_py.network.npdu import NPDU, decode_npdu, encode_npdu
+from bac_py.network.npdu import NPDU, _make_npdu, decode_npdu, encode_npdu
 from bac_py.types.enums import (
     NetworkMessageType,
     NetworkPriority,
@@ -701,12 +701,14 @@ class NetworkRouter:
         # Build new NPDU without destination (local delivery on target port)
         dadr = npdu.destination.mac_address
 
-        local_npdu = NPDU(
+        local_npdu = _make_npdu(
+            version=1,
             is_network_message=npdu.is_network_message,
             expecting_reply=npdu.expecting_reply,
             priority=npdu.priority,
             destination=None,
             source=source,
+            hop_count=255,
             message_type=npdu.message_type,
             vendor_id=npdu.vendor_id,
             apdu=npdu.apdu,
@@ -769,7 +771,8 @@ class NetworkRouter:
 
         source = self._inject_source(arrival_port_id, npdu, source_mac)
 
-        return NPDU(
+        return _make_npdu(
+            version=1,
             is_network_message=npdu.is_network_message,
             expecting_reply=npdu.expecting_reply,
             priority=npdu.priority,

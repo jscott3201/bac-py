@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from bac_py.transport.sc.vmac import SCVMAC, DeviceUUID
 
 logger = logging.getLogger(__name__)
+_DEBUG = logging.DEBUG
 
 
 @dataclass
@@ -233,10 +234,14 @@ class SCHubFunction:
             return
 
         if msg.destination and not msg.destination.is_broadcast:
-            logger.debug("SC hub routing unicast from %s to %s", source.peer_vmac, msg.destination)
+            if __debug__ and logger.isEnabledFor(_DEBUG):
+                logger.debug(
+                    "SC hub routing unicast from %s to %s", source.peer_vmac, msg.destination
+                )
             await self._unicast(msg, source.peer_vmac, raw)
         else:
-            logger.debug("SC hub routing broadcast from %s", source.peer_vmac)
+            if __debug__ and logger.isEnabledFor(_DEBUG):
+                logger.debug("SC hub routing broadcast from %s", source.peer_vmac)
             await self._broadcast(msg, source.peer_vmac, raw)
 
     async def _unicast(self, msg: SCMessage, exclude: SCVMAC, raw: bytes | None = None) -> None:

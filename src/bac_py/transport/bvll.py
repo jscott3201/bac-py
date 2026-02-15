@@ -12,6 +12,11 @@ BVLC_TYPE_BACNET_IP = 0x81
 BVLL_HEADER_LENGTH = 4  # Type(1) + Function(1) + Length(2)
 _FORWARDED_ADDR_LENGTH = 6  # 4-byte IP + 2-byte port
 
+# Pre-built BvlcFunction lookup tuple indexed by byte value
+_BVLC_FUNCTIONS: tuple[BvlcFunction | None, ...] = tuple(
+    BvlcFunction(i) if i <= 0x0C else None for i in range(256)
+)
+
 
 @dataclass(frozen=True, slots=True)
 class BvllMessage:
@@ -20,6 +25,19 @@ class BvllMessage:
     function: BvlcFunction
     data: bytes
     originating_address: BIPAddress | None = None
+
+
+def _make_bvll_message(
+    function: BvlcFunction,
+    data: bytes,
+    originating_address: BIPAddress | None,
+) -> BvllMessage:
+    """Fast BvllMessage construction bypassing frozen-dataclass ``__init__``."""
+    obj = object.__new__(BvllMessage)
+    object.__setattr__(obj, "function", function)
+    object.__setattr__(obj, "data", data)
+    object.__setattr__(obj, "originating_address", originating_address)
+    return obj
 
 
 def encode_bvll(
@@ -79,7 +97,10 @@ def decode_bvll(data: memoryview | bytes) -> BvllMessage:
         msg = f"Invalid BVLC type: {data[0]:#x}"
         raise ValueError(msg)
 
-    function = BvlcFunction(data[1])
+    function = _BVLC_FUNCTIONS[data[1]]
+    if function is None:
+        msg = f"Unknown BVLC function: {data[1]:#x}"
+        raise ValueError(msg)
     length = (data[2] << 8) | data[3]
 
     if length < BVLL_HEADER_LENGTH or length > len(data):
@@ -91,10 +112,6 @@ def decode_bvll(data: memoryview | bytes) -> BvllMessage:
             msg = f"Forwarded-NPDU too short: need at least {BVLL_HEADER_LENGTH + 6} bytes, got {length}"
             raise ValueError(msg)
         orig_addr = BIPAddress.decode(data[4:10])
-        return BvllMessage(
-            function=function,
-            data=bytes(data[10:length]),
-            originating_address=orig_addr,
-        )
+        return _make_bvll_message(function, bytes(data[10:length]), orig_addr)
 
-    return BvllMessage(function=function, data=bytes(data[4:length]))
+    return _make_bvll_message(function, bytes(data[4:length]), None)
