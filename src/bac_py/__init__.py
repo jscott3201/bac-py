@@ -8,7 +8,7 @@ Typical usage::
         value = await client.read("192.168.1.100", "ai,1", "pv")
 """
 
-__version__ = "1.4.7"
+__version__ = "1.4.8"
 
 from bac_py.app.application import (
     BACnetApplication,

@@ -668,6 +668,7 @@ class BACnetClient:
             str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
             list[str | int | PropertyIdentifier],
         ],
+        timeout: float | None = None,
     ) -> dict[str, dict[str, object]]:
         """Read multiple properties from multiple objects.
 
@@ -683,6 +684,7 @@ class BACnetClient:
                     "ai,2": ["pv", "status"],
                 }
 
+        :param timeout: Optional caller-level timeout in seconds.
         :returns: Nested dict mapping object ID strings to property name/value
             dicts. Property values are decoded to native Python types.
             Properties that returned errors have ``None`` as their value.
@@ -717,7 +719,7 @@ class BACnetClient:
                 )
             )
 
-        ack = await self.read_property_multiple(addr, access_specs)
+        ack = await self.read_property_multiple(addr, access_specs, timeout=timeout)
 
         result: dict[str, dict[str, object]] = {}
         for access_result in ack.list_of_read_access_results:
@@ -1274,8 +1276,8 @@ class BACnetClient:
 
     async def traverse_hierarchy(
         self,
-        address: BACnetAddress,
-        root: ObjectIdentifier,
+        address: str | BACnetAddress,
+        root: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
         *,
         max_depth: int = 10,
         timeout: float | None = None,
@@ -1286,16 +1288,23 @@ class BACnetClient:
         then recursively descends into any subordinate Structured View
         objects up to *max_depth* levels.
 
-        :param address: Target device address.
-        :param root: Root Structured View object identifier.
+        :param address: Target device (e.g. ``"192.168.1.100"``).
+        :param root: Root Structured View object (e.g. ``"sv,1"``
+            or ``"structured-view,1"``).
         :param max_depth: Maximum recursion depth (prevents cycles).
         :param timeout: Optional per-request timeout in seconds.
         :returns: Flat list of all discovered :class:`ObjectIdentifier`
             values, including Structured View objects themselves.
+
+        Example::
+
+            objects = await client.traverse_hierarchy("192.168.1.100", "sv,1", max_depth=5)
         """
         logger.debug("traverse_hierarchy from %s", address)
+        addr = parse_address(address)
+        root_id = parse_object_identifier(root)
         result: list[ObjectIdentifier] = []
-        await self._traverse_hierarchy_recursive(address, root, max_depth, timeout, result, set())
+        await self._traverse_hierarchy_recursive(addr, root_id, max_depth, timeout, result, set())
         return result
 
     async def _traverse_hierarchy_recursive(
@@ -1807,7 +1816,9 @@ class BACnetClient:
 
     async def who_has(
         self,
-        object_identifier: ObjectIdentifier | None = None,
+        object_identifier: (
+            str | tuple[str | ObjectType | int, int] | ObjectIdentifier | None
+        ) = None,
         object_name: str | None = None,
         low_limit: int | None = None,
         high_limit: int | None = None,
@@ -1821,8 +1832,9 @@ class BACnetClient:
         specified timeout duration. Supply either *object_identifier*
         or *object_name*.
 
-        :param object_identifier: Object to search for by identifier.
-        :param object_name: Object to search for by name.
+        :param object_identifier: Object to search for by identifier
+            (e.g. ``"ai,1"`` or ``ObjectIdentifier(...)``).
+        :param object_name: Object to search for by name string.
         :param low_limit: Optional lower bound of device instance range.
         :param high_limit: Optional upper bound of device instance range.
         :param destination: Broadcast address (default: global broadcast).
@@ -1832,10 +1844,21 @@ class BACnetClient:
             full timeout.
         :returns: List of :class:`IHaveRequest` responses received within the
             timeout.
+
+        Example::
+
+            # Search by object identifier
+            results = await client.who_has(object_identifier="ai,1")
+
+            # Search by object name
+            results = await client.who_has(object_name="Zone Temp")
         """
         logger.debug("who_has object_name=%s object_identifier=%s", object_name, object_identifier)
+        parsed_oid: ObjectIdentifier | None = None
+        if object_identifier is not None:
+            parsed_oid = parse_object_identifier(object_identifier)
         request = WhoHasRequest(
-            object_identifier=object_identifier,
+            object_identifier=parsed_oid,
             object_name=object_name,
             low_limit=low_limit,
             high_limit=high_limit,

@@ -126,6 +126,60 @@ class TestParseObjectIdentifier:
         with pytest.raises(ValueError, match="must have 2 elements"):
             parse_object_identifier(("ai", 1, 2))
 
+    # --- New alias categories ---
+
+    def test_alias_file(self):
+        result = parse_object_identifier("file,1")
+        assert result == ObjectIdentifier(ObjectType.FILE, 1)
+
+    def test_alias_nc(self):
+        result = parse_object_identifier("nc,1")
+        assert result == ObjectIdentifier(ObjectType.NOTIFICATION_CLASS, 1)
+
+    def test_alias_sched(self):
+        result = parse_object_identifier("sched,1")
+        assert result == ObjectIdentifier(ObjectType.SCHEDULE, 1)
+
+    def test_alias_tl(self):
+        result = parse_object_identifier("tl,1")
+        assert result == ObjectIdentifier(ObjectType.TREND_LOG, 1)
+
+    def test_alias_ch(self):
+        result = parse_object_identifier("ch,1")
+        assert result == ObjectIdentifier(ObjectType.CHANNEL, 1)
+
+    def test_alias_lp(self):
+        result = parse_object_identifier("lp,1")
+        assert result == ObjectIdentifier(ObjectType.LOOP, 1)
+
+    def test_alias_lo(self):
+        result = parse_object_identifier("lo,1")
+        assert result == ObjectIdentifier(ObjectType.LIGHTING_OUTPUT, 1)
+
+    def test_alias_sv(self):
+        result = parse_object_identifier("sv,1")
+        assert result == ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
+
+    def test_alias_np(self):
+        result = parse_object_identifier("np,1")
+        assert result == ObjectIdentifier(ObjectType.NETWORK_PORT, 1)
+
+    def test_alias_iv(self):
+        result = parse_object_identifier("iv,1")
+        assert result == ObjectIdentifier(ObjectType.INTEGER_VALUE, 1)
+
+    def test_alias_csv(self):
+        result = parse_object_identifier("csv,1")
+        assert result == ObjectIdentifier(ObjectType.CHARACTERSTRING_VALUE, 1)
+
+    def test_alias_ee(self):
+        result = parse_object_identifier("ee,1")
+        assert result == ObjectIdentifier(ObjectType.EVENT_ENROLLMENT, 1)
+
+    def test_alias_al(self):
+        result = parse_object_identifier("al,1")
+        assert result == ObjectIdentifier(ObjectType.AUDIT_LOG, 1)
+
     # --- All aliases exist ---
 
     def test_all_aliases_resolve(self):
@@ -195,6 +249,84 @@ class TestParsePropertyIdentifier:
     def test_unknown_name_raises(self):
         with pytest.raises(ValueError, match="Unknown property identifier"):
             parse_property_identifier("nonexistent-property")
+
+    # --- New alias categories ---
+
+    def test_alias_type(self):
+        result = parse_property_identifier("type")
+        assert result == PropertyIdentifier.OBJECT_TYPE
+
+    def test_alias_list(self):
+        result = parse_property_identifier("list")
+        assert result == PropertyIdentifier.OBJECT_LIST
+
+    def test_alias_priority(self):
+        result = parse_property_identifier("priority")
+        assert result == PropertyIdentifier.PRIORITY_ARRAY
+
+    def test_alias_relinquish(self):
+        result = parse_property_identifier("relinquish")
+        assert result == PropertyIdentifier.RELINQUISH_DEFAULT
+
+    def test_alias_min(self):
+        result = parse_property_identifier("min")
+        assert result == PropertyIdentifier.MIN_PRES_VALUE
+
+    def test_alias_max(self):
+        result = parse_property_identifier("max")
+        assert result == PropertyIdentifier.MAX_PRES_VALUE
+
+    def test_alias_event_state(self):
+        result = parse_property_identifier("event-state")
+        assert result == PropertyIdentifier.EVENT_STATE
+
+    def test_alias_polarity(self):
+        result = parse_property_identifier("polarity")
+        assert result == PropertyIdentifier.POLARITY
+
+    def test_alias_num_states(self):
+        result = parse_property_identifier("num-states")
+        assert result == PropertyIdentifier.NUMBER_OF_STATES
+
+    def test_alias_high_limit(self):
+        result = parse_property_identifier("high-limit")
+        assert result == PropertyIdentifier.HIGH_LIMIT
+
+    def test_alias_low_limit(self):
+        result = parse_property_identifier("low-limit")
+        assert result == PropertyIdentifier.LOW_LIMIT
+
+    def test_alias_deadband(self):
+        result = parse_property_identifier("deadband")
+        assert result == PropertyIdentifier.DEADBAND
+
+    def test_alias_notify_class(self):
+        result = parse_property_identifier("notify-class")
+        assert result == PropertyIdentifier.NOTIFICATION_CLASS
+
+    def test_alias_vendor_name(self):
+        result = parse_property_identifier("vendor-name")
+        assert result == PropertyIdentifier.VENDOR_NAME
+
+    def test_alias_model_name(self):
+        result = parse_property_identifier("model-name")
+        assert result == PropertyIdentifier.MODEL_NAME
+
+    def test_alias_max_apdu(self):
+        result = parse_property_identifier("max-apdu")
+        assert result == PropertyIdentifier.MAX_APDU_LENGTH_ACCEPTED
+
+    def test_alias_log_buffer(self):
+        result = parse_property_identifier("log-buffer")
+        assert result == PropertyIdentifier.LOG_BUFFER
+
+    def test_alias_enable(self):
+        result = parse_property_identifier("enable")
+        assert result == PropertyIdentifier.LOG_ENABLE
+
+    def test_alias_schedule_default(self):
+        result = parse_property_identifier("schedule-default")
+        assert result == PropertyIdentifier.SCHEDULE_DEFAULT
 
     # --- All aliases exist ---
 

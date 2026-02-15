@@ -33,12 +33,12 @@ import sys
 import time
 from typing import Any
 
-from docker.lib.bip_stress import stop_phase
 from docker.lib.bbmd_stress import (
     BBMDStats,
     latency_dict,
     spawn_bbmd_workers,
 )
+from docker.lib.bip_stress import stop_phase
 
 
 async def main() -> None:

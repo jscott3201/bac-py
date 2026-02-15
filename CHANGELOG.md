@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.8] - 2026-02-14
+
+### Added
+
+- **Expanded object type aliases**: Added 48 short aliases (up from 10) for common
+  object types in `parse_object_identifier()`. New aliases include `file`, `nc`,
+  `sched`, `tl`, `el`, `ch`, `lp`, `lo`, `sv`, `np`, `ee`, `tmr`, `iv`, `csv`,
+  `acc`, `lc`, `avg`, `al`, `ar`, and more. Full hyphenated names (e.g.
+  `"analog-input"`) continue to work without needing aliases.
+- **Expanded property identifier aliases**: Added 45 short aliases (up from 8) for
+  common property identifiers in `parse_property_identifier()`. New aliases include
+  `type`, `list`, `priority`, `relinquish`, `min`, `max`, `polarity`,
+  `event-state`, `high-limit`, `low-limit`, `deadband`, `notify-class`,
+  `vendor-name`, `model-name`, `max-apdu`, `log-buffer`, `enable`, and more.
+
+### Changed
+
+- **`traverse_hierarchy()` string support**: Now accepts string addresses and
+  object identifiers (e.g. `"sv,1"`) in addition to typed objects.
+- **`who_has()` string support**: `object_identifier` parameter now accepts
+  string formats (e.g. `"ai,1"`) in addition to `ObjectIdentifier`.
+- **`read_multiple()` timeout parameter**: Added missing `timeout` parameter for
+  consistency with `write_multiple()` and other convenience methods.
+
+### Docs
+
+- **Alias reference tables**: Updated the string aliases tables in
+  ``getting-started.rst``, ``features.rst``, and ``README.md`` to reflect the
+  expanded alias sets. Fixed incorrect ``sf`` alias reference in README
+  (correct alias is ``status``).
+
 ## [1.4.7] - 2026-02-14
 
 ### Changed

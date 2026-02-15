@@ -102,65 +102,252 @@ String Aliases
 --------------
 
 The convenience API accepts short aliases for common object types and property
-identifiers so you don't need to type out full names.
+identifiers so you don't need to type out full names. Full hyphenated names
+(``"analog-input,1"``, ``"present-value"``) and enum values
+(``ObjectType.ANALOG_INPUT``, ``PropertyIdentifier.PRESENT_VALUE``) are always
+accepted as well.
 
 Object type aliases:
 
 .. list-table::
    :header-rows: 1
-   :widths: 15 35
+   :widths: 15 35 15 35
 
    * - Alias
      - Object Type
+     - Alias
+     - Object Type
    * - ``ai``
      - analog-input
+     - ``lo``
+     - lighting-output
    * - ``ao``
      - analog-output
+     - ``blo``
+     - binary-lighting-output
    * - ``av``
      - analog-value
+     - ``lc``
+     - load-control
+   * - ``lav``
+     - large-analog-value
+     - ``acc``
+     - accumulator
    * - ``bi``
      - binary-input
+     - ``pc``
+     - pulse-converter
    * - ``bo``
      - binary-output
+     - ``tmr``
+     - timer
    * - ``bv``
      - binary-value
+     - ``ee``
+     - event-enrollment
    * - ``msi``
      - multi-state-input
+     - ``ae``
+     - alert-enrollment
    * - ``mso``
      - multi-state-output
+     - ``nf``
+     - notification-forwarder
    * - ``msv``
      - multi-state-value
+     - ``avg``
+     - averaging
    * - ``dev``
      - device
+     - ``iv``
+     - integer-value
+   * - ``file``
+     - file
+     - ``piv``
+     - positive-integer-value
+   * - ``nc``
+     - notification-class
+     - ``csv``
+     - characterstring-value
+   * - ``np``
+     - network-port
+     - ``bsv``
+     - bitstring-value
+   * - ``cal``
+     - calendar
+     - ``osv``
+     - octetstring-value
+   * - ``cmd``
+     - command
+     - ``dv``
+     - date-value
+   * - ``ch``
+     - channel
+     - ``dtv``
+     - datetime-value
+   * - ``prog``
+     - program
+     - ``tv``
+     - time-value
+   * - ``sched``
+     - schedule
+     - ``sv``
+     - structured-view
+   * - ``tl``
+     - trend-log
+     - ``grp``
+     - group
+   * - ``tlm``
+     - trend-log-multiple
+     - ``gg``
+     - global-group
+   * - ``el``
+     - event-log
+     - ``lsp``
+     - life-safety-point
+   * - ``lp``
+     - loop
+     - ``lsz``
+     - life-safety-zone
+   * -
+     -
+     - ``ad``
+     - access-door
+   * -
+     -
+     - ``ap``
+     - access-point
+   * -
+     -
+     - ``ar``
+     - audit-reporter
+   * -
+     -
+     - ``al``
+     - audit-log
 
 Property identifier aliases:
 
 .. list-table::
    :header-rows: 1
-   :widths: 15 35
+   :widths: 18 32 18 32
 
    * - Alias
      - Property
+     - Alias
+     - Property
    * - ``pv``
      - present-value
+     - ``polarity``
+     - polarity
    * - ``name``
      - object-name
+     - ``active-text``
+     - active-text
+   * - ``type``
+     - object-type
+     - ``inactive-text``
+     - inactive-text
    * - ``desc``
      - description
+     - ``num-states``
+     - number-of-states
    * - ``units``
      - units
+     - ``state-text``
+     - state-text
    * - ``status``
      - status-flags
+     - ``event-enable``
+     - event-enable
    * - ``oos``
      - out-of-service
-   * - ``cov-inc``
-     - cov-increment
+     - ``acked-transitions``
+     - acked-transitions
    * - ``reliability``
      - reliability
-
-Full hyphenated names (``"analog-input,1"``, ``"present-value"``) and enum
-values (``ObjectType.ANALOG_INPUT``, ``PropertyIdentifier.PRESENT_VALUE``)
-are always accepted as well.
+     - ``notify-type``
+     - notify-type
+   * - ``event-state``
+     - event-state
+     - ``time-delay``
+     - time-delay
+   * - ``list``
+     - object-list
+     - ``notify-class``
+     - notification-class
+   * - ``prop-list``
+     - property-list
+     - ``limit-enable``
+     - limit-enable
+   * - ``profile-name``
+     - profile-name
+     - ``log-buffer``
+     - log-buffer
+   * - ``priority``
+     - priority-array
+     - ``record-count``
+     - record-count
+   * - ``relinquish``
+     - relinquish-default
+     - ``enable``
+     - log-enable
+   * - ``min``
+     - min-pres-value
+     - ``weekly-schedule``
+     - weekly-schedule
+   * - ``max``
+     - max-pres-value
+     - ``exception-schedule``
+     - exception-schedule
+   * - ``res``
+     - resolution
+     - ``schedule-default``
+     - schedule-default
+   * - ``cov-inc``
+     - cov-increment
+     - ``system-status``
+     - system-status
+   * - ``deadband``
+     - deadband
+     - ``vendor-name``
+     - vendor-name
+   * - ``high-limit``
+     - high-limit
+     - ``vendor-id``
+     - vendor-identifier
+   * - ``low-limit``
+     - low-limit
+     - ``model-name``
+     - model-name
+   * -
+     -
+     - ``firmware-rev``
+     - firmware-revision
+   * -
+     -
+     - ``app-version``
+     - application-software-version
+   * -
+     -
+     - ``max-apdu``
+     - max-apdu-length-accepted
+   * -
+     -
+     - ``seg-supported``
+     - segmentation-supported
+   * -
+     -
+     - ``db-revision``
+     - database-revision
+   * -
+     -
+     - ``protocol-version``
+     - protocol-version
+   * -
+     -
+     - ``protocol-revision``
+     - protocol-revision
 
 
 .. _addressing:

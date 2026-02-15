@@ -34,7 +34,7 @@ wheels = [
 
 [[package]]
 name = "bac-py"
-version = "1.4.7"
+version = "1.4.8"
 source = { editable = "." }
 
 [package.optional-dependencies]

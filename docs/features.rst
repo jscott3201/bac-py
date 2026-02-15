@@ -31,10 +31,11 @@ common operations. See :doc:`getting-started` for a walkthrough and
 - **String object/property identifiers** -- use ``"ai,1"`` and ``"pv"``
   instead of ``ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)`` and
   ``PropertyIdentifier.PRESENT_VALUE``
-- **Short aliases** -- ``ai``, ``ao``, ``av``, ``bi``, ``bo``, ``bv``,
-  ``msi``, ``mso``, ``msv``, ``dev`` for object types; ``pv``, ``name``,
-  ``desc``, ``units``, ``status``, ``oos``, ``cov-inc``, ``reliability``
-  for properties (see :ref:`string-aliases` for the full table)
+- **Short aliases** -- 48 object type aliases (``ai``, ``ao``, ``av``,
+  ``bi``, ``bo``, ``bv``, ``dev``, ``sched``, ``tl``, ``nc``, etc.) and
+  45 property aliases (``pv``, ``name``, ``type``, ``list``, ``priority``,
+  ``min``, ``max``, ``status``, etc.)
+  (see :ref:`string-aliases` for the full table)
 - **Auto-decoding on read** -- raw BACnet tags are decoded to Python values
   automatically
 - **Auto-encoding on write** -- Python types are encoded to the correct BACnet

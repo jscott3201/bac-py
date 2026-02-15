@@ -2,6 +2,8 @@
 
 Asynchronous BACnet/IP protocol library for Python 3.13+, implementing ASHRAE Standard 135-2020. Zero required runtime dependencies, built on native `asyncio`.
 
+[Documentation](https://bac-py.readthedocs.io) | [Getting Started](https://bac-py.readthedocs.io/en/latest/getting-started.html) | [API Reference](https://bac-py.readthedocs.io/en/latest/api/app/client.html) | [Changelog](https://bac-py.readthedocs.io/en/latest/changelog.html)
+
 ```python
 from bac_py import Client
 
@@ -78,10 +80,11 @@ async def main():
 asyncio.run(main())
 ```
 
-The convenience API accepts short aliases (`ai`, `ao`, `av`, `bi`, `bo`, `bv`,
-`msv`, `dev`, etc.) and common property abbreviations (`pv`, `name`, `desc`,
-`units`, `sf`, etc.). Full names like `"analog-input,1"` and `"present-value"`
-also work.
+The convenience API accepts 48 object type aliases (`ai`, `ao`, `av`, `bi`,
+`bo`, `bv`, `msv`, `dev`, `sched`, `tl`, `nc`, etc.) and 45 property
+abbreviations (`pv`, `name`, `type`, `list`, `status`, `priority`, `min`,
+`max`, etc.). Full names like `"analog-input,1"` and `"present-value"` also
+work. See the [alias reference](https://bac-py.readthedocs.io/en/latest/getting-started.html#string-aliases) for the complete table.
 
 ### Write a Value
 
