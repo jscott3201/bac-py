@@ -105,11 +105,11 @@ all bound to ``127.0.0.1`` on auto-assigned UDP ports.
    * - Metric
      - Value
    * - Sustained throughput
-     - ~13,700 req/s
+     - ~13,300 req/s
    * - Error rate
      - ~0.4%
    * - Overall latency (p50 / p95 / p99)
-     - 0.1ms / 0.2ms / 0.2ms
+     - 0.2ms / 0.3ms / 0.3ms
    * - Duration
      - 30s sustained + 5s warmup
 
@@ -135,20 +135,23 @@ back to plaintext ``ws://`` for comparison.
 
    * - Metric
      - Value
-   * - Sustained throughput
-     - ~11,500 msg/s
+   * - Sustained throughput (TLS)
+     - ~9,200 msg/s
+   * - Sustained throughput (plaintext)
+     - ~11,700 msg/s
    * - Error rate
      - 0%
    * - Unicast latency (p50 / p95 / p99)
-     - 0.6ms / 0.7ms / 0.9ms
+     - 0.8ms / 0.9ms / 1.1ms
    * - Duration
      - 30s sustained + 5s warmup
 
 .. note::
 
-   Local SC throughput is significantly higher than Docker (~1,100 msg/s)
-   because WebSocket connections stay within a single event loop, avoiding
-   inter-container TCP overhead and Docker network bridging.
+   TLS adds ~22% overhead compared to plaintext (~9,200 vs ~11,700 msg/s).
+   Use ``--no-tls`` to compare.  Docker SC throughput (~16,350 msg/s) exceeds
+   local because server and clients run as separate OS processes, enabling true
+   CPU parallelism across the hub, echo nodes, and test client.
 
 
 .. _local-router-benchmark:
@@ -172,11 +175,11 @@ via the router using routed addresses (``NETWORK:HEXMAC`` format).
    * - Metric
      - Value
    * - Sustained throughput
-     - ~8,500 req/s
+     - ~7,300 req/s
    * - Error rate
-     - ~0.7%
+     - ~0.6%
    * - Overall latency (p50 / p95 / p99)
-     - 0.2ms / 0.3ms / 0.3ms
+     - 0.2ms / 0.3ms / 0.4ms
    * - Duration
      - 30s sustained + 5s warmup
 
@@ -208,11 +211,11 @@ FDT and BDT reads.
    * - Metric
      - Value
    * - Sustained throughput
-     - ~13,500 req/s
+     - ~13,240 req/s
    * - Error rate
      - ~0.4%
    * - Overall latency (p50 / p95 / p99)
-     - 0.1ms / 0.2ms / 0.2ms
+     - 0.2ms / 0.2ms / 0.3ms
    * - Duration
      - 30s sustained + 5s warmup
 
@@ -248,7 +251,7 @@ between Docker containers.
    * - Metric
      - Value
    * - Sustained throughput
-     - ~17,600 req/s
+     - ~18,500 req/s
    * - Error rate
      - ~0.3%
    * - Overall latency (p50 / p95 / p99)
@@ -315,9 +318,9 @@ for echo correlation. The test verifies that echoed payloads match.
    * - Metric
      - Value
    * - Sustained throughput
-     - ~1,100 msg/s
+     - ~16,350 msg/s
    * - Error rate
-     - < 0.1%
+     - 0%
    * - Unicast latency (p50 / p95 / p99)
      - 0.2ms / 0.3ms / 0.4ms
    * - Duration
@@ -353,7 +356,7 @@ advertising the remote network via Who-Is-Router-To-Network.
    * - Metric
      - Value
    * - Sustained throughput
-     - ~8,000 req/s
+     - ~7,900 req/s
    * - Error rate
      - ~0.7%
    * - Overall latency (p50 / p95 / p99)
@@ -398,13 +401,80 @@ and perform concurrent reads, writes, RPM/WPM, plus BBMD-specific operations.
    * - Metric
      - Value
    * - Sustained throughput
-     - ~17,800 req/s
+     - ~18,750 req/s
    * - Error rate
      - ~0.3%
    * - Overall latency (p50 / p95 / p99)
      - 0.1ms / 0.2ms / 0.2ms
    * - Duration
      - 60s sustained + 15s warmup
+
+
+.. _mixed-transport-tests:
+
+Mixed-Transport Integration Tests
+----------------------------------
+
+In addition to the per-transport stress benchmarks above, bac-py includes
+Docker integration tests that verify **cross-transport routing** through the
+``NetworkRouter``.  These are functional correctness tests (not throughput
+benchmarks) that exercise the full NPDU forwarding path across different
+transport types.
+
+
+.. _mixed-bip-ipv6:
+
+BIP ↔ IPv6 (Docker)
+^^^^^^^^^^^^^^^^^^^^
+
+A BACnet/IP client on network 1 communicates with a BACnet/IPv6 server on
+network 2 through a dual-stack ``NetworkRouter``.
+
+**Architecture:**
+
+- **Router** -- Bridges BIP (172.30.1.180:47808, network 1) and IPv6
+  (fd00:bac:1::40, network 2)
+- **IPv6 Server** -- Standard stress server (40 objects) on the IPv6 network
+- **BIP Test Client** -- On network 1, uses ``add_route()`` to reach the server
+  through the router via routed addresses (``NETWORK:HEXMAC`` format)
+
+**Tests (6 total):** read present-value, read object-name, read-property-multiple,
+write + readback, write-property-multiple + readback, get object-list.  All
+requests traverse the BIP→router→IPv6 path and responses return via
+IPv6→router→BIP.
+
+.. code-block:: bash
+
+   make docker-test-mixed-bip-ipv6
+
+
+.. _mixed-bip-sc:
+
+BIP ↔ SC (Docker)
+^^^^^^^^^^^^^^^^^
+
+A BACnet/IP client on network 1 sends NPDUs through a BIP↔SC
+``NetworkRouter`` to SC echo nodes connected via an SC hub on network 2.
+
+**Architecture:**
+
+- **SC Hub** -- WebSocket server with mutual TLS 1.3 on network 2
+- **SC Echo Nodes (x2)** -- Parse incoming NPDUs, swap SNET/SADR→DNET/DADR
+  headers, and echo the payload back with proper routing headers
+- **Router** -- ``BIPTransport`` (port 1, network 1) + ``SCTransport``
+  (port 2, network 2), connects to the SC hub as a node
+- **BIP Test Client** -- Constructs NPDUs with ``DNET=2, DADR=node_vmac``,
+  sends as unicast to the router's BIP address
+
+TLS certificates are generated locally before the Docker build and bind-mounted
+into containers.  Certificates are cleaned up after the test.
+
+**Tests (4 total):** unicast to node 1, unicast to node 2, 5 sequential
+round-trips, large (1000-byte) NPDU crossing the transport boundary.
+
+.. code-block:: bash
+
+   make docker-test-mixed-bip-sc
 
 
 .. _results-comparison:
@@ -422,24 +492,24 @@ Results Comparison
      - Docker (req/s)
      - Errors
    * - BACnet/IP
-     - ~13,700
+     - ~13,300
      - ~0.4%
-     - ~17,600
+     - ~18,500
      - ~0.3%
-   * - BACnet/SC
-     - ~11,500 msg/s
+   * - BACnet/SC (TLS)
+     - ~9,200 msg/s
      - 0%
-     - ~1,100 msg/s
-     - < 0.1%
+     - ~16,350 msg/s
+     - 0%
    * - Router
-     - ~8,500
-     - ~0.7%
-     - ~8,000
+     - ~7,300
+     - ~0.6%
+     - ~7,900
      - ~0.7%
    * - BBMD
-     - ~13,500
+     - ~13,240
      - ~0.4%
-     - ~17,800
+     - ~18,750
      - ~0.3%
 
 **Key observations:**
@@ -447,13 +517,17 @@ Results Comparison
 - **BIP/BBMD Docker > Local:** Docker runs server and clients as separate OS
   processes, enabling true CPU parallelism.  The single-process local benchmark
   is limited by Python's GIL and event-loop scheduling.
-- **SC Local >> Docker:** WebSocket connections within a single event loop avoid
-  inter-container TCP overhead, Docker bridge NAT, and process context switching.
+- **SC Docker > Local:** Like BIP/BBMD, Docker SC benefits from multi-process
+  parallelism across the hub, echo nodes, and test client.  The hub's routing
+  work (decode header, lookup destination, forward raw bytes) is CPU-bound and
+  benefits from running in a dedicated process.
 - **Router Local ≈ Docker:** Unlike BIP/BBMD, router throughput is similar in
   both environments because the routing overhead (two UDP hops, NPDU
   decode/re-encode at each hop) dominates over the multi-process benefit.
 - **Router overhead:** Routing adds ~40% latency vs. direct BIP.  Each request
   traverses two UDP hops and requires NPDU decode/re-encode at each hop.
+- **TLS overhead:** SC with TLS 1.3 adds ~22% overhead vs. plaintext locally
+  (~9,200 vs ~11,700 msg/s).
 
 .. note::
 
@@ -515,6 +589,10 @@ Running Benchmarks
 
    # BBMD stress runner (standalone, JSON report to stdout)
    make docker-bbmd-stress
+
+   # Mixed-transport integration tests (functional, not benchmarks)
+   make docker-test-mixed-bip-ipv6   # BIP client ↔ IPv6 server via router
+   make docker-test-mixed-bip-sc     # BIP client ↔ SC echo nodes via router
 
    # Run all Docker integration tests including stress
    make docker-test
@@ -674,6 +752,36 @@ interfere with ``--json`` output on stdout.
 
 Open ``/tmp/bip.html`` in a browser for an interactive flame graph showing
 where time is spent inside bac-py during the benchmark workload.
+
+
+Mixed-Environment SC Profiling
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The SC benchmark supports split Docker/local execution to isolate hub-side
+or client-side TLS overhead with pyinstrument.  The ``--mode`` flag selects
+which components run locally (and thus are profiled):
+
+- ``--mode all`` (default) — everything in-process
+- ``--mode hub`` — start only the hub locally; pair with Docker clients
+- ``--mode client`` — connect local echo nodes and stress workers to a
+  Docker-hosted hub
+
+First, generate shared TLS certificates with broad SANs (localhost,
+``host.docker.internal``, Docker bridge IPs):
+
+.. code-block:: bash
+
+   uv run python scripts/bench_sc.py --generate-certs .sc-bench-certs
+
+Then use the Makefile targets:
+
+.. code-block:: bash
+
+   # Profile client side (hub in Docker, local echo nodes + stress workers)
+   make bench-sc-profile-client
+
+   # Profile hub side (hub local, nodes + runner in Docker)
+   make bench-sc-profile-hub
 
 .. note::
 

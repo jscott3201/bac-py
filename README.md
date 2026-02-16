@@ -43,7 +43,7 @@ async with Client(instance_number=999) as client:
 | **Convenience API** | String-based addressing (`"ai,1"`, `"pv"`), smart type coercion, auto-discovery |
 | **Serialization** | `to_dict()`/`from_dict()` on all data types; optional `orjson` backend |
 | **Conformance** | BIBB declarations and PICS generation per Clause 24 |
-| **Quality** | 6,420+ unit tests, Docker integration tests, local benchmarks, type-safe enums and frozen dataclasses throughout |
+| **Quality** | 6,425+ unit tests, Docker integration tests, local benchmarks, type-safe enums and frozen dataclasses throughout |
 
 ## Installation
 
@@ -356,7 +356,7 @@ detailed walkthroughs.
 ## Testing
 
 ```bash
-make test          # 6,420+ unit tests
+make test          # 6,425+ unit tests
 make lint          # ruff check + format verification
 make typecheck     # mypy
 make docs          # sphinx-build
@@ -396,6 +396,8 @@ make docker-test-device-mgmt     # Device management: DCC, time sync, text messa
 make docker-test-cov-advanced    # COV: concurrent subscriptions, property-level COV
 make docker-test-events          # Events: alarm reporting, acknowledgment, queries
 make docker-test-ipv6            # IPv6: BACnet/IPv6 client/server (Annex U)
+make docker-test-mixed-bip-ipv6  # Mixed BIP↔IPv6: cross-transport routing
+make docker-test-mixed-bip-sc    # Mixed BIP↔SC: cross-transport routing (TLS)
 make docker-stress               # BIP stress runner (JSON report to stdout)
 make docker-sc-stress            # SC stress runner (JSON report to stdout)
 make docker-router-stress        # Router stress runner (JSON report to stdout)

@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-02-16
+
+### Fixed
+
+- **Docker entrypoint `sys.path`** — Added project root to `sys.path` so
+  `docker.lib` imports work when the entrypoint is run as a script.
+- **SC PKI `generate_test_pki()`** — Clear directory contents instead of
+  `shutil.rmtree()` on Docker volume mount points (which cannot be removed).
+- **SC certificate SANs** — Use specific `IPv4Address` entries instead of
+  `IPv4Network` for Docker bridge IPs in certificate Subject Alternative Names.
+  `IPv4Network` does not work for SSL hostname verification.
+
+### Added
+
+- **Mixed-environment SC profiling** — `bench_sc.py` supports `--mode hub` and
+  `--mode client` for split Docker/local benchmarks, enabling isolated
+  pyinstrument profiling of hub-side or client-side TLS overhead.
+  `--generate-certs DIR` creates shared TLS certificates with broad SANs
+  (localhost, host.docker.internal, Docker bridge IPs).  New Docker Compose
+  profiles `sc-bench-hub` and `sc-bench-client` and Makefile targets
+  `bench-sc-profile-client` and `bench-sc-profile-hub` orchestrate the
+  mixed-environment runs.
+- **Docker scenario 14: Mixed BIP↔IPv6 routing** — A BACnet/IP client on
+  network 1 communicates with a BACnet/IPv6 server on network 2 through a
+  dual-stack `NetworkRouter`.  Tests read, write, RPM, WPM, and object-list
+  operations through the cross-transport router (6 tests).
+  `make docker-test-mixed-bip-ipv6`.
+- **Docker scenario 15: Mixed BIP↔SC routing** — A BACnet/IP client sends
+  NPDUs through a BIP↔SC `NetworkRouter` to SC echo nodes connected via an
+  SC hub with mutual TLS 1.3 on network 2.  SC echo nodes parse incoming
+  NPDUs and swap SNET/SADR→DNET/DADR headers for proper routed responses.
+  TLS certificates are generated locally and bind-mounted into containers
+  (4 tests).  `make docker-test-mixed-bip-sc`.
+- **Entrypoint roles: `router-bip-sc`, `sc-npdu-echo`** — New Docker
+  entrypoint roles for BIP↔SC gateway routing and NPDU-level SC echo with
+  proper routing header manipulation.
+
+### Changed
+
+- **Docker images tagged with version** — All services share a version-tagged
+  image (`bac-py:<version>`) for reproducible builds.
+- **`docker-build` uses `docker build` directly** — Replaced `docker compose
+  build` (which built nothing since all services have profiles) with a direct
+  `docker build` command.  `docker-clean` now removes all `bac-py:*` images.
+
+- **Performance: APDU dispatch optimization** — Replaced `match`/`case` on
+  `PduType` enum with direct `isinstance` checks in `_on_apdu_received()`,
+  eliminating a redundant `PduType` extraction from the raw byte after
+  `decode_apdu()` already determines the type. BIP throughput improved ~4%,
+  Router throughput improved ~36% (cumulative with loop caching).
+- **Performance: Event loop caching** — Cache the running `asyncio` event loop
+  in `BACnetApplication.start()` and use `loop.create_task()` instead of
+  `asyncio.create_task()` in `_spawn_task()`, skipping the `get_running_loop()`
+  lookup on every request dispatch.
+- **Performance: SC WebSocket pending events deque** — Changed
+  `SCWebSocket._pending_events` from `list` with O(n) `pop(0)` to
+  `collections.deque` with O(1) `popleft()` and built-in `maxlen=64` cap.
+- **Performance: SC hub payload skip** — Hub connections now decode BVLC-SC
+  messages with `skip_payload=True`, avoiding a `bytes()` copy of the NPDU
+  payload that the hub never inspects (it forwards raw bytes directly).
+
 ## [1.5.1] - 2026-02-15
 
 ### Added

@@ -10,7 +10,14 @@ import subprocess
 import sys
 from typing import TYPE_CHECKING
 
-import bac_py
+# Ensure project root is on sys.path so ``from docker.lib import ...`` works
+# when the entrypoint is invoked as ``python docker/entrypoint.py`` (which puts
+# /app/docker/ on sys.path[0], not /app/).
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+import bac_py  # noqa: E402
 
 if TYPE_CHECKING:
     from bac_py.transport.sc.tls import SCTLSConfig
@@ -118,6 +125,8 @@ async def run_server_ipv6() -> None:
     port = int(os.environ.get("BACNET_PORT", "47808"))
     interface = os.environ.get("IPV6_INTERFACE", "::")
     multicast = os.environ.get("IPV6_MULTICAST", "ff02::bac0")
+    vmac_hex = os.environ.get("IPV6_VMAC", "")
+    vmac = bytes.fromhex(vmac_hex) if vmac_hex else None
 
     config = DeviceConfig(
         instance_number=instance,
@@ -126,6 +135,7 @@ async def run_server_ipv6() -> None:
         ipv6=True,
         interface=interface,
         multicast_address=multicast,
+        vmac=vmac,
     )
     app = BACnetApplication(config)
     await app.start()
@@ -262,6 +272,10 @@ async def run_router() -> None:
     port2 = int(os.environ.get("PORT_2", "47809"))
     bcast1 = os.environ.get("BROADCAST_ADDRESS_1", BROADCAST_ADDRESS)
     bcast2 = os.environ.get("BROADCAST_ADDRESS_2", BROADCAST_ADDRESS)
+    ipv6_1 = os.environ.get("IPV6_1", "").lower() == "true"
+    ipv6_2 = os.environ.get("IPV6_2", "").lower() == "true"
+    mcast1 = os.environ.get("MULTICAST_1", "")
+    mcast2 = os.environ.get("MULTICAST_2", "")
 
     router_config = RouterConfig(
         ports=[
@@ -271,6 +285,8 @@ async def run_router() -> None:
                 interface=iface1,
                 port=port1,
                 broadcast_address=bcast1,
+                ipv6=ipv6_1,
+                multicast_address=mcast1,
             ),
             RouterPortConfig(
                 port_id=2,
@@ -278,6 +294,8 @@ async def run_router() -> None:
                 interface=iface2,
                 port=port2,
                 broadcast_address=bcast2,
+                ipv6=ipv6_2,
+                multicast_address=mcast2,
             ),
         ],
         application_port_id=1,
@@ -757,6 +775,162 @@ async def run_sc_node() -> None:
     await transport.stop()
 
 
+async def run_router_bip_sc() -> None:
+    """Run a BACnet/IP-to-SC gateway router (pure NPDU forwarding)."""
+    from bac_py.network.router import NetworkRouter, RouterPort
+    from bac_py.transport.bip import BIPTransport
+    from bac_py.transport.sc import SCTransport, SCTransportConfig
+
+    bip_interface = os.environ.get("BIP_INTERFACE", "0.0.0.0")
+    bip_port = int(os.environ.get("BIP_PORT", "47808"))
+    bip_network = int(os.environ.get("BIP_NETWORK", "1"))
+    bip_bcast = os.environ.get("BIP_BROADCAST", BROADCAST_ADDRESS)
+    sc_hub_uri = os.environ.get("SC_HUB_URI", "ws://localhost:4443")
+    sc_network = int(os.environ.get("SC_NETWORK", "2"))
+    tls_config = _build_sc_tls_config()
+
+    bip_transport = BIPTransport(
+        interface=bip_interface, port=bip_port, broadcast_address=bip_bcast
+    )
+    await bip_transport.start()
+
+    bip_rport = RouterPort(
+        port_id=1,
+        network_number=bip_network,
+        transport=bip_transport,
+        mac_address=bip_transport.local_mac,
+        max_npdu_length=bip_transport.max_npdu_length,
+    )
+
+    sc_transport = SCTransport(
+        SCTransportConfig(
+            primary_hub_uri=sc_hub_uri,
+            tls_config=tls_config,
+            min_reconnect_time=0.5,
+            max_reconnect_time=5.0,
+        )
+    )
+
+    sc_rport = RouterPort(
+        port_id=2,
+        network_number=sc_network,
+        transport=sc_transport,
+        mac_address=sc_transport.local_mac,
+        max_npdu_length=sc_transport.max_npdu_length,
+    )
+
+    router = NetworkRouter([bip_rport, sc_rport])
+    await router.start()
+
+    connected = await sc_transport.hub_connector.wait_connected(timeout=30)
+    if not connected:
+        logger.error("Failed to connect to SC hub %s", sc_hub_uri)
+        await router.stop()
+        await bip_transport.stop()
+        sys.exit(1)
+
+    logger.info(
+        "BIP↔SC router running: net %d (BIP %s:%d) <-> net %d (SC %s)",
+        bip_network,
+        bip_interface,
+        bip_port,
+        sc_network,
+        sc_hub_uri,
+    )
+    _write_healthy()
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+    logger.info("Shutting down BIP↔SC router...")
+    await router.stop()
+
+
+async def run_sc_npdu_echo() -> None:
+    """Run an SC node that echoes NPDUs with proper NPDU routing headers."""
+    from bac_py.network.address import BACnetAddress
+    from bac_py.network.npdu import NPDU, decode_npdu, encode_npdu
+    from bac_py.transport.sc import SCTransport, SCTransportConfig
+    from bac_py.transport.sc.vmac import SCVMAC
+
+    hub_uri = os.environ.get("HUB_URI", "ws://172.30.1.120:4443")
+    vmac_hex = os.environ.get("VMAC", "")
+    tls_config = _build_sc_tls_config()
+
+    vmac = SCVMAC.from_hex(vmac_hex) if vmac_hex else None
+
+    transport = SCTransport(
+        SCTransportConfig(
+            primary_hub_uri=hub_uri,
+            tls_config=tls_config,
+            vmac=vmac,
+            min_reconnect_time=0.5,
+            max_reconnect_time=5.0,
+        )
+    )
+
+    def echo_handler(npdu_bytes: bytes, source_mac: bytes) -> None:
+        """Parse NPDU, swap SNET/SADR→DNET/DADR, echo back with proper routing."""
+        try:
+            npdu = decode_npdu(npdu_bytes)
+        except Exception:
+            logger.debug("Failed to decode NPDU, falling back to simple echo")
+            transport.send_unicast(b"ECHO:" + npdu_bytes, source_mac)
+            return
+
+        echo_payload = b"ECHO:" + npdu.apdu
+
+        if npdu.source is not None:
+            # Routed message: swap source→destination so router can route back
+            response = NPDU(
+                destination=BACnetAddress(
+                    network=npdu.source.network,
+                    mac_address=npdu.source.mac_address,
+                ),
+                apdu=echo_payload,
+                expecting_reply=False,
+            )
+            response_bytes = encode_npdu(response)
+            transport.send_unicast(response_bytes, source_mac)
+        else:
+            # Non-routed: simple echo
+            transport.send_unicast(b"ECHO:" + npdu_bytes, source_mac)
+
+        logger.debug(
+            "Echoed %d bytes back to %s (routed=%s)",
+            len(npdu_bytes),
+            source_mac.hex(),
+            npdu.source is not None,
+        )
+
+    transport.on_receive(echo_handler)
+    await transport.start()
+
+    connected = await transport.hub_connector.wait_connected(timeout=30)
+    if connected:
+        logger.info(
+            "SC NPDU-Echo node connected to hub %s (VMAC=%s)",
+            hub_uri,
+            ":".join(f"{b:02X}" for b in transport.local_mac),
+        )
+        _write_healthy()
+    else:
+        logger.error("SC NPDU-Echo node failed to connect to hub %s", hub_uri)
+        sys.exit(1)
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+    logger.info("Shutting down SC NPDU-Echo node...")
+    await transport.stop()
+
+
 def run_test() -> None:
     """Run pytest on a specific scenario file."""
     test_file = os.environ.get("TEST_FILE", "")
@@ -866,6 +1040,10 @@ def main() -> None:
         asyncio.run(run_sc_hub())
     elif role == "sc-node":
         asyncio.run(run_sc_node())
+    elif role == "router-bip-sc":
+        asyncio.run(run_router_bip_sc())
+    elif role == "sc-npdu-echo":
+        asyncio.run(run_sc_npdu_echo())
     elif role == "test":
         run_test()
     elif role == "stress":
@@ -883,8 +1061,9 @@ def main() -> None:
     else:
         logger.error(
             "Unknown ROLE: %r (expected: server, server-ipv6, server-extended, "
-            "stress-server, bbmd, router, sc-cert-gen, sc-hub, sc-node, test, "
-            "stress, sc-stress, router-stress, bbmd-stress, thermostat, demo-client)",
+            "stress-server, bbmd, router, router-bip-sc, sc-cert-gen, sc-hub, "
+            "sc-node, sc-npdu-echo, test, stress, sc-stress, router-stress, "
+            "bbmd-stress, thermostat, demo-client)",
             role,
         )
         sys.exit(1)

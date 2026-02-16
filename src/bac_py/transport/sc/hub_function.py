@@ -149,6 +149,7 @@ class SCHubFunction:
             config=self._config.connection_config,
             max_bvlc_length=self._config.max_bvlc_length,
             max_npdu_length=self._config.max_npdu_length,
+            hub_mode=True,
         )
 
         conn.on_connected = lambda: self._on_node_connected(conn)

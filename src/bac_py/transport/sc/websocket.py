@@ -8,6 +8,7 @@ WebSocket connection backed by a ``(StreamReader, StreamWriter)`` pair.
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import logging
 import socket
@@ -101,7 +102,7 @@ class SCWebSocket:
         # Buffer for events not yet consumed by recv().  When multiple
         # WebSocket frames arrive in one TCP segment, events_received()
         # returns all of them but recv() processes only one at a time.
-        self._pending_events: list[Frame] = []
+        self._pending_events: collections.deque[Frame] = collections.deque(maxlen=64)
         self._oversize_count = 0  # consecutive oversized frame counter
 
     # -- Client factory --
@@ -280,7 +281,7 @@ class SCWebSocket:
         while True:
             # Drain pending events first (from a previous multi-frame read)
             while self._pending_events:
-                event = self._pending_events.pop(0)
+                event = self._pending_events.popleft()
                 result = await self._process_frame(event)
                 if result is not None:
                     return result
@@ -293,7 +294,7 @@ class SCWebSocket:
                     if result is not None:
                         # Stash remaining events for subsequent recv() calls
                         for remaining in events[i + 1 :]:
-                            if isinstance(remaining, Frame) and len(self._pending_events) < 64:
+                            if isinstance(remaining, Frame):
                                 self._pending_events.append(remaining)
                         return result
 

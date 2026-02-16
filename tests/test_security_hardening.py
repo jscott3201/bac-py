@@ -820,15 +820,15 @@ class TestWebSocketOversizedFrameV2:
 
 
 class TestWebSocketPendingEventsCapV2:
-    """S4: _pending_events list capped at 64 entries."""
+    """S4: _pending_events deque capped at 64 entries."""
 
     def test_pending_events_cap_in_source(self):
         import inspect
 
         from bac_py.transport.sc.websocket import SCWebSocket
 
-        source = inspect.getsource(SCWebSocket.recv)
-        assert "64" in source
+        source = inspect.getsource(SCWebSocket.__init__)
+        assert "maxlen=64" in source
 
 
 # ---------------------------------------------------------------------------

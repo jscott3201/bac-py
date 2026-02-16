@@ -37,7 +37,6 @@ from bac_py.types.enums import (
     ConfirmedServiceChoice,
     EnableDisable,
     ObjectType,
-    PduType,
     RejectReason,
     UnconfirmedServiceChoice,
 )
@@ -232,6 +231,7 @@ class BACnetApplication:
         self._ready_event: asyncio.Event | None = None
         self._unconfirmed_listeners: dict[int, list[Callable[..., Any]]] = {}
         self._background_tasks: set[asyncio.Task[None]] = set()
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._cov_manager: COVManager | None = None
         self._event_engine: EventEngine | None = None
         self._cov_callbacks: dict[int, Callable[..., Any]] = {}
@@ -326,6 +326,7 @@ class BACnetApplication:
         )
         self._stopped = False
         self._stop_event = asyncio.Event()
+        self._loop = asyncio.get_running_loop()
 
         if self._config.router_config:
             await self._start_router_mode()
@@ -933,7 +934,8 @@ class BACnetApplication:
 
     def _spawn_task(self, coro: Any) -> None:
         """Create a background task and track it to prevent GC."""
-        task = asyncio.create_task(coro)
+        loop = self._loop or asyncio.get_running_loop()
+        task = loop.create_task(coro)
         self._background_tasks.add(task)
         task.add_done_callback(self._on_background_task_done)
 
@@ -971,64 +973,47 @@ class BACnetApplication:
             logger.warning("Dropped malformed APDU from %s", source)
             return
 
-        pdu_type = PduType((data[0] >> 4) & 0x0F)
-
-        match pdu_type:
-            case PduType.CONFIRMED_REQUEST:
-                if not isinstance(pdu, ConfirmedRequestPDU):
-                    return
-                if pdu.segmented:
-                    self._handle_segmented_request(pdu, source)
-                else:
-                    self._spawn_task(self._handle_confirmed_request(pdu, source))
-            case PduType.UNCONFIRMED_REQUEST:
-                self._spawn_task(self._handle_unconfirmed_request(pdu, source))
-            case PduType.SIMPLE_ACK:
-                if not isinstance(pdu, SimpleAckPDU):
-                    return
+        if isinstance(pdu, ConfirmedRequestPDU):
+            if pdu.segmented:
+                self._handle_segmented_request(pdu, source)
+            else:
+                self._spawn_task(self._handle_confirmed_request(pdu, source))
+        elif isinstance(pdu, UnconfirmedRequestPDU):
+            self._spawn_task(self._handle_unconfirmed_request(pdu, source))
+        elif isinstance(pdu, SimpleAckPDU):
+            if self._client_tsm:
+                self._client_tsm.handle_simple_ack(source, pdu.invoke_id, pdu.service_choice)
+        elif isinstance(pdu, ComplexAckPDU):
+            if self._client_tsm and pdu.segmented:
+                self._client_tsm.handle_segmented_complex_ack(source, pdu)
+            elif self._client_tsm:
+                self._client_tsm.handle_complex_ack(
+                    source, pdu.invoke_id, pdu.service_choice, pdu.service_ack
+                )
+        elif isinstance(pdu, ErrorPDU):
+            if self._client_tsm:
+                self._client_tsm.handle_error(
+                    source,
+                    pdu.invoke_id,
+                    pdu.error_class,
+                    pdu.error_code,
+                    pdu.error_data,
+                )
+        elif isinstance(pdu, RejectPDU):
+            if self._client_tsm:
+                self._client_tsm.handle_reject(source, pdu.invoke_id, pdu.reject_reason)
+        elif isinstance(pdu, AbortPDU):
+            if self._client_tsm:
+                self._client_tsm.handle_abort(source, pdu.invoke_id, pdu.abort_reason)
+        elif isinstance(pdu, SegmentAckPDU):
+            if pdu.sent_by_server:
+                # Server sent ACK -> we are the client receiving it
                 if self._client_tsm:
-                    self._client_tsm.handle_simple_ack(source, pdu.invoke_id, pdu.service_choice)
-            case PduType.COMPLEX_ACK:
-                if not isinstance(pdu, ComplexAckPDU):
-                    return
-                if self._client_tsm and pdu.segmented:
-                    self._client_tsm.handle_segmented_complex_ack(source, pdu)
-                elif self._client_tsm:
-                    self._client_tsm.handle_complex_ack(
-                        source, pdu.invoke_id, pdu.service_choice, pdu.service_ack
-                    )
-            case PduType.ERROR:
-                if not isinstance(pdu, ErrorPDU):
-                    return
-                if self._client_tsm:
-                    self._client_tsm.handle_error(
-                        source,
-                        pdu.invoke_id,
-                        pdu.error_class,
-                        pdu.error_code,
-                        pdu.error_data,
-                    )
-            case PduType.REJECT:
-                if not isinstance(pdu, RejectPDU):
-                    return
-                if self._client_tsm:
-                    self._client_tsm.handle_reject(source, pdu.invoke_id, pdu.reject_reason)
-            case PduType.ABORT:
-                if not isinstance(pdu, AbortPDU):
-                    return
-                if self._client_tsm:
-                    self._client_tsm.handle_abort(source, pdu.invoke_id, pdu.abort_reason)
-            case PduType.SEGMENT_ACK:
-                if not isinstance(pdu, SegmentAckPDU):
-                    return
-                if pdu.sent_by_server:
-                    # Server sent ACK -> we are the client receiving it
-                    if self._client_tsm:
-                        self._client_tsm.handle_segment_ack(source, pdu)
-                else:
-                    # Client sent ACK -> we are the server receiving it
-                    if self._server_tsm:
-                        self._server_tsm.handle_segment_ack_for_response(source, pdu)
+                    self._client_tsm.handle_segment_ack(source, pdu)
+            else:
+                # Client sent ACK -> we are the server receiving it
+                if self._server_tsm:
+                    self._server_tsm.handle_segment_ack_for_response(source, pdu)
 
     def _handle_segmented_request(
         self,

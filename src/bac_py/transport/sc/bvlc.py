@@ -218,9 +218,12 @@ class SCMessage:
         return bytes(buf)
 
     @staticmethod
-    def decode(data: bytes | memoryview) -> SCMessage:
+    def decode(data: bytes | memoryview, *, skip_payload: bool = False) -> SCMessage:
         """Decode a BVLC-SC message from wire bytes.
 
+        :param skip_payload: If True, set ``payload`` to ``b""`` instead of
+            copying the remaining bytes.  Used by the hub function which
+            forwards raw bytes and never inspects the payload.
         :raises ValueError: If the message is malformed or truncated.
         """
         if isinstance(data, bytes):
@@ -271,7 +274,7 @@ class SCMessage:
             data_options, consumed = SCHeaderOption.decode_list(data[offset:])
             offset += consumed
 
-        payload = bytes(data[offset:])
+        payload = b"" if skip_payload else bytes(data[offset:])
         return _make_sc_message(
             function,
             message_id,

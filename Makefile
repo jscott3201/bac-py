@@ -3,12 +3,14 @@
        bench-router bench-router-json bench-router-profile \
        bench-bbmd bench-bbmd-json bench-bbmd-profile \
        bench-sc bench-sc-json bench-sc-profile \
+       bench-sc-profile-client bench-sc-profile-hub \
        docker-build docker-test docker-stress docker-test-client docker-test-bbmd \
        docker-test-router docker-test-device-mgmt docker-test-cov-advanced \
        docker-test-events docker-test-sc docker-test-sc-stress docker-sc-stress \
        docker-test-router-stress docker-router-stress \
        docker-test-bbmd-stress docker-bbmd-stress \
        docker-test-ipv6 \
+       docker-test-mixed-bip-ipv6 docker-test-mixed-bip-sc \
        docker-demo docker-demo-auto docker-clean
 
 lint:
@@ -80,13 +82,41 @@ bench-sc-profile:
 	uv run python scripts/bench_sc.py --profile --sustain 10
 
 # ---------------------------------------------------------------------------
+# Mixed-environment SC profiling (Docker ↔ local split)
+# ---------------------------------------------------------------------------
+
+# Generate shared TLS certs for mixed SC benchmarks
+.sc-bench-certs:
+	uv run python scripts/bench_sc.py --generate-certs .sc-bench-certs
+
+# Profile client side: hub runs in Docker, echo nodes + stress client run locally
+bench-sc-profile-client: .sc-bench-certs docker-build
+	SC_BENCH_CERTS=.sc-bench-certs $(COMPOSE) --profile sc-bench-hub up -d
+	@echo "Waiting for Docker hub..." && sleep 5
+	-uv run python scripts/bench_sc.py --mode client \
+		--hub-uri wss://localhost:4443 --cert-dir .sc-bench-certs \
+		--profile --sustain 15
+	SC_BENCH_CERTS=.sc-bench-certs $(COMPOSE) --profile sc-bench-hub down
+
+# Profile hub side: hub runs locally, echo nodes + stress client run in Docker
+bench-sc-profile-hub: .sc-bench-certs docker-build
+	SC_BENCH_CERTS=.sc-bench-certs $(COMPOSE) --profile sc-bench-client up -d &
+	@echo "Waiting for Docker clients..." && sleep 10
+	uv run python scripts/bench_sc.py --mode hub --port 4443 \
+		--cert-dir .sc-bench-certs --profile --duration 100
+	SC_BENCH_CERTS=.sc-bench-certs $(COMPOSE) --profile sc-bench-client down
+
+# ---------------------------------------------------------------------------
 # Docker integration tests
 # ---------------------------------------------------------------------------
+
+BAC_PY_VERSION := $(shell uv run python -c "import bac_py; print(bac_py.__version__)")
+export BAC_PY_VERSION
 
 COMPOSE := docker compose -f docker/docker-compose.yml
 
 docker-build:
-	$(COMPOSE) build --no-cache
+	docker build --no-cache -t bac-py:$(BAC_PY_VERSION) -f docker/Dockerfile .
 
 docker-test-client: docker-build
 	$(COMPOSE) --profile client-server up --abort-on-container-exit --exit-code-from test-client-server
@@ -128,6 +158,18 @@ docker-test-ipv6: docker-build
 	$(COMPOSE) --profile ipv6 up --abort-on-container-exit --exit-code-from test-ipv6
 	$(COMPOSE) --profile ipv6 down -v
 
+docker-test-mixed-bip-ipv6: docker-build
+	$(COMPOSE) --profile mixed-bip-ipv6 up --abort-on-container-exit --exit-code-from test-mixed-bip-ipv6
+	$(COMPOSE) --profile mixed-bip-ipv6 down -v
+
+.sc-mixed-certs:
+	uv run python -c "from docker.lib.sc_pki import generate_test_pki; from pathlib import Path; generate_test_pki(Path('.sc-mixed-certs'), names=['hub','node1','node2','router'])"
+
+docker-test-mixed-bip-sc: docker-build .sc-mixed-certs
+	SC_MIXED_CERTS=$(CURDIR)/.sc-mixed-certs $(COMPOSE) --profile mixed-bip-sc up --abort-on-container-exit --exit-code-from test-mixed-bip-sc
+	SC_MIXED_CERTS=$(CURDIR)/.sc-mixed-certs $(COMPOSE) --profile mixed-bip-sc down -v
+	rm -rf .sc-mixed-certs
+
 docker-test: docker-build
 	$(MAKE) docker-test-client
 	$(MAKE) docker-test-bbmd
@@ -138,6 +180,8 @@ docker-test: docker-build
 	$(MAKE) docker-test-events
 	$(MAKE) docker-test-sc
 	$(MAKE) docker-test-ipv6
+	$(MAKE) docker-test-mixed-bip-ipv6
+	$(MAKE) docker-test-mixed-bip-sc
 
 docker-stress: docker-build
 	$(COMPOSE) --profile stress-runner up --abort-on-container-exit --exit-code-from stress-runner
@@ -181,3 +225,8 @@ docker-clean:
 	$(COMPOSE) --profile router-stress-runner down -v --rmi local
 	$(COMPOSE) --profile bbmd-stress down -v --rmi local
 	$(COMPOSE) --profile bbmd-stress-runner down -v --rmi local
+	$(COMPOSE) --profile mixed-bip-ipv6 down -v --rmi local
+	$(COMPOSE) --profile mixed-bip-sc down -v --rmi local
+	rm -rf .sc-mixed-certs
+	@echo "Removing all bac-py images..."
+	docker images --format '{{.Repository}}:{{.Tag}}' | grep '^bac-py:' | xargs -r docker rmi 2>/dev/null || true

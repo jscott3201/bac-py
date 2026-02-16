@@ -75,12 +75,15 @@ class SCConnection:
         config: SCConnectionConfig | None = None,
         max_bvlc_length: int = 1600,
         max_npdu_length: int = 1497,
+        *,
+        hub_mode: bool = False,
     ) -> None:
         self._config = config or SCConnectionConfig()
         self._local_vmac = local_vmac
         self._local_uuid = local_uuid
         self._max_bvlc = max_bvlc_length
         self._max_npdu = max_npdu_length
+        self._hub_mode = hub_mode
 
         self._state = SCConnectionState.IDLE
         self._role: SCConnectionRole | None = None
@@ -403,7 +406,7 @@ class SCConnection:
         try:
             while self._state == SCConnectionState.CONNECTED and self._ws is not None:
                 raw = await self._ws.recv()
-                msg = SCMessage.decode(raw)
+                msg = SCMessage.decode(raw, skip_payload=self._hub_mode)
                 await self._handle_message(msg, raw)
         except asyncio.CancelledError:
             raise

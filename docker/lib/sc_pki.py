@@ -44,8 +44,14 @@ def generate_test_pki(
         names = ["hub", "node1", "node2", "stress"]
 
     if cert_dir.exists():
-        shutil.rmtree(cert_dir)
-    cert_dir.mkdir(parents=True)
+        # Clear contents but keep the directory (may be a Docker volume mount)
+        for child in cert_dir.iterdir():
+            if child.is_dir():
+                shutil.rmtree(child)
+            else:
+                child.unlink()
+    else:
+        cert_dir.mkdir(parents=True)
 
     now = datetime.datetime.now(tz=datetime.UTC)
     validity = datetime.timedelta(days=365)
@@ -104,8 +110,11 @@ def generate_test_pki(
                     [
                         x509.DNSName("localhost"),
                         x509.IPAddress(ipaddress.IPv4Address("127.0.0.1")),
-                        # Docker bridge network addresses (172.30.1.x)
-                        x509.IPAddress(ipaddress.IPv4Network("172.30.0.0/16")),
+                        # Docker compose SC service IPs (172.30.1.120-199)
+                        *(
+                            x509.IPAddress(ipaddress.IPv4Address(f"172.30.1.{i}"))
+                            for i in range(120, 200)
+                        ),
                     ]
                 ),
                 critical=False,

@@ -627,7 +627,7 @@ sockets between separate application instances running in containers. The
 infrastructure lives under ``docker/`` and uses Docker Compose with isolated
 bridge networks to simulate realistic BACnet/IP topologies.
 
-Thirteen scenarios are provided:
+Fifteen scenarios are provided:
 
 - **Client/Server** -- ReadProperty, WriteProperty, ReadPropertyMultiple,
   WritePropertyMultiple, Who-Is discovery, and object list enumeration over
@@ -665,9 +665,17 @@ Thirteen scenarios are provided:
   multi-port BACnet router. See :ref:`benchmarks` for details.
 - **BBMD Stress** -- Foreign device throughput stress testing through a BBMD
   with sustained mixed workloads. See :ref:`benchmarks` for details.
+- **Mixed BIP↔IPv6** -- Cross-transport routing through a dual-stack
+  ``NetworkRouter`` bridging a BACnet/IP client on network 1 and a
+  BACnet/IPv6 server on network 2.  Tests read, write, RPM, WPM, and
+  object-list operations through the router.
+- **Mixed BIP↔SC** -- Cross-transport routing through a BIP↔SC
+  ``NetworkRouter`` gateway.  A BACnet/IP client sends NPDUs through the
+  router to SC echo nodes connected via an SC hub with mutual TLS 1.3.
 
 Run with ``make docker-test`` (all scenarios) or individual targets like
-``make docker-test-client``, ``make docker-test-sc``, etc.
+``make docker-test-client``, ``make docker-test-sc``,
+``make docker-test-mixed-bip-ipv6``, ``make docker-test-mixed-bip-sc``, etc.
 
 
 .. _structured-logging:

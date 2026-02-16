@@ -16,12 +16,18 @@
 #  11. Router Stress       (profile: router-stress)    — cross-network routing
 #  12. BBMD Stress         (profile: bbmd-stress)      — foreign device forwarding
 #  13. IPv6 Client/Server  (profile: ipv6)             — BACnet/IPv6 (Annex U)
+#  14. Mixed BIP↔IPv6      (profile: mixed-bip-ipv6)   — cross-transport routing
+#  15. Mixed BIP↔SC        (profile: mixed-bip-sc)     — cross-transport routing
 #
 # Runners (JSON report to stdout):
 #   - BIP stress runner    (profile: stress-runner)
 #   - SC stress runner     (profile: sc-stress-runner)
 #   - Router stress runner (profile: router-stress-runner)
 #   - BBMD stress runner   (profile: bbmd-stress-runner)
+#
+# Mixed-environment SC profiling:
+#   - SC bench hub         (profile: sc-bench-hub)      — hub in Docker
+#   - SC bench client      (profile: sc-bench-client)   — nodes+runner in Docker
 #
 # Usage:
 #   make docker-test              # run all test scenarios
@@ -71,6 +77,7 @@ x-healthcheck: &healthcheck
     start_period: 5s
 
 x-build: &build
+  image: bac-py:${BAC_PY_VERSION:-latest}
   build:
     context: ..
     dockerfile: docker/Dockerfile
@@ -815,6 +822,92 @@ services:
     profiles: ["bbmd-stress-runner"]
 
   # ===========================================================================
+  # Mixed-environment SC profiling (hub in Docker OR client in Docker)
+  # ===========================================================================
+
+  # Hub in Docker for profiling local client (make bench-sc-profile-client)
+  sc-bench-hub:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-sc-bench-hub
+    mem_limit: 2g
+    ports: ["4443:4443"]
+    volumes:
+      - ${SC_BENCH_CERTS:-.sc-bench-certs}:/certs:ro
+    environment:
+      ROLE: sc-hub
+      BIND_ADDRESS: "0.0.0.0"
+      BIND_PORT: "4443"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: hub
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.140
+    profiles: ["sc-bench-hub"]
+
+  # Nodes + runner in Docker for profiling local hub (make bench-sc-profile-hub)
+  sc-bench-node1:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-sc-bench-node1
+    mem_limit: 1g
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ${SC_BENCH_CERTS:-.sc-bench-certs}:/certs:ro
+    environment:
+      ROLE: sc-node
+      HUB_URI: "wss://host.docker.internal:4443"
+      VMAC: "02BB00000001"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: node1
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.141
+    profiles: ["sc-bench-client"]
+
+  sc-bench-node2:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-sc-bench-node2
+    mem_limit: 1g
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ${SC_BENCH_CERTS:-.sc-bench-certs}:/certs:ro
+    environment:
+      ROLE: sc-node
+      HUB_URI: "wss://host.docker.internal:4443"
+      VMAC: "02BB00000002"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: node2
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.142
+    profiles: ["sc-bench-client"]
+
+  sc-bench-runner:
+    <<: *build
+    container_name: bacnet-sc-bench-runner
+    mem_limit: 2g
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    volumes:
+      - ${SC_BENCH_CERTS:-.sc-bench-certs}:/certs:ro
+    environment:
+      ROLE: sc-stress
+      SC_STRESS_HUB_URI: "wss://host.docker.internal:4443"
+      SC_STRESS_NODE1_VMAC: "02BB00000001"
+      SC_STRESS_NODE2_VMAC: "02BB00000002"
+      UNICAST_WORKERS: "8"
+      BROADCAST_WORKERS: "2"
+      WARMUP_SECONDS: "15"
+      SUSTAIN_SECONDS: "60"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: stress
+    depends_on:
+      sc-bench-node1: {condition: service_healthy}
+      sc-bench-node2: {condition: service_healthy}
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.143
+    profiles: ["sc-bench-client"]
+
+  # ===========================================================================
   # Scenario 13: IPv6 Client/Server (BACnet/IPv6 Annex U)
   # ===========================================================================
 
@@ -847,3 +940,166 @@ services:
       server-ipv6:
         condition: service_healthy
     profiles: ["ipv6", "all"]
+
+  # ===========================================================================
+  # Scenario 14: Mixed BIP ↔ IPv6 (cross-transport routing)
+  # ===========================================================================
+
+  router-mixed-ipv6:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-router-mixed-ipv6
+    environment:
+      ROLE: router
+      DEVICE_INSTANCE: "800"
+      NETWORK_1: "1"
+      NETWORK_2: "2"
+      INTERFACE_1: "172.30.1.180"
+      INTERFACE_2: "fd00:bac:1::40"
+      PORT_1: "47808"
+      PORT_2: "47808"
+      BROADCAST_ADDRESS_1: "172.30.1.255"
+      IPV6_2: "true"
+      MULTICAST_2: "ff02::bac0"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.180
+      bacnet-ipv6:
+        ipv6_address: fd00:bac:1::40
+    profiles: ["mixed-bip-ipv6"]
+
+  server-mixed-ipv6:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-server-mixed-ipv6
+    environment:
+      ROLE: server-ipv6
+      DEVICE_INSTANCE: "801"
+      BACNET_PORT: "47808"
+      IPV6_INTERFACE: "::"
+      IPV6_MULTICAST: "ff02::bac0"
+      IPV6_VMAC: "aabbcc"
+    networks:
+      bacnet-ipv6:
+        ipv6_address: fd00:bac:1::30
+    profiles: ["mixed-bip-ipv6"]
+
+  test-mixed-bip-ipv6:
+    <<: *build
+    container_name: bacnet-test-mixed-bip-ipv6
+    environment:
+      ROLE: test
+      TEST_FILE: test_mixed_bip_ipv6.py
+      ROUTER_ADDRESS: "172.30.1.180"
+      SERVER_INSTANCE: "801"
+      SERVER_VMAC: "aabbcc"
+      NETWORK_2: "2"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.182
+    depends_on:
+      router-mixed-ipv6:
+        condition: service_healthy
+      server-mixed-ipv6:
+        condition: service_healthy
+    profiles: ["mixed-bip-ipv6"]
+
+  # ===========================================================================
+  # Scenario 15: Mixed BIP ↔ SC (cross-transport NPDU routing)
+  # ===========================================================================
+
+  sc-mixed-hub:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-sc-mixed-hub
+    environment:
+      ROLE: sc-hub
+      BIND_ADDRESS: "0.0.0.0"
+      BIND_PORT: "4443"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: hub
+    volumes:
+      - ${SC_MIXED_CERTS:-.sc-mixed-certs}:/certs:ro
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.190
+    profiles: ["mixed-bip-sc"]
+
+  sc-mixed-node1:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-sc-mixed-node1
+    environment:
+      ROLE: sc-npdu-echo
+      HUB_URI: "wss://172.30.1.190:4443"
+      VMAC: "02CC00000001"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: node1
+    volumes:
+      - ${SC_MIXED_CERTS:-.sc-mixed-certs}:/certs:ro
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.191
+    depends_on:
+      sc-mixed-hub:
+        condition: service_healthy
+    profiles: ["mixed-bip-sc"]
+
+  sc-mixed-node2:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-sc-mixed-node2
+    environment:
+      ROLE: sc-npdu-echo
+      HUB_URI: "wss://172.30.1.190:4443"
+      VMAC: "02CC00000002"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: node2
+    volumes:
+      - ${SC_MIXED_CERTS:-.sc-mixed-certs}:/certs:ro
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.193
+    depends_on:
+      sc-mixed-hub:
+        condition: service_healthy
+    profiles: ["mixed-bip-sc"]
+
+  router-bip-sc:
+    <<: [*build, *healthcheck]
+    container_name: bacnet-router-bip-sc
+    environment:
+      ROLE: router-bip-sc
+      BIP_INTERFACE: "172.30.1.188"
+      BIP_PORT: "47808"
+      BIP_NETWORK: "1"
+      BIP_BROADCAST: "172.30.1.255"
+      SC_HUB_URI: "wss://172.30.1.190:4443"
+      SC_NETWORK: "2"
+      TLS_CERT_DIR: /certs
+      TLS_CERT_NAME: router
+    volumes:
+      - ${SC_MIXED_CERTS:-.sc-mixed-certs}:/certs:ro
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.188
+    depends_on:
+      sc-mixed-node1:
+        condition: service_healthy
+      sc-mixed-node2:
+        condition: service_healthy
+    profiles: ["mixed-bip-sc"]
+
+  test-mixed-bip-sc:
+    <<: *build
+    container_name: bacnet-test-mixed-bip-sc
+    environment:
+      ROLE: test
+      TEST_FILE: test_mixed_bip_sc.py
+      ROUTER_ADDRESS: "172.30.1.188"
+      ROUTER_PORT: "47808"
+      SC_NETWORK: "2"
+      SC_NODE1_VMAC: "02CC00000001"
+      SC_NODE2_VMAC: "02CC00000002"
+    networks:
+      bacnet-main:
+        ipv4_address: 172.30.1.192
+    depends_on:
+      router-bip-sc:
+        condition: service_healthy
+    profiles: ["mixed-bip-sc"]
