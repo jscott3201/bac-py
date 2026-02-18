@@ -14,13 +14,18 @@ import struct
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from bac_py.transport.sc.bvlc import SCMessage
+from bac_py.transport.sc.bvlc import (
+    AddressResolutionAckPayload,
+    AdvertisementPayload,
+    BvlcResultPayload,
+    SCMessage,
+)
 from bac_py.transport.sc.connection import SCConnectionConfig
 from bac_py.transport.sc.hub_connector import SCHubConnector, SCHubConnectorConfig
 from bac_py.transport.sc.hub_function import SCHubConfig, SCHubFunction
 from bac_py.transport.sc.node_switch import SCNodeSwitch, SCNodeSwitchConfig
 from bac_py.transport.sc.tls import SCTLSConfig
-from bac_py.transport.sc.types import BvlcSCFunction
+from bac_py.transport.sc.types import BvlcSCFunction, SCResultCode
 from bac_py.transport.sc.vmac import SCVMAC, DeviceUUID
 
 if TYPE_CHECKING:
@@ -64,11 +69,18 @@ class SCTransportConfig:
     max_npdu_length: int = 1497
     """Maximum NPDU length."""
 
-    min_reconnect_time: float = 5.0
-    """Minimum reconnect delay in seconds."""
+    min_reconnect_time: float = 10.0
+    """Minimum reconnect delay in seconds (AB.6.1: fixed range 10..30s)."""
 
     max_reconnect_time: float = 600.0
     """Maximum reconnect delay in seconds."""
+
+    network_number: int | None = None
+    """Local network number for the SC network. Used by the network layer
+    for NPDU routing. ``None`` if unknown."""
+
+    connect_timeout: float = 15.0
+    """Timeout in seconds for initial hub connection during ``start()``."""
 
 
 class SCTransport:
@@ -89,13 +101,18 @@ class SCTransport:
         # Cached BVLC-SC headers keyed by destination MAC (6 bytes).
         # For unicast: 16-byte header (function + flags + msg_id + orig + dest).
         # Avoids SCVMAC/SCMessage creation and encode() on every send.
+        # Capped at 256 entries to prevent unbounded growth.
         self._unicast_header_cache: dict[bytes, bytes] = {}
-        # Broadcast header is fixed (10 bytes: function + flags + msg_id + orig).
-        # SCControlFlag.ORIGINATING_VMAC = 0x08
-        _bcast_flags = 0x08  # ORIGINATING_VMAC
+        self._unicast_cache_max = 256
+        # Broadcast header is fixed (16 bytes: function + flags + msg_id + orig + bcast_dest).
+        # Per AB.5.3.3, broadcast messages include the Destination VMAC set to the
+        # broadcast address so receiving nodes can identify the message as broadcast.
+        # SCControlFlag: ORIGINATING_VMAC(0x08) | DESTINATION_VMAC(0x04) = 0x0C
+        _bcast_flags = 0x0C  # ORIGINATING_VMAC | DESTINATION_VMAC
         self._broadcast_header: bytes = (
             struct.pack("!BBH", BvlcSCFunction.ENCAPSULATED_NPDU, _bcast_flags, 0)
             + self._vmac.address
+            + b"\xff\xff\xff\xff\xff\xff"  # broadcast VMAC
         )
 
         # Hub connector (client)
@@ -216,18 +233,26 @@ class SCTransport:
         if __debug__ and logger.isEnabledFor(_DEBUG):
             logger.debug("SC send unicast: %d bytes to %s", len(npdu), mac_address.hex())
 
-        # Try direct connection first (rare path — most traffic goes via hub)
+        # Try direct connection first (rare path — most traffic goes via hub).
+        # Per AB.4.2, direct connection messages omit both Originating and
+        # Destination VMACs.  If the direct send fails, we fall back to the
+        # hub path which includes both VMACs.
         if self._node_switch:
             dest = SCVMAC(mac_address)
             if self._node_switch.has_direct(dest):
-                msg = SCMessage(
+                direct_msg = SCMessage(
+                    BvlcSCFunction.ENCAPSULATED_NPDU,
+                    message_id=0,
+                    payload=npdu,
+                )
+                hub_msg = SCMessage(
                     BvlcSCFunction.ENCAPSULATED_NPDU,
                     message_id=0,
                     originating=self._vmac,
                     destination=dest,
                     payload=npdu,
                 )
-                self._schedule_send(self._send_direct_or_hub(dest, msg))
+                self._schedule_send(self._send_direct_or_hub(dest, direct_msg, hub_msg))
                 return
 
         # Fast path: use cached header + payload concatenation.
@@ -240,6 +265,8 @@ class SCTransport:
                 + self._vmac.address
                 + mac_address
             )
+            if len(self._unicast_header_cache) >= self._unicast_cache_max:
+                self._unicast_header_cache.clear()
             self._unicast_header_cache[mac_address] = header
         self._schedule_send(self._send_raw_via_hub(header + npdu))
 
@@ -282,13 +309,18 @@ class SCTransport:
         except ConnectionError:
             logger.debug("Hub not connected, message dropped")
 
-    async def _send_direct_or_hub(self, dest: SCVMAC, msg: SCMessage) -> None:
-        """Try direct connection first, fall back to hub."""
+    async def _send_direct_or_hub(
+        self, dest: SCVMAC, direct_msg: SCMessage, hub_msg: SCMessage
+    ) -> None:
+        """Try direct connection first, fall back to hub.
+
+        *direct_msg* omits VMACs per AB.4.2; *hub_msg* includes them.
+        """
         if self._node_switch:
-            ok = await self._node_switch.send_direct(dest, msg)
+            ok = await self._node_switch.send_direct(dest, direct_msg)
             if ok:
                 return
-        await self._send_via_hub(msg)
+        await self._send_via_hub(hub_msg)
 
     # ------------------------------------------------------------------
     # Message receive handlers
@@ -309,6 +341,76 @@ class SCTransport:
                     logger.warning("Error in receive callback", exc_info=True)
         elif msg.function == BvlcSCFunction.ADDRESS_RESOLUTION_ACK and self._node_switch:
             self._node_switch.handle_address_resolution_ack(msg)
+        elif msg.function == BvlcSCFunction.ADVERTISEMENT_SOLICITATION:
+            await self._handle_advertisement_solicitation(msg)
+        elif msg.function == BvlcSCFunction.ADDRESS_RESOLUTION:
+            await self._handle_address_resolution(msg)
+
+    async def _handle_advertisement_solicitation(self, msg: SCMessage) -> None:
+        """Respond to Advertisement-Solicitation with an Advertisement (AB.3.2).
+
+        The Advertisement contains current hub connection status, whether
+        this node accepts direct connections, and max BVLC/NPDU lengths.
+        Advertisement is NOT a response message per AB.3.1.4, so it uses
+        a fresh message ID (does not copy the solicitation's ID).
+        """
+        accepts_direct = self._node_switch is not None and self._node_switch._config.enable
+        payload = AdvertisementPayload(
+            hub_connection_status=self._hub_connector.connection_status,
+            accept_direct_connections=accepts_direct,
+            max_bvlc_length=self._config.max_bvlc_length,
+            max_npdu_length=self._config.max_npdu_length,
+        ).encode()
+        response = SCMessage(
+            BvlcSCFunction.ADVERTISEMENT,
+            message_id=0,
+            originating=self._vmac,
+            destination=msg.originating,
+            payload=payload,
+        )
+        try:
+            await self._hub_connector.send(response)
+        except ConnectionError:
+            logger.debug("Hub not connected, Advertisement dropped")
+
+    async def _handle_address_resolution(self, msg: SCMessage) -> None:
+        """Respond to Address-Resolution (AB.3.3).
+
+        If this node accepts direct connections, responds with
+        Address-Resolution-ACK.  Otherwise, responds with BVLC-Result NAK
+        (optional functionality not supported).
+        """
+        if self._node_switch and self._node_switch._config.enable:
+            # Respond with ACK containing our direct connection URIs.
+            # URI list may be empty if our external address is unknown.
+            ack_payload = AddressResolutionAckPayload(()).encode()
+            response = SCMessage(
+                BvlcSCFunction.ADDRESS_RESOLUTION_ACK,
+                message_id=msg.message_id,
+                originating=self._vmac,
+                destination=msg.originating,
+                payload=ack_payload,
+            )
+        else:
+            # NAK: optional functionality not supported
+            nak_payload = BvlcResultPayload(
+                for_function=BvlcSCFunction.ADDRESS_RESOLUTION,
+                result_code=SCResultCode.NAK,
+                error_header_marker=0x00,
+                error_class=7,  # COMMUNICATION
+                error_code=0x0039,  # OPTIONAL_FUNCTIONALITY_NOT_SUPPORTED
+            ).encode()
+            response = SCMessage(
+                BvlcSCFunction.BVLC_RESULT,
+                message_id=msg.message_id,
+                originating=self._vmac,
+                destination=msg.originating,
+                payload=nak_payload,
+            )
+        try:
+            await self._hub_connector.send(response)
+        except ConnectionError:
+            logger.debug("Hub not connected, Address-Resolution response dropped")
 
     async def _on_direct_message(self, msg: SCMessage, raw: bytes | None = None) -> None:
         """Handle a message received from a direct connection."""

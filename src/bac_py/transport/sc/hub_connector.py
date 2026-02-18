@@ -46,7 +46,7 @@ class SCHubConnectorConfig:
     failover_hub_uri: str | None = None
     tls_config: SCTLSConfig = field(default_factory=SCTLSConfig)
     connection_config: SCConnectionConfig = field(default_factory=SCConnectionConfig)
-    min_reconnect_time: float = 5.0
+    min_reconnect_time: float = 10.0
     max_reconnect_time: float = 600.0
     max_bvlc_length: int = 1600
     max_npdu_length: int = 1497
@@ -198,8 +198,8 @@ class SCHubConnector:
                 logger.warning(
                     "SC hub connection failed, retrying in %.1fs", self._reconnect_delay
                 )
-                self._increase_backoff()
                 await asyncio.sleep(self._reconnect_delay)
+                self._increase_backoff()
         except asyncio.CancelledError:
             pass
 

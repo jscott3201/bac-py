@@ -48,6 +48,8 @@ if TYPE_CHECKING:
     from bac_py.app.tsm import ServerTransaction
     from bac_py.network.address import BACnetAddress, BIP6Address, BIPAddress
     from bac_py.transport.bbmd import BDTEntry
+    from bac_py.transport.ethernet import EthernetTransport
+    from bac_py.transport.sc import SCTransport, SCTransportConfig
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +93,12 @@ class RouterPortConfig:
     """IPv6 multicast group address. Defaults to ``ff02::bac0``."""
     vmac: bytes | None = None
     """3-byte VMAC for IPv6. Auto-generated if ``None``."""
+    sc_config: SCTransportConfig | None = None
+    """BACnet/SC transport for this router port. Mutually exclusive with ``ipv6``."""
+    ethernet_interface: str | None = None
+    """Network interface for BACnet Ethernet transport on this router port."""
+    ethernet_mac: bytes | None = None
+    """Explicit 6-byte MAC for Ethernet transport on this router port."""
 
 
 @dataclass
@@ -172,8 +180,30 @@ class DeviceConfig:
     """3-byte VMAC for IPv6 transport. Auto-generated if ``None``.
     Ignored for IPv4 mode."""
 
+    sc_config: SCTransportConfig | None = None
+    """BACnet/SC transport configuration. When set, uses SC transport
+    instead of BIP/BIP6. Mutually exclusive with ``ipv6``."""
+
+    ethernet_interface: str | None = None
+    """Network interface for BACnet Ethernet (Clause 7) transport, e.g. ``"eth0"``.
+    When set, uses raw 802.3/802.2 Ethernet instead of BIP/BIP6.
+    Mutually exclusive with ``ipv6`` and ``sc_config``."""
+
+    ethernet_mac: bytes | None = None
+    """Explicit 6-byte MAC for Ethernet transport. Auto-detected from the
+    interface if ``None``. Required on macOS where auto-detection is not supported."""
+
     def __post_init__(self) -> None:
-        """Fill version defaults from the bac-py package version."""
+        """Fill version defaults and validate mutual exclusion."""
+        if self.sc_config is not None and self.ipv6:
+            msg = "sc_config and ipv6 are mutually exclusive"
+            raise ValueError(msg)
+        if self.ethernet_interface is not None and self.ipv6:
+            msg = "ethernet_interface and ipv6 are mutually exclusive"
+            raise ValueError(msg)
+        if self.ethernet_interface is not None and self.sc_config is not None:
+            msg = "ethernet_interface and sc_config are mutually exclusive"
+            raise ValueError(msg)
         if not self.firmware_revision or not self.application_software_version:
             import bac_py  # lazy to avoid circular import
 
@@ -216,10 +246,12 @@ class BACnetApplication:
         :param config: Device and network parameters for this BACnet device.
         """
         self._config = config
-        self._transport: BIPTransport | BIP6Transport | None = None
+        self._transport: BIPTransport | BIP6Transport | SCTransport | EthernetTransport | None = (
+            None
+        )
         self._network: NetworkLayer | None = None
         self._router: NetworkRouter | None = None
-        self._transports: list[BIPTransport | BIP6Transport] = []
+        self._transports: list[BIPTransport | BIP6Transport | SCTransport | EthernetTransport] = []
         self._client_tsm: ClientTSM | None = None
         self._server_tsm: ServerTSM | None = None
         self._service_registry = ServiceRegistry()
@@ -383,7 +415,11 @@ class BACnetApplication:
 
     async def _start_non_router_mode(self) -> None:
         """Start in non-router (simple device) mode."""
-        if self._config.ipv6 or ":" in self._config.interface:
+        if self._config.sc_config is not None:
+            await self._start_sc_mode()
+        elif self._config.ethernet_interface is not None:
+            await self._start_ethernet_mode()
+        elif self._config.ipv6 or ":" in self._config.interface:
             iface = self._config.interface if self._config.interface != "0.0.0.0" else "::"
             mcast = self._config.multicast_address or "ff02::bac0"
             self._transport = BIP6Transport(
@@ -392,15 +428,53 @@ class BACnetApplication:
                 multicast_address=mcast,
                 vmac=self._config.vmac,
             )
+            self._network = NetworkLayer(self._transport)
+            self._network.on_receive(self._on_apdu_received)
+            await self._transport.start()
         else:
             self._transport = BIPTransport(
                 interface=self._config.interface,
                 port=self._config.port,
                 broadcast_address=self._config.broadcast_address,
             )
-        self._network = NetworkLayer(self._transport)
+            self._network = NetworkLayer(self._transport)
+            self._network.on_receive(self._on_apdu_received)
+            await self._transport.start()
+
+    async def _start_sc_mode(self) -> None:
+        """Start in BACnet/SC (Annex AB) mode."""
+        from bac_py.transport.sc import SCTransport
+
+        sc_config = self._config.sc_config
+        assert sc_config is not None  # guaranteed by caller
+        transport = SCTransport(sc_config)
+        self._transport = transport
+        self._network = NetworkLayer(transport, network_number=sc_config.network_number)
         self._network.on_receive(self._on_apdu_received)
-        await self._transport.start()
+        await transport.start()
+        if sc_config.primary_hub_uri:
+            connected = await transport.hub_connector.wait_connected(
+                timeout=sc_config.connect_timeout
+            )
+            if not connected:
+                await transport.stop()
+                raise ConnectionError(
+                    f"Failed to connect to SC hub at {sc_config.primary_hub_uri} "
+                    f"within {sc_config.connect_timeout}s"
+                )
+
+    async def _start_ethernet_mode(self) -> None:
+        """Start in BACnet Ethernet (Clause 7) mode."""
+        from bac_py.transport.ethernet import EthernetTransport as _EthernetTransport
+
+        transport = _EthernetTransport(
+            self._config.ethernet_interface,  # type: ignore[arg-type]
+            mac_address=self._config.ethernet_mac,
+        )
+        self._transport = transport
+        self._network = NetworkLayer(transport)
+        self._network.on_receive(self._on_apdu_received)
+        await transport.start()
 
     async def _start_router_mode(self) -> None:
         """Start in router mode with multiple ports."""
@@ -409,8 +483,33 @@ class BACnetApplication:
             raise RuntimeError(msg)
         ports: list[RouterPort] = []
         for pc in self._config.router_config.ports:
-            transport: BIPTransport | BIP6Transport
-            if pc.ipv6 or ":" in pc.interface:
+            transport: BIPTransport | BIP6Transport | SCTransport | EthernetTransport
+            if pc.sc_config is not None:
+                from bac_py.transport.sc import SCTransport as _SCTransport
+
+                sc_cfg = pc.sc_config
+                sc_transport = _SCTransport(sc_cfg)
+                await sc_transport.start()
+                if sc_cfg.primary_hub_uri:
+                    connected = await sc_transport.hub_connector.wait_connected(
+                        timeout=sc_cfg.connect_timeout
+                    )
+                    if not connected:
+                        await sc_transport.stop()
+                        raise ConnectionError(
+                            f"Failed to connect to SC hub at {sc_cfg.primary_hub_uri} "
+                            f"within {sc_cfg.connect_timeout}s"
+                        )
+                transport = sc_transport
+            elif pc.ethernet_interface is not None:
+                from bac_py.transport.ethernet import EthernetTransport as _EthernetTransport
+
+                transport = _EthernetTransport(
+                    pc.ethernet_interface,
+                    mac_address=pc.ethernet_mac,
+                )
+                await transport.start()
+            elif pc.ipv6 or ":" in pc.interface:
                 iface = pc.interface if pc.interface != "0.0.0.0" else "::"
                 mcast = pc.multicast_address or "ff02::bac0"
                 transport = BIP6Transport(
@@ -419,17 +518,18 @@ class BACnetApplication:
                     multicast_address=mcast,
                     vmac=pc.vmac,
                 )
+                await transport.start()
             else:
                 transport = BIPTransport(
                     interface=pc.interface,
                     port=pc.port,
                     broadcast_address=pc.broadcast_address,
                 )
-            await transport.start()
+                await transport.start()
             self._transports.append(transport)
 
-            # Attach BBMD if configured for this port
-            if pc.bbmd_config is not None:
+            # Attach BBMD if configured for this port (BIP/BIP6 only)
+            if pc.bbmd_config is not None and hasattr(transport, "attach_bbmd"):
                 await transport.attach_bbmd(pc.bbmd_config.bdt_entries or None)  # type: ignore[arg-type]
 
             port = RouterPort(
@@ -607,6 +707,9 @@ class BACnetApplication:
                 raise RuntimeError(msg)
             msg = "Application not started"
             raise RuntimeError(msg)
+        if not isinstance(self._transport, (BIPTransport, BIP6Transport)):
+            msg = "Foreign device registration is only supported with BIP/BIP6 transport"
+            raise RuntimeError(msg)
         if self._transport.foreign_device is not None:
             msg = "Already registered as a foreign device"
             raise RuntimeError(msg)
@@ -626,7 +729,10 @@ class BACnetApplication:
 
         :raises RuntimeError: If not registered as a foreign device.
         """
-        if self._transport is None or self._transport.foreign_device is None:
+        if not isinstance(self._transport, (BIPTransport, BIP6Transport)):
+            msg = "Not registered as a foreign device"
+            raise RuntimeError(msg)
+        if self._transport.foreign_device is None:
             msg = "Not registered as a foreign device"
             raise RuntimeError(msg)
         await self._transport.foreign_device.stop()
@@ -635,9 +741,10 @@ class BACnetApplication:
     @property
     def is_foreign_device(self) -> bool:
         """Whether this device is currently registered as a foreign device."""
+        if not isinstance(self._transport, (BIPTransport, BIP6Transport)):
+            return False
         return (
-            self._transport is not None
-            and self._transport.foreign_device is not None
+            self._transport.foreign_device is not None
             and self._transport.foreign_device.is_registered
         )
 
@@ -647,7 +754,9 @@ class BACnetApplication:
 
         Returns ``None`` if foreign device mode is not active.
         """
-        if self._transport is None or self._transport.foreign_device is None:
+        if not isinstance(self._transport, (BIPTransport, BIP6Transport)):
+            return None
+        if self._transport.foreign_device is None:
             return None
         fd = self._transport.foreign_device
         return ForeignDeviceStatus(
@@ -668,7 +777,9 @@ class BACnetApplication:
         :param timeout: Maximum seconds to wait.
         :returns: ``True`` if registered, ``False`` if timeout expired.
         """
-        if self._transport is None or self._transport.foreign_device is None:
+        if not isinstance(self._transport, (BIPTransport, BIP6Transport)):
+            return False
+        if self._transport.foreign_device is None:
             return False
         fd = self._transport.foreign_device
         try:
@@ -769,8 +880,10 @@ class BACnetApplication:
                 segmentation_supported=int(iam.segmentation_supported),
             )
             logger.debug(
-                f"cached device info: instance={iam.object_identifier} "
-                f"max_apdu={iam.max_apdu_length} from {source}"
+                "cached device info: instance=%s max_apdu=%d from %s",
+                iam.object_identifier,
+                iam.max_apdu_length,
+                source,
             )
         except Exception:
             logger.debug("Failed to decode I-Am for cache from %s", source, exc_info=True)

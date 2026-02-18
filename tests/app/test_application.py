@@ -26,6 +26,7 @@ from bac_py.encoding.apdu import (
 from bac_py.network.address import BACnetAddress
 from bac_py.services.errors import BACnetAbortError, BACnetError, BACnetRejectError
 from bac_py.services.who_is import IAmRequest
+from bac_py.transport.bip import BIPTransport
 from bac_py.types.enums import (
     AbortReason,
     ConfirmedServiceChoice,
@@ -40,7 +41,7 @@ from bac_py.types.primitives import ObjectIdentifier
 
 def _make_mock_transport():
     """Create a mock BIPTransport with required attributes."""
-    transport = MagicMock()
+    transport = MagicMock(spec=BIPTransport)
     transport.start = AsyncMock()
     transport.stop = AsyncMock()
     transport.local_mac = b"\x7f\x00\x00\x01\xba\xc0"
@@ -562,21 +563,21 @@ class TestPropertyGettersAndState:
     def test_is_foreign_device_false_no_fd(self):
         """is_foreign_device is False when foreign_device is None."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.foreign_device = None
         assert app.is_foreign_device is False
 
     def test_is_foreign_device_false_not_registered(self):
         """is_foreign_device is False when FD exists but not registered."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.foreign_device.is_registered = False
         assert app.is_foreign_device is False
 
     def test_is_foreign_device_true_when_registered(self):
         """is_foreign_device is True when FD is registered."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.foreign_device.is_registered = True
         assert app.is_foreign_device is True
 
@@ -588,14 +589,14 @@ class TestPropertyGettersAndState:
     def test_foreign_device_status_none_no_fd(self):
         """Foreign device status is None when no FD manager."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.foreign_device = None
         assert app.foreign_device_status is None
 
     def test_foreign_device_status_constructs_status(self):
         """Foreign device status constructs ForeignDeviceStatus from FD manager."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         fd = MagicMock()
         fd.bbmd_address.host = "192.168.1.1"
         fd.bbmd_address.port = 47808
@@ -614,7 +615,7 @@ class TestPropertyGettersAndState:
     def test_foreign_device_status_last_result_none(self):
         """Foreign device status handles None last_result."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         fd = MagicMock()
         fd.bbmd_address.host = "10.0.0.1"
         fd.bbmd_address.port = 47808
@@ -656,7 +657,7 @@ class TestErrorValidationPaths:
     async def test_register_foreign_device_already_registered(self):
         """register_as_foreign_device raises when already registered."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.foreign_device = MagicMock()  # Already has FD
         with pytest.raises(RuntimeError, match="Already registered"):
             await app.register_as_foreign_device("192.168.1.1")
@@ -664,7 +665,7 @@ class TestErrorValidationPaths:
     async def test_register_foreign_device_success(self):
         """register_as_foreign_device attaches FD manager."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.foreign_device = None
         app._transport.attach_foreign_device = AsyncMock()
 
@@ -682,7 +683,7 @@ class TestErrorValidationPaths:
     async def test_deregister_foreign_device_no_fd(self):
         """deregister_foreign_device raises when transport has no FD."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.foreign_device = None
         with pytest.raises(RuntimeError, match="Not registered"):
             await app.deregister_foreign_device()
@@ -690,7 +691,7 @@ class TestErrorValidationPaths:
     async def test_deregister_foreign_device_success(self):
         """deregister_foreign_device stops FD and clears reference."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         fd = MagicMock()
         fd.stop = AsyncMock()
         app._transport.foreign_device = fd
@@ -746,14 +747,14 @@ class TestErrorValidationPaths:
     async def test_wait_for_registration_no_fd(self):
         """wait_for_registration returns False when no FD manager."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.foreign_device = None
         assert await app.wait_for_registration() is False
 
     async def test_wait_for_registration_timeout(self):
         """wait_for_registration returns False on timeout."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         fd = MagicMock()
         fd._registered = asyncio.Event()  # Never set
         fd.is_registered = False
@@ -765,7 +766,7 @@ class TestErrorValidationPaths:
     async def test_wait_for_registration_success(self):
         """wait_for_registration returns True when registered."""
         app = BACnetApplication(DeviceConfig(instance_number=1))
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         fd = MagicMock()
         fd._registered = asyncio.Event()
         fd._registered.set()
@@ -2039,7 +2040,7 @@ class TestApplicationStopBranches:
         app._event_engine = mock_engine
         app._cov_manager = None
         app._dcc_timer = None
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.stop = AsyncMock()
 
         await app.stop()
@@ -2053,7 +2054,7 @@ class TestApplicationStopBranches:
         app._cov_manager = mock_cov
         app._event_engine = None
         app._dcc_timer = None
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.stop = AsyncMock()
 
         await app.stop()
@@ -2067,7 +2068,7 @@ class TestApplicationStopBranches:
         app._dcc_timer = mock_timer
         app._event_engine = None
         app._cov_manager = None
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.stop = AsyncMock()
 
         await app.stop()
@@ -2085,7 +2086,7 @@ class TestApplicationStopBranches:
         app._event_engine = None
         app._cov_manager = None
         app._dcc_timer = None
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.stop = AsyncMock()
 
         await app.stop()
@@ -2404,7 +2405,7 @@ class TestStopBranchPartials:
         app._event_engine = None
         app._cov_manager = None
         app._dcc_timer = None
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.stop = AsyncMock()
 
         await app.stop()
@@ -2445,7 +2446,7 @@ class TestMemoryCleanupOnStop:
         app._event_engine = None
         app._cov_manager = None
         app._dcc_timer = None
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.stop = AsyncMock()
 
         # Register some listeners
@@ -2462,7 +2463,7 @@ class TestMemoryCleanupOnStop:
         app._event_engine = None
         app._cov_manager = None
         app._dcc_timer = None
-        app._transport = MagicMock()
+        app._transport = MagicMock(spec=BIPTransport)
         app._transport.stop = AsyncMock()
 
         # Populate cache

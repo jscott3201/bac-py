@@ -22,6 +22,7 @@ SC_EXAMPLES = {
     "secure_connect_hub",
     "ip_to_sc_router",
     "sc_generate_certs",
+    "sc_server",
 }
 
 
@@ -193,4 +194,4 @@ class TestExampleCompleteness:
         )
 
     def test_example_count(self) -> None:
-        assert len(ALL_EXAMPLES) >= 22, f"Expected at least 22 examples, found {len(ALL_EXAMPLES)}"
+        assert len(ALL_EXAMPLES) >= 25, f"Expected at least 25 examples, found {len(ALL_EXAMPLES)}"

@@ -3,9 +3,11 @@
 Example Scripts
 ===============
 
-The ``examples/`` directory contains 23 runnable scripts demonstrating bac-py's
-capabilities. Each script is self-contained and uses the high-level
-:class:`~bac_py.client.Client` API with ``asyncio.run()``.
+The ``examples/`` directory contains 26 runnable scripts demonstrating bac-py's
+capabilities. Each script is self-contained with ``asyncio.run()``. Client
+examples use the high-level :class:`~bac_py.client.Client` API; server examples
+use :class:`~bac_py.app.application.BACnetApplication` with
+:class:`~bac_py.app.server.DefaultServerHandlers`.
 
 Run any example by replacing the address and object identifiers with values
 from your network:
@@ -480,8 +482,8 @@ Query audit log records with target-based filtering and pagination:
 BACnet/IPv6
 -----------
 
-ipv6_client_server.py
-^^^^^^^^^^^^^^^^^^^^^
+ipv6_client.py
+^^^^^^^^^^^^^^
 
 Discover devices and read properties over BACnet/IPv6 (Annex U) with multicast
 discovery using the ``ff02::bac0`` multicast group:
@@ -502,17 +504,91 @@ discovery using the ``ff02::bac0`` multicast group:
 See :ref:`transport-ipv6` for IPv6 transport configuration details.
 
 
+ipv6_server.py
+^^^^^^^^^^^^^^
+
+Run a BACnet/IPv6 server with ``BACnetApplication`` and ``DefaultServerHandlers``
+for full APDU dispatch (ReadProperty, WriteProperty, Who-Is, etc.):
+
+.. code-block:: python
+
+   from bac_py.app.application import BACnetApplication, DeviceConfig
+
+   config = DeviceConfig(instance_number=500, name="IPv6-Server", ipv6=True)
+   app = BACnetApplication(config)
+   await app.start()
+
+   # Create objects, register DefaultServerHandlers, then wait for requests
+
+
+.. _examples-ethernet:
+
+BACnet Ethernet
+---------------
+
+ethernet_server.py
+^^^^^^^^^^^^^^^^^^
+
+Run a BACnet server over raw IEEE 802.3/802.2 Ethernet frames (Clause 7)
+using ``BACnetApplication`` and ``DefaultServerHandlers``.  Requires
+``CAP_NET_RAW`` or root privileges on Linux, and a BPF device on macOS:
+
+.. code-block:: python
+
+   from bac_py.app.application import BACnetApplication, DeviceConfig
+
+   config = DeviceConfig(
+       instance_number=600,
+       name="Ethernet-Server",
+       ethernet_interface="eth0",
+   )
+   app = BACnetApplication(config)
+   await app.start()
+
+   # Create objects, register DefaultServerHandlers, then wait for requests
+
+
 .. _examples-secure-connect:
 
 BACnet Secure Connect
 ---------------------
 
+sc_server.py
+^^^^^^^^^^^^
+
+Run a BACnet/SC server with ``BACnetApplication`` and ``DefaultServerHandlers``
+for full APDU dispatch.  This is the **high-level** approach -- the server runs
+an SC hub function that accepts WebSocket connections from SC nodes:
+
+.. code-block:: python
+
+   from bac_py.app.application import BACnetApplication, DeviceConfig
+   from bac_py.transport.sc import SCTransportConfig
+   from bac_py.transport.sc.hub_function import SCHubConfig
+   from bac_py.transport.sc.tls import SCTLSConfig
+
+   sc_config = SCTransportConfig(
+       hub_function_config=SCHubConfig(
+           bind_address="0.0.0.0",
+           bind_port=4443,
+           tls_config=SCTLSConfig(allow_plaintext=True),
+       ),
+       tls_config=SCTLSConfig(allow_plaintext=True),
+   )
+   config = DeviceConfig(instance_number=1000, name="SC-Server", sc_config=sc_config)
+   app = BACnetApplication(config)
+   await app.start()
+
+   # Create objects, register DefaultServerHandlers, then wait for requests
+
+
 secure_connect.py
 ^^^^^^^^^^^^^^^^^
 
 Connect to an SC hub over WebSocket/TLS and send a ReadProperty request to a
-remote device addressed by its 6-byte VMAC. Demonstrates the lower-level
-``SCTransport`` API with manual NPDU/APDU construction:
+remote device addressed by its 6-byte VMAC. Demonstrates the **lower-level**
+``SCTransport`` API with manual NPDU/APDU construction (see ``sc_server.py``
+for the high-level approach):
 
 .. code-block:: python
 

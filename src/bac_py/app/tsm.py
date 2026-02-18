@@ -505,7 +505,9 @@ class ClientTSM:
                 self._send_confirmed_request(txn, effective)
         else:
             logger.debug(
-                f"TSM transaction timeout invoke_id={txn.invoke_id} retries={txn.retry_count}"
+                "TSM transaction timeout invoke_id=%d retries=%d",
+                txn.invoke_id,
+                txn.retry_count,
             )
             txn.future.set_exception(
                 BACnetTimeoutError(f"No response after {self._retries} retries")

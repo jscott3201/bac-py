@@ -407,12 +407,40 @@ network parameters:
    async with Client(config) as client:
        value = await client.read("192.168.1.100", "ai,1", "pv")
 
+**Transport selection** -- ``DeviceConfig`` also supports IPv6, BACnet/SC, and
+Ethernet transports (mutually exclusive):
+
+.. code-block:: python
+
+   # IPv6 transport (Annex U)
+   config = DeviceConfig(instance_number=999, ipv6=True)
+
+   # BACnet/SC transport (Annex AB) -- requires bac-py[secure]
+   from bac_py.transport.sc import SCTransportConfig
+   from bac_py.transport.sc.tls import SCTLSConfig
+   config = DeviceConfig(
+       instance_number=999,
+       sc_config=SCTransportConfig(
+           primary_hub_uri="wss://hub.example.com:8443",
+           tls_config=SCTLSConfig(...),
+       ),
+   )
+
+   # Ethernet transport (Clause 7) -- requires root/CAP_NET_RAW
+   config = DeviceConfig(instance_number=999, ethernet_interface="eth0")
+
+See :doc:`guide/transport-setup` for full transport configuration details.
+
 For simple client use cases, you can skip ``DeviceConfig`` and pass common
 options directly:
 
 .. code-block:: python
 
    async with Client(instance_number=999, interface="192.168.1.50") as client:
+       ...
+
+   # IPv6 and SC transports also work with Client directly
+   async with Client(instance_number=999, ipv6=True) as client:
        ...
 
 

@@ -1,12 +1,14 @@
-"""BACnet/IPv6 (Annex U) client and server example.
+"""BACnet/IPv6 (Annex U) client example.
 
 Demonstrates using bac-py over BACnet/IPv6 with multicast discovery and
 property reads. IPv6 transport uses 3-byte VMACs and the ``ff02::bac0``
 multicast group by default.
 
+For the server counterpart, see ``ipv6_server.py``.
+
 Usage::
 
-    python examples/ipv6_client_server.py
+    python examples/ipv6_client.py
 """
 
 import asyncio

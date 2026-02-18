@@ -337,6 +337,18 @@ class SCWebSocket:
             raise ConnectionClosedOK(rcvd, None, rcvd_then_sent=None)
         if event.opcode in (Opcode.PING, Opcode.PONG):
             await self._flush_outgoing()
+            return None
+        # Non-binary data frames (e.g. TEXT): close with 1003 per AB.7.5.3
+        if event.opcode == Opcode.TEXT:
+            logger.warning(
+                "SC WebSocket received TEXT frame, closing with status 1003 per AB.7.5.3"
+            )
+            try:
+                self._protocol.send_close(1003, "Non-binary data not accepted")
+                _write_pending(self._protocol, self._writer)
+            except (OSError, ConnectionError):
+                pass
+            raise ConnectionClosedError(None, None, rcvd_then_sent=None)
         return None
 
     async def close(self, code: int = 1000, reason: str = "") -> None:

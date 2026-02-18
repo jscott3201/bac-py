@@ -19,7 +19,7 @@ from bac_py.transport.sc.connection import (
     SCConnectionState,
 )
 from bac_py.transport.sc.tls import SCTLSConfig, build_server_ssl_context
-from bac_py.transport.sc.types import SC_HUB_SUBPROTOCOL
+from bac_py.transport.sc.types import SC_HUB_SUBPROTOCOL, VMAC_BROADCAST
 from bac_py.transport.sc.websocket import SCWebSocket
 
 if TYPE_CHECKING:
@@ -39,7 +39,7 @@ class SCHubConfig:
     tls_config: SCTLSConfig = field(default_factory=SCTLSConfig)
     connection_config: SCConnectionConfig = field(default_factory=SCConnectionConfig)
     max_connections: int = 1000
-    max_bvlc_length: int = 1600
+    max_bvlc_length: int = 6000
     max_npdu_length: int = 1497
 
 
@@ -101,8 +101,13 @@ class SCHubFunction:
     async def stop(self) -> None:
         """Stop the hub function, force-close all connections."""
         logger.info("SC hub function stopping")
-        # Force-close all connections first (before closing the server,
-        # since wait_closed() waits for active connection handlers)
+        # Stop accepting new connections first to prevent new clients
+        # arriving during shutdown cleanup.
+        if self._server:
+            self._server.close()
+
+        # Force-close all connections (before wait_closed(), since
+        # wait_closed() blocks until active connection handlers finish)
         for conn in list(self._connections.values()):
             with contextlib.suppress(Exception):
                 await conn._go_idle()
@@ -119,7 +124,6 @@ class SCHubFunction:
         self._pending_vmacs.clear()
 
         if self._server:
-            self._server.close()
             await self._server.wait_closed()
             self._server = None
         logger.info("SC hub function stopped")
@@ -255,8 +259,12 @@ class SCHubFunction:
         - Unicast (destination set): forward to matching VMAC connection.
         - Broadcast (no destination): replicate to all except source.
 
-        When *raw* bytes are available (from the receive loop), they are
-        forwarded directly to avoid re-encoding the identical message.
+        Per AB.5.3, the hub rewrites VMAC headers before forwarding:
+
+        - **Unicast (AB.5.3.2):** Sets Originating VMAC to the sender's VMAC
+          and removes the Destination VMAC.
+        - **Broadcast (AB.5.3.3):** Sets Originating VMAC to the sender's
+          VMAC and keeps the Destination VMAC as the broadcast address.
         """
         if source.peer_vmac is None:
             return
@@ -272,16 +280,20 @@ class SCHubFunction:
             )
             return
 
+        # Rewrite raw bytes for hub forwarding (AB.5.3)
+        source_mac = source.peer_vmac.address
         if msg.destination and not msg.destination.is_broadcast:
             if __debug__ and logger.isEnabledFor(_DEBUG):
                 logger.debug(
                     "SC hub routing unicast from %s to %s", source.peer_vmac, msg.destination
                 )
-            await self._unicast(msg, source.peer_vmac, raw)
+            forwarded = _rewrite_for_hub_unicast(raw, source_mac) if raw else None
+            await self._unicast(msg, source.peer_vmac, forwarded)
         else:
             if __debug__ and logger.isEnabledFor(_DEBUG):
                 logger.debug("SC hub routing broadcast from %s", source.peer_vmac)
-            await self._broadcast(msg, source.peer_vmac, raw)
+            forwarded = _rewrite_for_hub_broadcast(raw, source_mac) if raw else None
+            await self._broadcast(msg, source.peer_vmac, forwarded)
 
     async def _unicast(self, msg: SCMessage, exclude: SCVMAC, raw: bytes | None = None) -> None:
         """Forward unicast message to destination VMAC.
@@ -292,11 +304,13 @@ class SCHubFunction:
             return
         dest_conn = self._connections.get(msg.destination)
         if dest_conn and dest_conn.state == SCConnectionState.CONNECTED:
-            with contextlib.suppress(Exception):
+            try:
                 if raw is not None:
                     await dest_conn.send_raw(raw)
                 else:
                     await dest_conn.send_message(msg)
+            except Exception:
+                logger.debug("Hub unicast to %s failed", msg.destination, exc_info=True)
 
     async def _broadcast(self, msg: SCMessage, exclude: SCVMAC, raw: bytes | None = None) -> None:
         """Send message to all connected nodes except the source.
@@ -312,8 +326,10 @@ class SCHubFunction:
             if vmac != exclude and conn.state == SCConnectionState.CONNECTED
         ]
         if len(targets) == 1:
-            with contextlib.suppress(Exception):
+            try:
                 await targets[0].send_raw(encoded)
+            except Exception:
+                logger.debug("Hub broadcast to single target failed", exc_info=True)
         elif targets:
             # Phase 1: buffer writes synchronously (no await)
             needs_drain = []
@@ -322,10 +338,90 @@ class SCHubFunction:
                     if conn.write_raw_no_drain(encoded):
                         needs_drain.append(conn)
                 except Exception:
-                    pass
+                    logger.debug("Hub broadcast buffer write failed", exc_info=True)
             # Phase 2: drain all concurrently
             if needs_drain:
                 await asyncio.gather(
                     *(conn.drain() for conn in needs_drain),
                     return_exceptions=True,
                 )
+
+
+# ---------------------------------------------------------------------------
+# Hub forwarding byte rewriters (AB.5.3)
+# ---------------------------------------------------------------------------
+
+# Control flag bit positions (AB.2.2)
+_ORIGINATING_VMAC = 0x08
+_DESTINATION_VMAC = 0x04
+_OPTIONS_MASK = 0x03  # bits 0-1: data_options, dest_options
+
+
+def _rewrite_for_hub_unicast(raw: bytes | None, source_vmac: bytes) -> bytes | None:
+    """Rewrite raw BVLC-SC bytes for hub unicast forwarding (AB.5.3.2).
+
+    Sets Originating VMAC to the source peer's VMAC and removes the
+    Destination VMAC.  Preserves message function, message ID, header
+    options, and payload.
+    """
+    if raw is None or len(raw) < 4:
+        return raw
+
+    flags = raw[1] & 0x0F
+    offset = 4  # skip function(1) + flags(1) + message_id(2)
+
+    # Skip existing VMAC fields to find where options+payload start
+    if flags & _ORIGINATING_VMAC:
+        offset += 6
+    if flags & _DESTINATION_VMAC:
+        offset += 6
+
+    # New flags: Originating VMAC only + preserve options flag bits
+    new_flags = (flags & _OPTIONS_MASK) | _ORIGINATING_VMAC
+
+    # Build: header(4) + originating_vmac(6) + rest
+    rest_len = len(raw) - offset
+    result = bytearray(10 + rest_len)
+    result[0] = raw[0]
+    result[1] = new_flags
+    result[2] = raw[2]
+    result[3] = raw[3]
+    result[4:10] = source_vmac
+    if rest_len:
+        result[10:] = raw[offset:]
+    return bytes(result)
+
+
+def _rewrite_for_hub_broadcast(raw: bytes | None, source_vmac: bytes) -> bytes | None:
+    """Rewrite raw BVLC-SC bytes for hub broadcast forwarding (AB.5.3.3).
+
+    Sets Originating VMAC to the source peer's VMAC and sets the
+    Destination VMAC to the broadcast address (``FF:FF:FF:FF:FF:FF``).
+    Preserves message function, message ID, header options, and payload.
+    """
+    if raw is None or len(raw) < 4:
+        return raw
+
+    flags = raw[1] & 0x0F
+    offset = 4
+
+    if flags & _ORIGINATING_VMAC:
+        offset += 6
+    if flags & _DESTINATION_VMAC:
+        offset += 6
+
+    # New flags: Originating + Destination VMAC + preserve options flags
+    new_flags = (flags & _OPTIONS_MASK) | _ORIGINATING_VMAC | _DESTINATION_VMAC
+
+    # Build: header(4) + originating_vmac(6) + broadcast_vmac(6) + rest
+    rest_len = len(raw) - offset
+    result = bytearray(16 + rest_len)
+    result[0] = raw[0]
+    result[1] = new_flags
+    result[2] = raw[2]
+    result[3] = raw[3]
+    result[4:10] = source_vmac
+    result[10:16] = VMAC_BROADCAST
+    if rest_len:
+        result[16:] = raw[offset:]
+    return bytes(result)

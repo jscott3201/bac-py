@@ -1,9 +1,13 @@
-"""BACnet Secure Connect (BACnet/SC) hub server example.
+"""BACnet Secure Connect (BACnet/SC) low-level hub example.
 
-Starts an SC hub that accepts WebSocket connections from SC nodes and
-routes traffic between them.  The hub also acts as an SC node itself,
-registering objects in an ``ObjectDatabase`` that can be read by
-connected clients.
+Starts an SC hub using the lower-level ``SCTransport`` API with a manual
+``on_receive`` callback.  The hub accepts WebSocket connections from SC
+nodes and routes traffic between them, but APDU dispatch is not wired up
+(see the ``TODO`` in ``on_receive``).
+
+For the high-level approach with full APDU dispatch (ReadProperty,
+WriteProperty, Who-Is, etc.), see ``sc_server.py`` which uses
+``BACnetApplication`` and ``DefaultServerHandlers``.
 
 Optionally enables the node switch for direct peer-to-peer connections,
 bypassing the hub for unicast traffic between nodes that have resolved

@@ -163,13 +163,17 @@ class SegmentSender:
                 f"at most {peer_max_segments}"
             )
             logger.warning(
-                f"segment count exceeded: {len(segments)} segments, "
-                f"peer max={peer_max_segments}, invoke_id={invoke_id}"
+                "segment count exceeded: %d segments, peer max=%s, invoke_id=%d",
+                len(segments),
+                peer_max_segments,
+                invoke_id,
             )
             raise SegmentationError(AbortReason.APDU_TOO_LONG, msg)
         logger.debug(
-            f"segmented send created: invoke_id={invoke_id} "
-            f"segments={len(segments)} window={proposed_window_size}"
+            "segmented send created: invoke_id=%d segments=%d window=%d",
+            invoke_id,
+            len(segments),
+            proposed_window_size,
         )
         return cls(
             segments=segments,
@@ -192,9 +196,11 @@ class SegmentSender:
             more_follows = idx < last_idx
             result.append((seq_num, self.segments[idx], more_follows))
         logger.debug(
-            f"fill_window: invoke_id={self.invoke_id} "
-            f"segments={len(result)}/{self.total_segments} "
-            f"window_size={self.actual_window_size}"
+            "fill_window: invoke_id=%d segments=%d/%d window_size=%d",
+            self.invoke_id,
+            len(result),
+            self.total_segments,
+            self.actual_window_size,
         )
         return result
 
@@ -217,8 +223,10 @@ class SegmentSender:
         if negative:
             # Re-send from the segment after the last successfully received
             logger.debug(
-                f"negative ack: invoke_id={self.invoke_id} "
-                f"seq={ack_seq}, resending from idx={acked_idx + 1}"
+                "negative ack: invoke_id=%d seq=%d, resending from idx=%d",
+                self.invoke_id,
+                ack_seq,
+                acked_idx + 1,
             )
             self._window_start_idx = acked_idx + 1
         else:
@@ -227,8 +235,9 @@ class SegmentSender:
 
         if self.is_complete:
             logger.info(
-                f"segmented send complete: invoke_id={self.invoke_id} "
-                f"segments={self.total_segments}"
+                "segmented send complete: invoke_id=%d segments=%d",
+                self.invoke_id,
+                self.total_segments,
             )
         return self.is_complete
 
@@ -351,8 +360,11 @@ class SegmentReceiver:
                 logger.warning("Reassembly size exceeds %d bytes, aborting", _MAX_REASSEMBLY_SIZE)
                 return (SegmentAction.ABORT, -1)
             logger.debug(
-                f"segment {seq_num}/{self.actual_window_size} received, "
-                f"idx={abs_idx}, more_follows={more_follows}"
+                "segment %d/%d received, idx=%d, more_follows=%s",
+                seq_num,
+                self.actual_window_size,
+                abs_idx,
+                more_follows,
             )
 
             if not more_follows:

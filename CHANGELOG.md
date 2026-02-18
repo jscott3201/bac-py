@@ -5,6 +5,60 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.3] - 2026-02-18
+
+### Added
+
+- **SC server example** (`examples/sc_server.py`): BACnet/SC server using
+  `BACnetApplication` and `DefaultServerHandlers` with an SC hub function
+  for full APDU dispatch (ReadProperty, WriteProperty, Who-Is, etc.).
+  This is the high-level approach to running an SC server.
+- **IPv6 server example** (`examples/ipv6_server.py`): BACnet/IPv6 server
+  using `BACnetApplication` and `DefaultServerHandlers`.
+- **Ethernet server example** (`examples/ethernet_server.py`): BACnet
+  Ethernet (Clause 7) server using `BACnetApplication` and
+  `DefaultServerHandlers` with platform notes for Linux and macOS.
+- **Docker SC server role** (`docker/entrypoint.py`): New `run_sc_server()`
+  function and `"sc-server"` role dispatch using `BACnetApplication` with
+  SC transport, matching the pattern of `run_server()` and `run_server_ipv6()`.
+- **`Client` transport parameters**: `Client` constructor now accepts
+  `sc_config`, `ethernet_interface`, and `ethernet_mac` parameters for
+  selecting BACnet/SC and Ethernet transports directly.
+- **Top-level SC exports**: `SCHubConfig` and `SCTLSConfig` are now
+  importable directly from `bac_py` (lazy-loaded like `SCTransport`).
+- **Top-level Ethernet export**: `EthernetTransport` is now importable
+  directly from `bac_py`.
+
+### Changed
+
+- **Renamed `ipv6_client_server.py` → `ipv6_client.py`**: The example was
+  client-only with no server component. Updated docstring to reference the
+  new `ipv6_server.py` for the server counterpart.
+- **Updated SC example docstrings**: `secure_connect.py` and
+  `secure_connect_hub.py` now clarify they are **low-level** examples and
+  point to `sc_server.py` for the high-level `BACnetApplication` approach.
+
+### Documentation
+
+- **User guide: transport-setup.rst** — Added high-level `DeviceConfig`-based
+  server examples for IPv6, Ethernet, and SC transports. Existing low-level
+  transport examples retained with clarified headings.
+- **User guide: secure-connect.rst** — Added "High-Level Integration" section
+  showing `DeviceConfig(sc_config=...)` and `Client(sc_config=...)`. Clarified
+  "Quick Start" and "Hub Function" sections as low-level API.
+- **User guide: client-guide.rst** — Added "Transport Options" section
+  documenting `Client` constructor parameters for IPv6, SC, and Ethernet.
+- **User guide: server-mode.rst** — Added `ipv6`, `sc_config`,
+  `ethernet_interface`, and `ethernet_mac` to the DeviceConfig Options section
+  with mutual exclusion note.
+- **User guide: getting-started.rst** — Added transport selection examples
+  to the Configuration section (IPv6, SC, Ethernet).
+- **User guide: examples.rst** — Updated example count (23 → 26), added
+  documentation entries for `sc_server.py`, `ipv6_server.py`, and
+  `ethernet_server.py`. Added Ethernet section.
+- **README.md** — Updated example table entry for renamed `ipv6_client.py`.
+- **Test count**: `test_example_count` updated to `>= 25` (26 total examples).
+
 ## [1.5.2] - 2026-02-16
 
 ### Fixed

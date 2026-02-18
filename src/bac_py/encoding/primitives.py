@@ -332,6 +332,9 @@ def decode_bit_string(data: memoryview | bytes) -> BitString:
         msg = "BitString data too short: need at least 1 byte for unused-bits count"
         raise ValueError(msg)
     unused_bits = data[0]
+    if unused_bits > 7:
+        msg = f"BitString unused_bits must be 0-7, got {unused_bits}"
+        raise ValueError(msg)
     return BitString(bytes(data[1:]), unused_bits)
 
 

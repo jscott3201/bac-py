@@ -344,6 +344,33 @@ The default multicast group is ``ff02::bac0`` (link-local). Use
    ) as client:
        ...
 
+IPv6 server
+^^^^^^^^^^^^
+
+Run a BACnet/IPv6 server with full APDU dispatch using ``DeviceConfig``:
+
+.. code-block:: python
+
+   from bac_py import BACnetApplication, DefaultServerHandlers, DeviceConfig, DeviceObject
+
+   config = DeviceConfig(
+       instance_number=100,
+       name="IPv6-Server",
+       ipv6=True,
+   )
+
+   async with BACnetApplication(config) as app:
+       device = DeviceObject(instance_number=100, object_name="IPv6-Server",
+                             vendor_name="ACME", vendor_identifier=999)
+       app.object_db.add(device)
+       # ... add objects ...
+
+       handlers = DefaultServerHandlers(app, app.object_db, device)
+       handlers.register()
+       await app.run()
+
+See ``examples/ipv6_server.py`` for a complete example.
+
 IPv6 foreign device
 ^^^^^^^^^^^^^^^^^^^^
 
@@ -387,8 +414,46 @@ BACnet Ethernet (ISO 8802-3)
 -----------------------------
 
 Raw Ethernet transport for legacy BACnet installations using IEEE 802.3
-frames with 802.2 LLC headers (Clause 7). This is a low-level transport that
-bypasses IP entirely.
+frames with 802.2 LLC headers (Clause 7). This is a transport that
+bypasses IP entirely, sending BACnet packets directly on the LAN.
+
+Platform requirements:
+
+- **Linux**: ``AF_PACKET`` / ``SOCK_RAW`` (requires ``CAP_NET_RAW`` or root)
+- **macOS**: BPF devices (``/dev/bpf*``); requires explicit ``ethernet_mac``
+
+Ethernet server
+^^^^^^^^^^^^^^^^
+
+Run a BACnet Ethernet server with full APDU dispatch using ``DeviceConfig``:
+
+.. code-block:: python
+
+   from bac_py import BACnetApplication, DefaultServerHandlers, DeviceConfig, DeviceObject
+
+   config = DeviceConfig(
+       instance_number=100,
+       name="Ethernet-Server",
+       ethernet_interface="eth0",
+       # ethernet_mac=b"\x00\x11\x22\x33\x44\x55",  # required on macOS
+   )
+
+   async with BACnetApplication(config) as app:
+       device = DeviceObject(instance_number=100, object_name="Ethernet-Server",
+                             vendor_name="ACME", vendor_identifier=999)
+       app.object_db.add(device)
+       # ... add objects ...
+
+       handlers = DefaultServerHandlers(app, app.object_db, device)
+       handlers.register()
+       await app.run()
+
+See ``examples/ethernet_server.py`` for a complete example.
+
+Low-level transport
+^^^^^^^^^^^^^^^^^^^^
+
+For direct transport access without ``BACnetApplication``:
 
 .. code-block:: python
 
@@ -399,11 +464,6 @@ bypasses IP entirely.
        mac_address=b"\x00\x11\x22\x33\x44\x55",  # optional on Linux
    )
    await transport.start()
-
-Platform requirements:
-
-- **Linux**: ``AF_PACKET`` / ``SOCK_RAW`` (requires ``CAP_NET_RAW``)
-- **macOS**: BPF devices (``/dev/bpf*``)
 
 Ethernet MAC addresses are supported in address strings:
 
@@ -423,10 +483,80 @@ BACnet Secure Connect (Annex AB)
 
 BACnet/SC replaces broadcast UDP with TLS-secured WebSocket connections in a
 hub-and-spoke topology. It traverses firewalls and NAT without BBMD
-infrastructure.
+infrastructure. Install the ``secure`` extra: ``pip install bac-py[secure]``.
 
-SC client (hub connector)
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+SC server with BACnetApplication
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The recommended approach: run an SC hub with full APDU dispatch using
+``DeviceConfig(sc_config=...)``:
+
+.. code-block:: python
+
+   from bac_py import BACnetApplication, DefaultServerHandlers, DeviceConfig, DeviceObject
+   from bac_py.transport.sc import SCTransportConfig
+   from bac_py.transport.sc.hub_function import SCHubConfig
+   from bac_py.transport.sc.tls import SCTLSConfig
+
+   tls = SCTLSConfig(
+       ca_certificates_path="/path/to/ca.pem",
+       certificate_path="/path/to/hub.pem",
+       private_key_path="/path/to/hub.key",
+   )
+
+   config = DeviceConfig(
+       instance_number=100,
+       name="SC-Server",
+       sc_config=SCTransportConfig(
+           hub_function_config=SCHubConfig(
+               bind_address="0.0.0.0",
+               bind_port=8443,
+               tls_config=tls,
+           ),
+           tls_config=tls,
+       ),
+   )
+
+   async with BACnetApplication(config) as app:
+       device = DeviceObject(instance_number=100, object_name="SC-Server",
+                             vendor_name="ACME", vendor_identifier=999)
+       app.object_db.add(device)
+       # ... add objects ...
+
+       handlers = DefaultServerHandlers(app, app.object_db, device)
+       handlers.register()
+       await app.run()
+
+See ``examples/sc_server.py`` for a complete example.
+
+SC client with Client
+^^^^^^^^^^^^^^^^^^^^^^
+
+Connect to an existing SC hub using the high-level ``Client``:
+
+.. code-block:: python
+
+   from bac_py import Client
+   from bac_py.transport.sc import SCTransportConfig
+   from bac_py.transport.sc.tls import SCTLSConfig
+
+   sc_config = SCTransportConfig(
+       primary_hub_uri="wss://hub.example.com:8443",
+       tls_config=SCTLSConfig(
+           ca_certificates_path="/path/to/ca.pem",
+           certificate_path="/path/to/device.pem",
+           private_key_path="/path/to/device.key",
+       ),
+   )
+
+   async with Client(instance_number=999, sc_config=sc_config) as client:
+       devices = await client.discover(timeout=5.0)
+       value = await client.read("...", "ai,1", "pv")
+
+SC client (low-level hub connector)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For direct transport access without ``BACnetApplication``:
 
 Connect to an existing SC hub:
 
@@ -447,10 +577,11 @@ Connect to an existing SC hub:
    await transport.start()
    await transport.hub_connector.wait_connected(timeout=10.0)
 
-SC hub server
-^^^^^^^^^^^^^
+SC hub server (low-level)
+^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Run a hub that accepts connections from SC nodes:
+Run a hub using the low-level transport API (no APDU dispatch -- use the
+``BACnetApplication`` approach above for a full server):
 
 .. code-block:: python
 

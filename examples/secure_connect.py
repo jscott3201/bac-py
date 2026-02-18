@@ -1,9 +1,12 @@
-"""BACnet Secure Connect (BACnet/SC) client example.
+"""BACnet Secure Connect (BACnet/SC) low-level client example.
 
 Connects to an SC hub over WebSocket/TLS and sends a ReadProperty
 request to a remote SC device addressed by its VMAC.  This demonstrates
-the lower-level ``SCTransport`` API since the high-level ``Client``
-does not yet integrate with SC transport.
+the lower-level ``SCTransport`` API with manual NPDU/APDU construction.
+
+For the high-level approach using ``BACnetApplication`` with full APDU
+dispatch, see ``sc_server.py``.  The high-level ``Client`` also supports
+SC via ``Client(sc_config=...)``.
 
 TLS certificate setup
 ~~~~~~~~~~~~~~~~~~~~~~

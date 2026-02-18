@@ -749,8 +749,10 @@ class EventEngine:
         transition = ctx.state_machine.evaluate(event_result, fault_result, now)
         if transition is not None:
             logger.info(
-                f"event state transition {enrollment.object_identifier}: "
-                f"{transition.from_state} -> {transition.to_state}"
+                "event state transition %s: %s -> %s",
+                enrollment.object_identifier,
+                transition.from_state,
+                transition.to_state,
             )
             self._dispatch_notification(enrollment, transition, event_type, fault_result)
 
@@ -845,8 +847,10 @@ class EventEngine:
         transition = ctx.state_machine.evaluate(event_result, fault_result, now)
         if transition is not None:
             logger.info(
-                f"event state transition {obj.object_identifier}: "
-                f"{transition.from_state} -> {transition.to_state}"
+                "event state transition %s: %s -> %s",
+                obj.object_identifier,
+                transition.from_state,
+                transition.to_state,
             )
             self._dispatch_intrinsic_notification(obj, transition, event_type, fault_result)
 

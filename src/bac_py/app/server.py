@@ -403,7 +403,10 @@ class DefaultServerHandlers:
 
         obj_id = self._resolve_object_id(request.object_identifier)
         logger.debug(
-            f"handling read_property {obj_id} {request.property_identifier.name} from {source}"
+            "handling read_property %s %s from %s",
+            obj_id,
+            request.property_identifier.name,
+            source,
         )
 
         obj = self._db.get(obj_id)
@@ -450,7 +453,10 @@ class DefaultServerHandlers:
 
         obj_id = self._resolve_object_id(request.object_identifier)
         logger.debug(
-            f"handling write_property {obj_id} {request.property_identifier.name} from {source}"
+            "handling write_property %s %s from %s",
+            obj_id,
+            request.property_identifier.name,
+            source,
         )
 
         obj = self._db.get(obj_id)
@@ -465,8 +471,10 @@ class DefaultServerHandlers:
             write_value = decode_and_unwrap(request.property_value)
         except (ValueError, IndexError):
             logger.warning(
-                f"write_property: invalid data type for {obj_id}"
-                f" {request.property_identifier.name} from {source}"
+                "write_property: invalid data type for %s %s from %s",
+                obj_id,
+                request.property_identifier.name,
+                source,
             )
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.INVALID_DATA_TYPE) from None
 
@@ -556,7 +564,8 @@ class DefaultServerHandlers:
         cov_manager = self._app.cov_manager
         if cov_manager is None:
             logger.warning(
-                f"subscribe_cov_property: COV not supported, denied request from {source}"
+                "subscribe_cov_property: COV not supported, denied request from %s",
+                source,
             )
             raise BACnetError(ErrorClass.SERVICES, ErrorCode.SERVICE_REQUEST_DENIED)
         cov_manager.subscribe_property(source, request, self._db)
@@ -579,7 +588,8 @@ class DefaultServerHandlers:
         cov_manager = self._app.cov_manager
         if cov_manager is None:
             logger.warning(
-                f"subscribe_cov_property_multiple: COV not supported, denied request from {source}"
+                "subscribe_cov_property_multiple: COV not supported, denied request from %s",
+                source,
             )
             raise BACnetError(ErrorClass.SERVICES, ErrorCode.SERVICE_REQUEST_DENIED)
         cov_manager.subscribe_property_multiple(source, request, self._db)
@@ -641,7 +651,10 @@ class DefaultServerHandlers:
         """
         request = WhoIsRequest.decode(data)
         logger.debug(
-            f"handling who_is low={request.low_limit} high={request.high_limit} from {source}"
+            "handling who_is low=%s high=%s from %s",
+            request.low_limit,
+            request.high_limit,
+            source,
         )
         instance = self._device.object_identifier.instance_number
 
@@ -775,8 +788,9 @@ class DefaultServerHandlers:
         """
         request = ReadPropertyMultipleRequest.decode(data)
         logger.debug(
-            f"handling read_property_multiple"
-            f" ({len(request.list_of_read_access_specs)} specs) from {source}"
+            "handling read_property_multiple (%d specs) from %s",
+            len(request.list_of_read_access_specs),
+            source,
         )
 
         results: list[ReadAccessResult] = []
@@ -860,8 +874,9 @@ class DefaultServerHandlers:
 
         request = WritePropertyMultipleRequest.decode(data)
         logger.debug(
-            f"handling write_property_multiple"
-            f" ({len(request.list_of_write_access_specs)} specs) from {source}"
+            "handling write_property_multiple (%d specs) from %s",
+            len(request.list_of_write_access_specs),
+            source,
         )
 
         # Pass 1: Validate all writes (object existence, property access)
@@ -878,8 +893,10 @@ class DefaultServerHandlers:
                 prop_def = obj.PROPERTY_DEFINITIONS.get(pv.property_identifier)
                 if prop_def is None:
                     logger.warning(
-                        f"write_property_multiple: unknown property"
-                        f" {pv.property_identifier.name} on {obj_id} from {source}"
+                        "write_property_multiple: unknown property %s on %s from %s",
+                        pv.property_identifier.name,
+                        obj_id,
+                        source,
                     )
                     raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
                 if prop_def.access == PropertyAccess.READ_ONLY and not (
@@ -887,8 +904,10 @@ class DefaultServerHandlers:
                     and obj._properties.get(PropertyIdentifier.OUT_OF_SERVICE) is True
                 ):
                     logger.warning(
-                        f"write_property_multiple: write access denied for"
-                        f" {pv.property_identifier.name} on {obj_id} from {source}"
+                        "write_property_multiple: write access denied for %s on %s from %s",
+                        pv.property_identifier.name,
+                        obj_id,
+                        source,
                     )
                     raise BACnetError(ErrorClass.PROPERTY, ErrorCode.WRITE_ACCESS_DENIED)
             validated.append((obj, spec.list_of_properties))
@@ -935,7 +954,10 @@ class DefaultServerHandlers:
 
         obj_id = self._resolve_object_id(request.object_identifier)
         logger.debug(
-            f"handling read_range {obj_id} {request.property_identifier.name} from {source}"
+            "handling read_range %s %s from %s",
+            obj_id,
+            request.property_identifier.name,
+            source,
         )
         obj = self._db.get(obj_id)
         if obj is None:
@@ -950,8 +972,9 @@ class DefaultServerHandlers:
 
         if not isinstance(value, list):
             logger.warning(
-                f"read_range: property {request.property_identifier.name}"
-                f" on {obj_id} is not a list"
+                "read_range: property %s on %s is not a list",
+                request.property_identifier.name,
+                obj_id,
             )
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.PROPERTY_IS_NOT_A_LIST)
 
@@ -1300,8 +1323,10 @@ class DefaultServerHandlers:
         """
         request = CreateObjectRequest.decode(data)
         logger.debug(
-            f"handling create_object type={request.object_type}"
-            f" id={request.object_identifier} from {source}"
+            "handling create_object type=%s id=%s from %s",
+            request.object_type,
+            request.object_identifier,
+            source,
         )
 
         if request.object_identifier is not None:
@@ -1384,7 +1409,10 @@ class DefaultServerHandlers:
         request = AddListElementRequest.decode(data)
         obj_id = self._resolve_object_id(request.object_identifier)
         logger.debug(
-            f"handling add_list_element {obj_id} {request.property_identifier.name} from {source}"
+            "handling add_list_element %s %s from %s",
+            obj_id,
+            request.property_identifier.name,
+            source,
         )
 
         obj = self._db.get(obj_id)
@@ -1395,15 +1423,19 @@ class DefaultServerHandlers:
         prop_def = obj.PROPERTY_DEFINITIONS.get(request.property_identifier)
         if prop_def is None:
             logger.warning(
-                f"add_list_element: unknown property"
-                f" {request.property_identifier.name} on {obj_id} from {source}"
+                "add_list_element: unknown property %s on %s from %s",
+                request.property_identifier.name,
+                obj_id,
+                source,
             )
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
 
         if prop_def.access == PropertyAccess.READ_ONLY:
             logger.warning(
-                f"add_list_element: write access denied for"
-                f" {request.property_identifier.name} on {obj_id} from {source}"
+                "add_list_element: write access denied for %s on %s from %s",
+                request.property_identifier.name,
+                obj_id,
+                source,
             )
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.WRITE_ACCESS_DENIED)
 
@@ -1414,8 +1446,9 @@ class DefaultServerHandlers:
                 obj._properties[request.property_identifier] = current
             else:
                 logger.warning(
-                    f"add_list_element: property {request.property_identifier.name}"
-                    f" on {obj_id} is not a list"
+                    "add_list_element: property %s on %s is not a list",
+                    request.property_identifier.name,
+                    obj_id,
                 )
                 raise BACnetError(ErrorClass.PROPERTY, ErrorCode.PROPERTY_IS_NOT_A_LIST)
 
@@ -1444,8 +1477,10 @@ class DefaultServerHandlers:
         request = RemoveListElementRequest.decode(data)
         obj_id = self._resolve_object_id(request.object_identifier)
         logger.debug(
-            f"handling remove_list_element {obj_id}"
-            f" {request.property_identifier.name} from {source}"
+            "handling remove_list_element %s %s from %s",
+            obj_id,
+            request.property_identifier.name,
+            source,
         )
 
         obj = self._db.get(obj_id)
@@ -1456,23 +1491,28 @@ class DefaultServerHandlers:
         prop_def = obj.PROPERTY_DEFINITIONS.get(request.property_identifier)
         if prop_def is None:
             logger.warning(
-                f"remove_list_element: unknown property"
-                f" {request.property_identifier.name} on {obj_id} from {source}"
+                "remove_list_element: unknown property %s on %s from %s",
+                request.property_identifier.name,
+                obj_id,
+                source,
             )
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.UNKNOWN_PROPERTY)
 
         if prop_def.access == PropertyAccess.READ_ONLY:
             logger.warning(
-                f"remove_list_element: write access denied for"
-                f" {request.property_identifier.name} on {obj_id} from {source}"
+                "remove_list_element: write access denied for %s on %s from %s",
+                request.property_identifier.name,
+                obj_id,
+                source,
             )
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.WRITE_ACCESS_DENIED)
 
         current = obj._properties.get(request.property_identifier)
         if not isinstance(current, list):
             logger.warning(
-                f"remove_list_element: property {request.property_identifier.name}"
-                f" on {obj_id} is not a list"
+                "remove_list_element: property %s on %s is not a list",
+                request.property_identifier.name,
+                obj_id,
             )
             raise BACnetError(ErrorClass.PROPERTY, ErrorCode.PROPERTY_IS_NOT_A_LIST)
 
@@ -1500,15 +1540,18 @@ class DefaultServerHandlers:
         """
         request = AcknowledgeAlarmRequest.decode(data)
         logger.debug(
-            f"handling acknowledge_alarm {request.event_object_identifier}"
-            f" state={request.event_state_acknowledged.name} from {source}"
+            "handling acknowledge_alarm %s state=%s from %s",
+            request.event_object_identifier,
+            request.event_state_acknowledged.name,
+            source,
         )
 
         obj = self._db.get(request.event_object_identifier)
         if obj is None:
             logger.warning(
-                f"acknowledge_alarm: unknown object"
-                f" {request.event_object_identifier} from {source}"
+                "acknowledge_alarm: unknown object %s from %s",
+                request.event_object_identifier,
+                source,
             )
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
 
@@ -1816,8 +1859,10 @@ class DefaultServerHandlers:
         """
         request = WhoHasRequest.decode(data)
         logger.debug(
-            f"handling who_has id={request.object_identifier}"
-            f" name={request.object_name} from {source}"
+            "handling who_has id=%s name=%s from %s",
+            request.object_identifier,
+            request.object_name,
+            source,
         )
         instance = self._device.object_identifier.instance_number
 
@@ -2081,7 +2126,9 @@ class DefaultServerHandlers:
         sessions = getattr(self._app, "_vt_sessions", {})
         if request.vt_session_identifier not in sessions:
             logger.warning(
-                f"vt_data: unknown VT session {request.vt_session_identifier} from {source}"
+                "vt_data: unknown VT session %d from %s",
+                request.vt_session_identifier,
+                source,
             )
             raise BACnetError(ErrorClass.VT, ErrorCode.UNKNOWN_VT_SESSION)
         logger.debug(
@@ -2117,7 +2164,9 @@ class DefaultServerHandlers:
         obj = self._db.get(request.audit_log)
         if obj is None or not isinstance(obj, AuditLogObject):
             logger.warning(
-                f"audit_log_query: unknown or invalid audit log {request.audit_log} from {source}"
+                "audit_log_query: unknown or invalid audit log %s from %s",
+                request.audit_log,
+                source,
             )
             raise BACnetError(ErrorClass.OBJECT, ErrorCode.UNKNOWN_OBJECT)
 

@@ -14,9 +14,28 @@ customization.
 Basic Server Setup
 ------------------
 
-Host a BACnet server that exposes local objects to the network. Server mode
-uses :class:`~bac_py.app.application.BACnetApplication` and
-:class:`~bac_py.app.server.DefaultServerHandlers` directly:
+Every bac-py server follows the same four-step pattern regardless of
+transport:
+
+1. Create a :class:`~bac_py.app.application.DeviceConfig` (transport
+   selection happens here)
+2. Start a :class:`~bac_py.app.application.BACnetApplication`
+3. Populate the :class:`~bac_py.objects.base.ObjectDatabase` with a
+   :class:`~bac_py.objects.device.DeviceObject` and application objects
+4. Register :class:`~bac_py.app.server.DefaultServerHandlers` for APDU
+   dispatch
+
+The transport is determined entirely by ``DeviceConfig`` — the object
+creation, handler registration, and lifecycle management are identical
+across BACnet/IP, IPv6, SC, and Ethernet.
+
+
+.. _server-bip:
+
+BACnet/IP server (default)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The default transport. Uses UDP on port 47808 with broadcast discovery:
 
 .. code-block:: python
 
@@ -31,6 +50,9 @@ uses :class:`~bac_py.app.application.BACnetApplication` and
            name="My-Device",
            vendor_name="ACME",
            vendor_id=999,
+           interface="0.0.0.0",          # bind address (all interfaces)
+           port=0xBAC0,                   # UDP 47808
+           broadcast_address="255.255.255.255",  # or subnet-directed, e.g. "192.168.1.255"
        )
 
        async with BACnetApplication(config) as app:
@@ -58,6 +80,197 @@ uses :class:`~bac_py.app.application.BACnetApplication` and
            await app.run()
 
    asyncio.run(serve())
+
+
+.. _server-ipv6:
+
+BACnet/IPv6 server
+^^^^^^^^^^^^^^^^^^^
+
+BACnet/IPv6 (Annex U) uses UDP over IPv6 with multicast discovery and 3-byte
+VMAC addressing. Set ``ipv6=True`` on ``DeviceConfig`` — everything else
+is identical to BACnet/IP:
+
+.. code-block:: python
+
+   async def serve_ipv6():
+       config = DeviceConfig(
+           instance_number=100,
+           name="My-IPv6-Device",
+           vendor_name="ACME",
+           vendor_id=999,
+           ipv6=True,
+           # interface="::" is the default when ipv6=True (all interfaces)
+           # port=0xBAC0 is the default (47808)
+           # multicast_address="ff02::bac0" is the default (link-local)
+           # vmac=None auto-generates a 3-byte VMAC
+       )
+
+       async with BACnetApplication(config) as app:
+           device = DeviceObject(
+               instance_number=100,
+               object_name="My-IPv6-Device",
+               vendor_name="ACME",
+               vendor_identifier=999,
+           )
+           app.object_db.add(device)
+           # ... add objects ...
+
+           handlers = DefaultServerHandlers(app, app.object_db, device)
+           handlers.register()
+           await app.run()
+
+   asyncio.run(serve_ipv6())
+
+Use ``multicast_address="ff05::bac0"`` for site-local scope (reaches beyond
+the link). Provide an explicit ``vmac`` (3 bytes) if you need a stable
+address across restarts.
+
+See ``examples/ipv6_server.py`` for a complete example.
+
+
+.. _server-sc:
+
+BACnet/SC server
+^^^^^^^^^^^^^^^^^
+
+BACnet Secure Connect (Annex AB) uses TLS-secured WebSockets in a
+hub-and-spoke topology. An SC server typically runs the **hub function** so
+that SC nodes can connect to it. Pass an ``SCTransportConfig`` with a
+``hub_function_config`` to ``DeviceConfig``:
+
+.. code-block:: python
+
+   from bac_py.transport.sc import SCTransportConfig
+   from bac_py.transport.sc.hub_function import SCHubConfig
+   from bac_py.transport.sc.tls import SCTLSConfig
+
+   async def serve_sc():
+       tls = SCTLSConfig(
+           ca_certificates_path="/path/to/ca.pem",
+           certificate_path="/path/to/hub.pem",
+           private_key_path="/path/to/hub.key",
+       )
+
+       config = DeviceConfig(
+           instance_number=100,
+           name="My-SC-Hub",
+           vendor_name="ACME",
+           vendor_id=999,
+           sc_config=SCTransportConfig(
+               hub_function_config=SCHubConfig(
+                   bind_address="0.0.0.0",
+                   bind_port=8443,
+                   tls_config=tls,
+               ),
+               tls_config=tls,
+           ),
+       )
+
+       async with BACnetApplication(config) as app:
+           device = DeviceObject(
+               instance_number=100,
+               object_name="My-SC-Hub",
+               vendor_name="ACME",
+               vendor_identifier=999,
+           )
+           app.object_db.add(device)
+           # ... add objects ...
+
+           handlers = DefaultServerHandlers(app, app.object_db, device)
+           handlers.register()
+           await app.run()
+
+   asyncio.run(serve_sc())
+
+Key ``SCTransportConfig`` fields for server mode:
+
+- ``hub_function_config`` — required for a server that accepts node
+  connections. Omit this (and set ``primary_hub_uri``) for a node that
+  *connects to* an existing hub.
+- ``tls_config`` — TLS 1.3 certificate configuration. Use
+  ``SCTLSConfig(allow_plaintext=True)`` only for testing.
+- ``primary_hub_uri`` — leave empty (``""``) when this node *is* the hub.
+  Set it to connect to another hub as a client simultaneously (hub chaining).
+
+For testing without TLS certificates:
+
+.. code-block:: python
+
+   config = DeviceConfig(
+       instance_number=100,
+       name="SC-Test-Hub",
+       sc_config=SCTransportConfig(
+           hub_function_config=SCHubConfig(
+               bind_address="0.0.0.0",
+               bind_port=4443,
+               tls_config=SCTLSConfig(allow_plaintext=True),
+           ),
+           tls_config=SCTLSConfig(allow_plaintext=True),
+       ),
+   )
+
+See ``examples/sc_server.py`` for a complete example and
+:doc:`secure-connect` for TLS certificate generation, failover, and VMAC
+addressing.
+
+
+.. _server-ethernet:
+
+BACnet Ethernet server
+^^^^^^^^^^^^^^^^^^^^^^^
+
+BACnet Ethernet (Clause 7) sends BACnet packets directly over IEEE 802.3
+frames with 802.2 LLC headers, bypassing IP entirely. Set
+``ethernet_interface`` on ``DeviceConfig``:
+
+.. code-block:: python
+
+   async def serve_ethernet():
+       config = DeviceConfig(
+           instance_number=100,
+           name="My-Ethernet-Device",
+           vendor_name="ACME",
+           vendor_id=999,
+           ethernet_interface="eth0",
+           # ethernet_mac=b"\x02\x42\xAC\x11\x00\x02",  # required on macOS
+       )
+
+       async with BACnetApplication(config) as app:
+           device = DeviceObject(
+               instance_number=100,
+               object_name="My-Ethernet-Device",
+               vendor_name="ACME",
+               vendor_identifier=999,
+           )
+           app.object_db.add(device)
+           # ... add objects ...
+
+           handlers = DefaultServerHandlers(app, app.object_db, device)
+           handlers.register()
+           await app.run()
+
+   asyncio.run(serve_ethernet())
+
+Platform requirements:
+
+- **Linux** — raw sockets require ``CAP_NET_RAW`` or root. The MAC address
+  is auto-detected from the interface.
+- **macOS** — requires a BPF device (``/dev/bpf*``), typically root. You
+  **must** provide an explicit ``ethernet_mac`` because BPF does not
+  expose the interface MAC address directly.
+
+See ``examples/ethernet_server.py`` for a complete example.
+
+
+Transport-independent wiring
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Because transport selection is isolated in ``DeviceConfig``, the rest of
+your server code — object creation, handler registration, engines, custom
+handlers — is identical across all four transports. You can switch transports
+by changing only the ``DeviceConfig``, which makes it straightforward to
+support multiple deployment environments from a single codebase.
 
 ``DefaultServerHandlers.register()`` installs handlers for all standard
 BACnet server services. The server will respond to Who-Is with I-Am,
@@ -97,7 +310,16 @@ network parameters, and security:
        broadcast_address="255.255.255.255",  # Directed broadcast address
        password="secret123",          # Optional password for DCC/ReinitializeDevice
        router_config=None,            # Multi-network router (see below)
+       ipv6=False,                    # Use BACnet/IPv6 (Annex U) transport
+       sc_config=None,                # BACnet/SC transport config (Annex AB)
+       ethernet_interface=None,       # Ethernet interface, e.g. "eth0" (Clause 7)
+       ethernet_mac=None,             # Explicit 6-byte MAC (auto-detected on Linux)
    )
+
+**Transport selection** -- ``ipv6``, ``sc_config``, and ``ethernet_interface``
+are mutually exclusive.  When none are set, the default BACnet/IP (UDP)
+transport is used.  See :doc:`transport-setup` for transport configuration
+details and examples for each transport type.
 
 The ``password`` field (1--20 characters) is used by the
 DeviceCommunicationControl and ReinitializeDevice handlers. When set, incoming
@@ -206,7 +428,7 @@ intrinsic reporting.
 Supported Object Types
 ----------------------
 
-bac-py includes 40+ object types covering the full BACnet standard:
+bac-py includes 62 object types covering the full BACnet standard:
 
 **Sensing:** AnalogInput, BinaryInput, MultiStateInput
 

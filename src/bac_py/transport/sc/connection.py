@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from dataclasses import dataclass
 from enum import IntEnum
 from typing import TYPE_CHECKING
@@ -105,6 +106,7 @@ class SCConnection:
         # Internal tasks
         self._receive_task: asyncio.Task[None] | None = None
         self._heartbeat_task: asyncio.Task[None] | None = None
+        self._last_recv_time: float = 0.0
 
     @property
     def state(self) -> SCConnectionState:
@@ -384,6 +386,7 @@ class SCConnection:
     # ------------------------------------------------------------------
 
     def _start_background_tasks(self) -> None:
+        self._last_recv_time = time.monotonic()
         self._receive_task = asyncio.create_task(self._receive_loop())
         if self._role == SCConnectionRole.INITIATING:
             self._heartbeat_task = asyncio.create_task(self._heartbeat_loop())
@@ -406,7 +409,14 @@ class SCConnection:
         try:
             while self._state == SCConnectionState.CONNECTED and self._ws is not None:
                 raw = await self._ws.recv()
-                msg = SCMessage.decode(raw, skip_payload=self._hub_mode)
+                self._last_recv_time = time.monotonic()
+                try:
+                    msg = SCMessage.decode(raw, skip_payload=self._hub_mode)
+                except ValueError as exc:
+                    # Send BVLC-Result NAK for malformed messages (AB.3.1.5)
+                    logger.warning("SC connection %s malformed message: %s", self._local_vmac, exc)
+                    await self._send_decode_error_nak(raw, str(exc))
+                    continue
                 await self._handle_message(msg, raw)
         except asyncio.CancelledError:
             raise
@@ -454,13 +464,65 @@ class SCConnection:
                 except Exception as exc:
                     logger.error("on_message callback error: %s", exc, exc_info=True)
 
+    # Response message functions that SHALL NOT generate BVLC-Result (AB.3.1.4)
+    _RESPONSE_FUNCTIONS = frozenset(
+        {
+            BvlcSCFunction.BVLC_RESULT,
+            BvlcSCFunction.CONNECT_ACCEPT,
+            BvlcSCFunction.DISCONNECT_ACK,
+            BvlcSCFunction.HEARTBEAT_ACK,
+            BvlcSCFunction.ADDRESS_RESOLUTION_ACK,
+        }
+    )
+
+    async def _send_decode_error_nak(self, raw: bytes, error: str) -> None:
+        """Send a BVLC-Result NAK for a malformed message (AB.3.1.5).
+
+        Attempts to extract the BVLC function from the first byte.
+        Skips NAK if the message appears to be a response type (AB.3.1.4).
+        """
+        if self._ws is None:
+            return
+        # Try to extract the BVLC function
+        for_function = BvlcSCFunction.BVLC_RESULT
+        if raw:
+            with contextlib.suppress(ValueError):
+                for_function = BvlcSCFunction(raw[0])
+        # Response messages SHALL NOT generate BVLC-Result responses
+        if for_function in self._RESPONSE_FUNCTIONS:
+            return
+        nak = BvlcResultPayload(
+            for_function=for_function,
+            result_code=SCResultCode.NAK,
+            error_header_marker=0x00,
+            error_class=_ERROR_CLASS_COMMUNICATION,
+            error_code=0,
+            error_details=error[:128],
+        ).encode()
+        nak_msg = SCMessage(BvlcSCFunction.BVLC_RESULT, message_id=0, payload=nak)
+        with contextlib.suppress(OSError, ConnectionError):
+            await self._ws.send(nak_msg.encode())
+
     async def _heartbeat_loop(self) -> None:
-        """Periodic heartbeat (initiating peer only, AB.6.3)."""
+        """Periodic heartbeat (initiating peer only, AB.6.3).
+
+        Per the spec, a heartbeat is sent only if no BVLC message was
+        received within the heartbeat timeout.  The timer is reset each
+        time ``_receive_loop`` records a message arrival.
+        """
         try:
             while self._state == SCConnectionState.CONNECTED and self._ws is not None:
-                await asyncio.sleep(self._config.heartbeat_timeout)
+                # Compute time until next heartbeat is needed
+                elapsed = time.monotonic() - self._last_recv_time
+                remaining = self._config.heartbeat_timeout - elapsed
+                if remaining > 0:
+                    await asyncio.sleep(remaining)
                 if self._state != SCConnectionState.CONNECTED or self._ws is None:
                     break
+                # Re-check: a message may have arrived during the sleep
+                elapsed = time.monotonic() - self._last_recv_time
+                if elapsed < self._config.heartbeat_timeout:
+                    continue
                 hb = SCMessage(
                     BvlcSCFunction.HEARTBEAT_REQUEST,
                     message_id=self._next_msg_id(),

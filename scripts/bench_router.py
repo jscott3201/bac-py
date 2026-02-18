@@ -513,8 +513,14 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     )
     await router_app.start()
 
-    port1_port = router_app._transports[0].local_address.port
-    port2_port = router_app._transports[1].local_address.port
+    from bac_py.transport.bip import BIPTransport
+
+    t0 = router_app._transports[0]
+    t1 = router_app._transports[1]
+    assert isinstance(t0, BIPTransport)
+    assert isinstance(t1, BIPTransport)
+    port1_port = t0.local_address.port
+    port2_port = t1.local_address.port
     router_port1_mac = router_app._transports[0].local_mac
     log(f"  Router started: net {net1} on :{port1_port}, net {net2} on :{port2_port}\n")
 

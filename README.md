@@ -5,7 +5,7 @@
 [![License](https://img.shields.io/github/license/jscott3201/bac-py)](LICENSE)
 [![CI](https://github.com/jscott3201/bac-py/actions/workflows/ci.yml/badge.svg)](https://github.com/jscott3201/bac-py/actions/workflows/ci.yml)
 
-Asynchronous BACnet/IP protocol library for Python 3.13+, implementing ASHRAE Standard 135-2020. Zero required runtime dependencies, built on native `asyncio`.
+Asynchronous BACnet protocol library for Python 3.13+, implementing ASHRAE Standard 135-2020 with four transports: BACnet/IP, BACnet/IPv6, BACnet Secure Connect, and BACnet Ethernet. Zero required runtime dependencies, built on native `asyncio`.
 
 [Documentation](https://jscott3201.github.io/bac-py/) | [Getting Started](https://jscott3201.github.io/bac-py/getting-started.html) | [API Reference](https://jscott3201.github.io/bac-py/api/app/index.html) | [Changelog](https://jscott3201.github.io/bac-py/changelog.html)
 
@@ -21,6 +21,7 @@ async with Client(instance_number=999) as client:
 - [Features](#features)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Transports](#transports)
 - [API Levels](#api-levels)
 - [Configuration](#configuration)
 - [Architecture](#architecture)
@@ -35,7 +36,7 @@ async with Client(instance_number=999) as client:
 |----------|-----------|
 | **Transports** | BACnet/IP (Annex J), BACnet/IPv6 with BBMD and foreign device (Annex U), BACnet Ethernet (Clause 7), BACnet Secure Connect over WebSocket/TLS 1.3 (Annex AB) |
 | **Client & Server** | Full-duplex -- serve objects and issue requests from the same application |
-| **Object Model** | 40+ object types with property definitions, priority arrays, and commandable outputs |
+| **Object Model** | 62 object types with property definitions, priority arrays, and commandable outputs |
 | **Services** | All confirmed and unconfirmed services including COV, alarms, file access, audit logging, and private transfer |
 | **Event Reporting** | All 18 event algorithms, intrinsic reporting, NotificationClass routing with day/time filtering |
 | **Engines** | Schedule evaluation, trend logging (polled/COV/triggered), and audit record generation |
@@ -43,7 +44,7 @@ async with Client(instance_number=999) as client:
 | **Convenience API** | String-based addressing (`"ai,1"`, `"pv"`), smart type coercion, auto-discovery |
 | **Serialization** | `to_dict()`/`from_dict()` on all data types; optional `orjson` backend |
 | **Conformance** | BIBB declarations and PICS generation per Clause 24 |
-| **Quality** | 6,425+ unit tests, Docker integration tests, local benchmarks, type-safe enums and frozen dataclasses throughout |
+| **Quality** | 6,475+ unit tests, Docker integration tests, local benchmarks, type-safe enums and frozen dataclasses throughout |
 
 ## Installation
 
@@ -203,6 +204,90 @@ The server automatically handles ReadProperty, WriteProperty,
 ReadPropertyMultiple, WritePropertyMultiple, ReadRange, Who-Is, COV
 subscriptions, device management, file access, and object management.
 
+## Transports
+
+bac-py supports four BACnet transports. The transport is selected via
+`Client(...)` or `DeviceConfig(...)` parameters -- all BACnet services work
+identically regardless of transport.
+
+### BACnet/IP (default)
+
+Standard UDP transport on port 47808. No extra dependencies.
+
+```python
+async with Client(instance_number=999) as client:
+    value = await client.read("192.168.1.100", "ai,1", "pv")
+```
+
+### BACnet/IPv6
+
+IPv6 transport with multicast discovery (Annex U). No extra dependencies.
+
+```python
+async with Client(instance_number=999, ipv6=True) as client:
+    devices = await client.discover(timeout=3.0)
+```
+
+### BACnet Secure Connect
+
+TLS 1.3 WebSocket hub-and-spoke topology (Annex AB). Requires `pip install bac-py[secure]`.
+
+```python
+from bac_py.transport.sc import SCTransportConfig
+from bac_py.transport.sc.tls import SCTLSConfig
+
+sc_config = SCTransportConfig(
+    primary_hub_uri="wss://hub.example.com:8443",
+    tls_config=SCTLSConfig(
+        ca_certificates_path="ca.pem",
+        certificate_path="device.pem",
+        private_key_path="device.key",
+    ),
+)
+async with Client(instance_number=999, sc_config=sc_config) as client:
+    devices = await client.discover(timeout=5.0)
+```
+
+### BACnet Ethernet
+
+Raw IEEE 802.3/802.2 LLC frames (Clause 7). Requires root/CAP_NET_RAW on
+Linux or BPF access on macOS. No extra dependencies.
+
+```python
+async with Client(instance_number=999, ethernet_interface="eth0") as client:
+    value = await client.read("01:02:03:04:05:06", "ai,1", "pv")
+```
+
+### Server Transport Selection
+
+The same transport options work for servers via `DeviceConfig`:
+
+```python
+# IPv6 server
+config = DeviceConfig(instance_number=100, ipv6=True)
+
+# BACnet/SC server (hub + node)
+from bac_py.transport.sc import SCTransportConfig
+from bac_py.transport.sc.hub_function import SCHubConfig
+from bac_py.transport.sc.tls import SCTLSConfig
+
+config = DeviceConfig(
+    instance_number=100,
+    sc_config=SCTransportConfig(
+        hub_function_config=SCHubConfig(
+            bind_address="0.0.0.0", bind_port=8443, tls_config=tls,
+        ),
+        tls_config=tls,
+    ),
+)
+
+# Ethernet server
+config = DeviceConfig(instance_number=100, ethernet_interface="eth0")
+```
+
+See the [Transport Setup Guide](https://jscott3201.github.io/bac-py/guide/transport-setup.html)
+and [Server Mode Guide](https://jscott3201.github.io/bac-py/guide/server-mode.html) for full details.
+
 ## API Levels
 
 bac-py offers two API levels:
@@ -255,6 +340,10 @@ config = DeviceConfig(
     apdu_timeout=6000,            # Request timeout (ms)
     apdu_retries=3,               # Retry count
     max_segments=None,            # Max segments (None = unlimited)
+    # Transport selection (mutually exclusive):
+    # ipv6=True,                  # BACnet/IPv6 (Annex U)
+    # sc_config=SCTransportConfig(...),  # BACnet Secure Connect (Annex AB)
+    # ethernet_interface="eth0",  # BACnet Ethernet (Clause 7)
 )
 ```
 
@@ -285,7 +374,7 @@ src/bac_py/
                   event engine, schedule engine, trend log engine, audit manager
   encoding/       ASN.1/BER tag-length-value encoding and APDU codec
   network/        Addressing, NPDU network layer, multi-port router
-  objects/        40+ BACnet object types with property definitions
+  objects/        62 BACnet object types with property definitions
   segmentation/   Segmented message assembly and transmission
   serialization/  JSON serialization (optional orjson backend)
   services/       Service request/response types and handler registry
@@ -323,9 +412,10 @@ from bac_py.services.errors import (
 
 ## Examples
 
-The [`examples/`](examples/) directory contains 23 runnable scripts. See the
-[Examples Guide](https://jscott3201.github.io/bac-py/guide/examples.html) for
-detailed walkthroughs.
+The [`examples/`](examples/) directory contains 26 runnable scripts covering
+client operations, server setup across all transports, and advanced features.
+See the [Examples Guide](https://jscott3201.github.io/bac-py/guide/examples.html)
+for detailed walkthroughs.
 
 | File | Description |
 |------|-------------|
@@ -346,17 +436,20 @@ detailed walkthroughs.
 | `audit_log.py` | Query audit log records with pagination |
 | `router_discovery.py` | Discover routers and remote networks |
 | `foreign_device.py` | Register as foreign device via BBMD |
-| `secure_connect.py` | Connect to a BACnet/SC hub and exchange NPDUs |
-| `secure_connect_hub.py` | Run a BACnet/SC hub with object serving |
-| `ip_to_sc_router.py` | Bridge BACnet/IP and BACnet/SC networks |
-| `ipv6_client_server.py` | BACnet/IPv6 client and server with foreign device |
-| `interactive_cli.py` | Menu-driven interactive CLI for exploring the full API |
+| `ipv6_client.py` | BACnet/IPv6 client with multicast discovery |
+| `ipv6_server.py` | BACnet/IPv6 server with BACnetApplication |
+| `ethernet_server.py` | BACnet Ethernet server with BACnetApplication |
+| `sc_server.py` | BACnet/SC server (hub + full APDU dispatch) |
+| `secure_connect.py` | Low-level SC hub connection and NPDU exchange |
+| `secure_connect_hub.py` | Low-level SC hub with manual message relay |
 | `sc_generate_certs.py` | Generate test PKI and demonstrate TLS-secured SC |
+| `ip_to_sc_router.py` | Bridge BACnet/IP and BACnet/SC networks |
+| `interactive_cli.py` | Menu-driven interactive CLI for exploring the full API |
 
 ## Testing
 
 ```bash
-make test          # 6,425+ unit tests
+make test          # 6,475+ unit tests
 make lint          # ruff check + format verification
 make typecheck     # mypy
 make docs          # sphinx-build

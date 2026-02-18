@@ -53,6 +53,41 @@ is accessible via ``client.app``.
        ack = await client.read_property(addr, oid, PropertyIdentifier.PRESENT_VALUE)
 
 
+.. _client-transport-options:
+
+Transport Options
+------------------
+
+``Client`` supports all bac-py transports via constructor parameters.
+These are mutually exclusive -- at most one transport selector should be set:
+
+.. code-block:: python
+
+   # BACnet/IP (default)
+   async with Client(instance_number=999) as client: ...
+
+   # BACnet/IPv6 (Annex U)
+   async with Client(instance_number=999, ipv6=True) as client: ...
+
+   # BACnet/SC (Annex AB) -- requires bac-py[secure]
+   from bac_py.transport.sc import SCTransportConfig
+   from bac_py.transport.sc.tls import SCTLSConfig
+
+   sc_config = SCTransportConfig(
+       primary_hub_uri="wss://hub.example.com:8443",
+       tls_config=SCTLSConfig(...),
+   )
+   async with Client(instance_number=999, sc_config=sc_config) as client: ...
+
+   # BACnet Ethernet (Clause 7) -- requires root/CAP_NET_RAW
+   async with Client(
+       instance_number=999,
+       ethernet_interface="eth0",
+   ) as client: ...
+
+See :doc:`transport-setup` for detailed transport configuration.
+
+
 .. _capabilities-at-a-glance:
 
 Capabilities at a Glance

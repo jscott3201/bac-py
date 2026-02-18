@@ -77,10 +77,67 @@ Each node is identified by a :class:`~bac_py.transport.sc.types.DeviceUUID`
 within the SC network.
 
 
-Quick Start: Connecting to a Hub
----------------------------------
+High-Level Integration
+-----------------------
 
-The simplest BACnet/SC setup connects a single node to an existing hub:
+BACnet/SC is fully integrated into :class:`~bac_py.app.application.BACnetApplication`
+and :class:`~bac_py.client.Client`.  Pass an ``SCTransportConfig`` to
+``DeviceConfig(sc_config=...)`` or ``Client(sc_config=...)`` and the SC
+transport replaces BACnet/IP transparently -- all services, objects, and
+encoding work identically.
+
+**SC server** -- run a hub with full APDU dispatch (ReadProperty, WriteProperty,
+Who-Is, etc.):
+
+.. code-block:: python
+
+   from bac_py import BACnetApplication, DeviceConfig
+   from bac_py.transport.sc import SCTransportConfig
+   from bac_py.transport.sc.hub_function import SCHubConfig
+   from bac_py.transport.sc.tls import SCTLSConfig
+
+   tls = SCTLSConfig(ca_certificates_path="ca.pem",
+                      certificate_path="hub.pem",
+                      private_key_path="hub.key")
+
+   config = DeviceConfig(
+       instance_number=100,
+       sc_config=SCTransportConfig(
+           hub_function_config=SCHubConfig(bind_address="0.0.0.0", bind_port=8443,
+                                           tls_config=tls),
+           tls_config=tls,
+       ),
+   )
+   app = BACnetApplication(config)
+   await app.start()
+
+See ``examples/sc_server.py`` for a complete server example.
+
+**SC client** -- connect to an existing hub and use the convenience API:
+
+.. code-block:: python
+
+   from bac_py import Client
+   from bac_py.transport.sc import SCTransportConfig
+   from bac_py.transport.sc.tls import SCTLSConfig
+
+   sc_config = SCTransportConfig(
+       primary_hub_uri="wss://hub.example.com:8443",
+       tls_config=SCTLSConfig(ca_certificates_path="ca.pem",
+                               certificate_path="device.pem",
+                               private_key_path="device.key"),
+   )
+   async with Client(instance_number=999, sc_config=sc_config) as client:
+       devices = await client.discover(timeout=5.0)
+
+The rest of this guide covers the lower-level ``SCTransport`` API for advanced
+use cases (manual NPDU/APDU construction, custom callbacks, etc.).
+
+
+Quick Start: Connecting to a Hub (Low-Level)
+---------------------------------------------
+
+The low-level approach connects directly to a hub via ``SCTransport``:
 
 .. code-block:: python
 
@@ -115,10 +172,12 @@ connection, TLS handshake, VMAC assignment, and BVLC-SC message framing
 transparently.
 
 
-Hub Function: Running Your Own Hub
------------------------------------
+Hub Function: Running Your Own Hub (Low-Level)
+------------------------------------------------
 
-To run a BACnet/SC hub that accepts connections from other nodes, use the
+To run a BACnet/SC hub using the low-level transport API (without APDU
+dispatch -- see `High-Level Integration`_ above for the recommended
+approach), use the
 :class:`~bac_py.transport.sc.SCTransport` with a
 :class:`~bac_py.transport.sc.hub_function.SCHubConfig`:
 

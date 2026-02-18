@@ -1,7 +1,7 @@
 Objects
 =======
 
-BACnet object model with 40+ object types as frozen dataclasses. Each object
+BACnet object model with 62 object types as frozen dataclasses. Each object
 defines its standard properties, default values, and read/write access control.
 Objects are hosted in an :class:`~bac_py.objects.base.ObjectDatabase` registry
 for server-side use.

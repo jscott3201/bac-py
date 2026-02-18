@@ -192,6 +192,98 @@ async def run_server_ipv6() -> None:
     await app.stop()
 
 
+async def run_sc_server() -> None:
+    """Run a BACnet/SC server with sample objects using BACnetApplication."""
+    from bac_py.app.application import BACnetApplication, DeviceConfig
+    from bac_py.app.server import DefaultServerHandlers
+    from bac_py.objects.analog import AnalogInputObject, AnalogOutputObject, AnalogValueObject
+    from bac_py.objects.binary import BinaryInputObject, BinaryValueObject
+    from bac_py.objects.device import DeviceObject
+    from bac_py.transport.sc import SCTransportConfig
+    from bac_py.transport.sc.hub_function import SCHubConfig
+    from bac_py.types.enums import EngineeringUnits
+
+    instance = int(os.environ.get("DEVICE_INSTANCE", "100"))
+    bind_address = os.environ.get("BIND_ADDRESS", "0.0.0.0")
+    bind_port = int(os.environ.get("BIND_PORT", "4443"))
+    tls_config = _build_sc_tls_config()
+
+    sc_config = SCTransportConfig(
+        hub_function_config=SCHubConfig(
+            bind_address=bind_address,
+            bind_port=bind_port,
+            tls_config=tls_config,
+        ),
+        tls_config=tls_config,
+    )
+
+    config = DeviceConfig(
+        instance_number=instance,
+        name=f"Docker-SC-Device-{instance}",
+        sc_config=sc_config,
+    )
+    app = BACnetApplication(config)
+    await app.start()
+
+    device = DeviceObject(
+        instance,
+        object_name=f"Docker-SC-Device-{instance}",
+        vendor_name="bac-py",
+        vendor_identifier=0,
+        model_name="bac-py-docker-sc",
+        firmware_revision=bac_py.__version__,
+        application_software_version=bac_py.__version__,
+    )
+    app.object_db.add(device)
+
+    ai = AnalogInputObject(
+        1,
+        object_name="Temperature",
+        present_value=72.5,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+    )
+    ao = AnalogOutputObject(
+        1,
+        object_name="Setpoint-Output",
+        present_value=68.0,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+    )
+    av = AnalogValueObject(
+        1,
+        object_name="Setpoint",
+        present_value=70.0,
+        units=EngineeringUnits.DEGREES_FAHRENHEIT,
+        commandable=True,
+    )
+    bi = BinaryInputObject(1, object_name="Occupancy")
+    bv = BinaryValueObject(1, object_name="Override", commandable=True)
+
+    for obj in (ai, ao, av, bi, bv):
+        app.object_db.add(obj)
+
+    handlers = DefaultServerHandlers(app, app.object_db, device)
+    handlers.register()
+
+    tls_label = "TLS" if not tls_config.allow_plaintext else "plaintext"
+    logger.info(
+        "SC server running: device %d on %s:%d (%s)",
+        instance,
+        bind_address,
+        bind_port,
+        tls_label,
+    )
+    _write_healthy()
+
+    stop = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stop.set)
+    await stop.wait()
+
+    logger.info("Shutting down SC server...")
+    await app.stop()
+
+
 async def run_bbmd() -> None:
     """Run a BACnet server with BBMD enabled."""
     from bac_py.app.application import BACnetApplication, DeviceConfig
@@ -213,7 +305,7 @@ async def run_bbmd() -> None:
     await app.start()
 
     # Attach BBMD functionality (empty BDT = foreign-device-only mode)
-    if app._transport is not None:
+    if app._transport is not None and hasattr(app._transport, "attach_bbmd"):
         await app._transport.attach_bbmd()
         logger.info("BBMD attached on port %d", port)
 
@@ -1034,6 +1126,8 @@ def main() -> None:
         asyncio.run(run_bbmd())
     elif role == "router":
         asyncio.run(run_router())
+    elif role == "sc-server":
+        asyncio.run(run_sc_server())
     elif role == "sc-cert-gen":
         run_sc_cert_gen()
     elif role == "sc-hub":
@@ -1061,8 +1155,8 @@ def main() -> None:
     else:
         logger.error(
             "Unknown ROLE: %r (expected: server, server-ipv6, server-extended, "
-            "stress-server, bbmd, router, router-bip-sc, sc-cert-gen, sc-hub, "
-            "sc-node, sc-npdu-echo, test, stress, sc-stress, router-stress, "
+            "stress-server, bbmd, router, router-bip-sc, sc-server, sc-cert-gen, "
+            "sc-hub, sc-node, sc-npdu-echo, test, stress, sc-stress, router-stress, "
             "bbmd-stress, thermostat, demo-client)",
             role,
         )

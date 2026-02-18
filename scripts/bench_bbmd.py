@@ -494,7 +494,7 @@ async def _run(args: argparse.Namespace) -> dict[str, Any]:
     log(f"  Server started on {server_addr} (instance={server_instance})\n")
 
     # Attach BBMD
-    if app._transport is not None:
+    if app._transport is not None and hasattr(app._transport, "attach_bbmd"):
         await app._transport.attach_bbmd()
         log(f"  BBMD attached on port {actual_port}\n")
 

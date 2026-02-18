@@ -73,6 +73,7 @@ if TYPE_CHECKING:
     from bac_py.services.who_is import IAmRequest
     from bac_py.services.write_group import GroupChannelValue
     from bac_py.services.write_property_multiple import WriteAccessSpecification
+    from bac_py.transport.sc import SCTransportConfig
     from bac_py.types.audit_types import AuditQueryBySource, AuditQueryByTarget
     from bac_py.types.constructed import BACnetTimeStamp
     from bac_py.types.enums import (
@@ -136,6 +137,9 @@ class Client:
         ipv6: bool = False,
         multicast_address: str = "",
         vmac: bytes | None = None,
+        sc_config: SCTransportConfig | None = None,
+        ethernet_interface: str | None = None,
+        ethernet_mac: bytes | None = None,
     ) -> None:
         """Create a BACnet client.
 
@@ -159,6 +163,14 @@ class Client:
             ``ff02::bac0`` when *ipv6* is ``True``.
         :param vmac: 3-byte VMAC for IPv6 transport. Auto-generated
             if ``None``.
+        :param sc_config: BACnet/SC transport configuration. When set,
+            uses SC transport instead of BIP. Mutually exclusive with
+            *ipv6*.
+        :param ethernet_interface: Network interface for BACnet Ethernet
+            (Clause 7) transport, e.g. ``"eth0"``. Mutually exclusive
+            with *ipv6* and *sc_config*.
+        :param ethernet_mac: Explicit 6-byte MAC for Ethernet transport.
+            Auto-detected if ``None``.
         """
         if config is None:
             iface = interface
@@ -172,6 +184,9 @@ class Client:
                 ipv6=ipv6,
                 multicast_address=multicast_address,
                 vmac=vmac,
+                sc_config=sc_config,
+                ethernet_interface=ethernet_interface,
+                ethernet_mac=ethernet_mac,
             )
         self._config = config
         self._bbmd_address = bbmd_address
