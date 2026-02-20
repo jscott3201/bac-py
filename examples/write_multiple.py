@@ -31,6 +31,15 @@ async def main() -> None:
             },
         )
 
+        # Write with a BACnet priority (1-16)
+        await client.write_multiple(
+            "192.168.1.100",
+            {
+                "av,1": {"pv": 68.0},
+            },
+            priority=8,
+        )
+
         # Verify the writes by reading back
         result = await client.read_multiple(
             "192.168.1.100",

@@ -1913,6 +1913,73 @@ class TestConvenienceWrappers:
         assert tag.number == 4  # Real
         assert decode_real(prop.value[offset : offset + tag.length]) == pytest.approx(72.5)
 
+    async def test_write_multiple_with_priority(self):
+        """write_multiple passes priority to every BACnetPropertyValue."""
+        from bac_py.services.write_property_multiple import WritePropertyMultipleRequest
+
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.write_multiple(
+            "192.168.1.100",
+            {"av,1": {"pv": 72.5}, "bo,1": {"pv": 1}},
+            priority=8,
+        )
+
+        call_kwargs = app.confirmed_request.call_args
+        service_data = call_kwargs.kwargs["service_data"]
+        req = WritePropertyMultipleRequest.decode(service_data)
+        for spec in req.list_of_write_access_specs:
+            for prop in spec.list_of_properties:
+                assert prop.priority == 8
+
+    async def test_write_multiple_without_priority(self):
+        """write_multiple without priority leaves BACnetPropertyValue.priority as None."""
+        from bac_py.services.write_property_multiple import WritePropertyMultipleRequest
+
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.write_multiple(
+            "192.168.1.100",
+            {"av,1": {"pv": 72.5}},
+        )
+
+        call_kwargs = app.confirmed_request.call_args
+        service_data = call_kwargs.kwargs["service_data"]
+        req = WritePropertyMultipleRequest.decode(service_data)
+        prop = req.list_of_write_access_specs[0].list_of_properties[0]
+        assert prop.priority is None
+
+    async def test_write_multiple_priority_roundtrip(self):
+        """Priority survives encode/decode round-trip."""
+        from bac_py.services.write_property_multiple import WritePropertyMultipleRequest
+
+        app = self._make_app()
+        client = BACnetClient(app)
+        app.confirmed_request.return_value = b""
+
+        await client.write_multiple(
+            "192.168.1.100",
+            {"av,1": {"pv": 99.0}},
+            priority=16,
+        )
+
+        call_kwargs = app.confirmed_request.call_args
+        service_data = call_kwargs.kwargs["service_data"]
+        req = WritePropertyMultipleRequest.decode(service_data)
+        prop = req.list_of_write_access_specs[0].list_of_properties[0]
+        assert prop.priority == 16
+        # Re-encode and decode again
+        re_encoded = req.encode()
+        req2 = WritePropertyMultipleRequest.decode(re_encoded)
+        prop2 = req2.list_of_write_access_specs[0].list_of_properties[0]
+        assert prop2.priority == 16
+        tag, offset = decode_tag(prop2.value, 0)
+        assert decode_real(prop2.value[offset : offset + tag.length]) == pytest.approx(99.0)
+
     # --- get_object_list fallback ---
 
     async def test_get_object_list_fallback_on_segmentation_abort(self):

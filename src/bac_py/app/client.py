@@ -747,6 +747,7 @@ class BACnetClient:
             str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
             dict[str | int | PropertyIdentifier, object],
         ],
+        priority: int | None = None,
         timeout: float | None = None,
     ) -> None:
         """Write multiple properties to multiple objects.
@@ -763,6 +764,9 @@ class BACnetClient:
                     "av,1": {"pv": 72.5, "object-name": "Zone Temp"},
                     "bo,1": {"pv": 1},
                 }
+        :param priority: Optional BACnet write priority (1--16).  Applied
+            uniformly to every property in *specs*.  For per-property
+            control use :meth:`write_property_multiple` directly.
         :param timeout: Optional caller-level timeout in seconds.
         :raises BACnetError: On Error-PDU response (first failing property).
         :raises BACnetRejectError: On Reject-PDU response.
@@ -777,6 +781,7 @@ class BACnetClient:
                     "av,1": {"pv": 72.5},
                     "bo,1": {"pv": 1},
                 },
+                priority=8,
             )
         """
         logger.debug("write_multiple %s values to %s", len(specs), address)
@@ -795,6 +800,7 @@ class BACnetClient:
                     BACnetPropertyValue(
                         property_identifier=prop_id,
                         value=encoded,
+                        priority=priority,
                     )
                 )
             write_specs.append(

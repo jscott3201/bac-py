@@ -766,6 +766,13 @@ class TestClientProtocolDelegation:
         await client.write_multiple("10.0.0.1", {"av,1": {"pv": 42.0}})
         mock.write_multiple.assert_called_once()
 
+    async def test_write_multiple_delegates_with_priority(self):
+        client, mock = _make_protocol_mock_client()
+        await client.write_multiple("10.0.0.1", {"av,1": {"pv": 42.0}}, priority=8)
+        mock.write_multiple.assert_called_once()
+        call_kwargs = mock.write_multiple.call_args
+        assert call_kwargs.kwargs["priority"] == 8
+
     async def test_get_object_list_delegates(self):
         client, mock = _make_protocol_mock_client()
         result = await client.get_object_list("10.0.0.1", 1)

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 
+import orjson
 import pytest
 
-from bac_py.serialization import Serializer, deserialize, get_serializer, serialize
+from bac_py.serialization import Serializer, deserialize, get_serializer, json_default, serialize
 from bac_py.serialization.json import JsonSerializer
+from bac_py.serialization.json import json_default as json_default_direct
 from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import (
     BACnetDate,
@@ -1173,3 +1175,138 @@ class TestJsonSerializerCoverageGaps:
         assert s._default(MyEnum.FOO) == 42
         assert s._default(MyEnum.BAR) == 99
         assert isinstance(s._default(MyEnum.FOO), int)
+
+
+# ---------------------------------------------------------------------------
+# json_default() public function tests
+# ---------------------------------------------------------------------------
+
+
+class TestJsonDefault:
+    """Test the public json_default() function directly."""
+
+    def test_importable_from_top_level(self):
+        from bac_py import json_default as jd
+
+        assert jd is json_default
+
+    def test_importable_from_serialization_json(self):
+        assert json_default_direct is json_default
+
+    def test_to_dict(self):
+        class Dummy:
+            def to_dict(self):
+                return {"key": "value"}
+
+        assert json_default(Dummy()) == {"key": "value"}
+
+    def test_bytes(self):
+        assert json_default(b"\xde\xad\xbe\xef") == "deadbeef"
+
+    def test_memoryview(self):
+        assert json_default(memoryview(b"\xca\xfe")) == "cafe"
+
+    def test_int_enum(self):
+        assert json_default(ObjectType.ANALOG_INPUT) == 0
+        assert isinstance(json_default(ObjectType.DEVICE), int)
+
+    def test_unknown_raises_type_error(self):
+        with pytest.raises(TypeError, match="Cannot serialize"):
+            json_default(object())
+
+
+class TestJsonDefaultStdlib:
+    """Test json_default() with stdlib json.dumps()."""
+
+    def test_bitstring(self):
+        bs = BitString(b"\xa4", unused_bits=2)
+        out = json.loads(json.dumps({"sf": bs}, default=json_default))
+        assert "bits" in out["sf"]
+        assert "unused_bits" in out["sf"]
+
+    def test_object_identifier(self):
+        oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 7)
+        out = json.loads(json.dumps(oid.to_dict()))
+        assert out == {"object_type": "analog-input", "instance": 7}
+        # Also via json_default wrapping
+        out2 = json.loads(json.dumps({"oid": oid}, default=json_default))
+        assert out2["oid"]["object_type"] == "analog-input"
+        assert out2["oid"]["instance"] == 7
+
+    def test_bacnet_date(self):
+        d = BACnetDate(year=0xFF, month=12, day=25, day_of_week=0xFF)
+        out = json.loads(json.dumps({"date": d}, default=json_default))
+        assert out["date"]["year"] is None
+        assert out["date"]["month"] == 12
+        assert out["date"]["day"] == 25
+        assert out["date"]["day_of_week"] is None
+
+    def test_bacnet_time(self):
+        t = BACnetTime(hour=14, minute=30, second=0, hundredth=50)
+        out = json.loads(json.dumps({"time": t}, default=json_default))
+        assert out["time"]["hour"] == 14
+        assert out["time"]["minute"] == 30
+
+    def test_int_enum(self):
+        out = json.loads(json.dumps({"type": ObjectType.DEVICE}, default=json_default))
+        assert out["type"] == 8
+
+    def test_bytes_hex(self):
+        out = json.loads(json.dumps({"raw": b"\xab\xcd"}, default=json_default))
+        assert out["raw"] == "abcd"
+
+    def test_nested_result(self):
+        """Simulated read_multiple() result dict with mixed types."""
+        result = {
+            "analog-input,1": {
+                "present-value": 72.5,
+                "status-flags": BitString(b"\x00", unused_bits=4),
+                "units": 62,
+                "object-name": "Zone Temp",
+            },
+            "device,100": {
+                "object-identifier": ObjectIdentifier(ObjectType.DEVICE, 100),
+                "firmware-revision": "1.5.3",
+            },
+        }
+        text = json.dumps(result, default=json_default)
+        out = json.loads(text)
+        assert out["analog-input,1"]["present-value"] == 72.5
+        assert out["analog-input,1"]["object-name"] == "Zone Temp"
+        assert isinstance(out["analog-input,1"]["status-flags"], dict)
+        assert out["device,100"]["object-identifier"]["instance"] == 100
+
+
+class TestJsonDefaultOrjson:
+    """Test json_default() with orjson.dumps()."""
+
+    def test_orjson_with_json_default(self):
+        data = {
+            "oid": ObjectIdentifier(ObjectType.ANALOG_INPUT, 1),
+            "raw": b"\xde\xad",
+            "type": ObjectType.BINARY_INPUT,
+        }
+        s = JsonSerializer()
+        out_internal = s.decode(s.encode(data))
+        out_orjson = orjson.loads(
+            orjson.dumps(data, default=json_default, option=orjson.OPT_NON_STR_KEYS)
+        )
+        assert out_orjson == out_internal
+
+    def test_orjson_nested_result(self):
+        result = {
+            "analog-input,1": {
+                "present-value": 72.5,
+                "status-flags": BitString(b"\x00", unused_bits=4),
+                "units": 62,
+                "object-name": "Zone Temp",
+            },
+            "device,100": {
+                "firmware-revision": "1.5.3",
+                "raw": b"\xab\xcd",
+            },
+        }
+        out = orjson.loads(orjson.dumps(result, default=json_default))
+        assert out["analog-input,1"]["present-value"] == 72.5
+        assert out["analog-input,1"]["object-name"] == "Zone Temp"
+        assert out["device,100"]["raw"] == "abcd"

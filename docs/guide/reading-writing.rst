@@ -143,6 +143,56 @@ multiple objects in a single request:
            "av,2": {"pv": 55.0},
        })
 
+Pass ``priority`` to apply a BACnet write priority (1--16) uniformly to every
+property in the request.  For per-property priority control, use the lower-level
+:meth:`~bac_py.app.client.BACnetClient.write_property_multiple` directly.
+
+.. code-block:: python
+
+   await client.write_multiple("192.168.1.100", {
+       "av,1": {"pv": 72.5},
+   }, priority=8)
+
+
+.. _json-serialization-guide:
+
+JSON Serialization
+------------------
+
+Read results often contain rich BACnet types (``BitString``,
+``ObjectIdentifier``, ``BACnetDate``, ``IntEnum`` subclasses, ``bytes``) that
+stdlib :func:`json.dumps` cannot serialize.  Use
+:func:`~bac_py.serialization.json.json_default` as the *default* argument:
+
+.. code-block:: python
+
+   import json
+   from bac_py import Client, json_default
+
+   async with Client(instance_number=999) as client:
+       result = await client.read_multiple("192.168.1.100", {
+           "ai,1": ["pv", "status", "units", "object-name"],
+       })
+       print(json.dumps(result, default=json_default, indent=2))
+
+If `orjson <https://github.com/ijl/orjson>`_ is installed
+(``pip install bac-py[serialization]``), the same function works as the
+*default* callback:
+
+.. code-block:: python
+
+   import orjson
+   from bac_py import json_default
+
+   data = orjson.dumps(result, default=json_default)
+
+``json_default`` handles:
+
+* Objects with a ``to_dict()`` method — returns the dict.
+* ``bytes`` / ``memoryview`` — returns a hex string.
+* ``IntEnum`` subclasses (``ObjectType``, ``PropertyIdentifier``, …) — returns
+  ``int``.
+
 
 .. _cov-subscriptions:
 

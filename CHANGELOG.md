@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.4] - 2026-02-20
+
+### Added
+
+- **`json_default()` function**: Public default handler for serializing BACnet
+  types with stdlib `json.dumps()` or `orjson.dumps()`.  Handles objects with
+  `to_dict()`, `bytes`/`memoryview` (→ hex string), and `IntEnum` subclasses
+  (→ `int`).  Importable from `bac_py` and `bac_py.serialization`.
+- **`write_multiple()` priority parameter**: Both `BACnetClient.write_multiple()`
+  and `Client.write_multiple()` now accept an optional `priority` (1--16)
+  that is applied uniformly to every property in the request.
+
 ## [1.5.3] - 2026-02-18
 
 ### Added

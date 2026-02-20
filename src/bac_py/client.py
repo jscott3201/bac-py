@@ -298,13 +298,16 @@ class Client:
             str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
             dict[str | int | PropertyIdentifier, object],
         ],
+        priority: int | None = None,
         timeout: float | None = None,
     ) -> None:
         """Write multiple properties to multiple objects.
 
         See :meth:`~bac_py.app.client.BACnetClient.write_multiple` for details.
         """
-        await self._require_client().write_multiple(address, specs, timeout=timeout)
+        await self._require_client().write_multiple(
+            address, specs, priority=priority, timeout=timeout
+        )
 
     async def get_object_list(
         self,

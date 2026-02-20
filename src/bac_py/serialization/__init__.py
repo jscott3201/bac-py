@@ -9,9 +9,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol, runtime_checkable
 
+from bac_py.serialization.json import json_default
+
 logger = logging.getLogger(__name__)
 
-__all__ = ["Serializer", "deserialize", "get_serializer", "serialize"]
+__all__ = ["Serializer", "deserialize", "get_serializer", "json_default", "serialize"]
 
 
 @runtime_checkable

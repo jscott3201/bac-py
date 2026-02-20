@@ -8,7 +8,7 @@ Typical usage::
         value = await client.read("192.168.1.100", "ai,1", "pv")
 """
 
-__version__ = "1.5.3"
+__version__ = "1.5.4"
 
 from bac_py.app.application import (
     BACnetApplication,
@@ -29,7 +29,7 @@ from bac_py.app.client import (
 from bac_py.app.server import DefaultServerHandlers
 from bac_py.client import Client
 from bac_py.objects.device import DeviceObject
-from bac_py.serialization import deserialize, serialize
+from bac_py.serialization import deserialize, json_default, serialize
 from bac_py.transport.ethernet import EthernetTransport
 
 __all__ = [
@@ -55,6 +55,7 @@ __all__ = [
     "__version__",
     "decode_cov_values",
     "deserialize",
+    "json_default",
     "serialize",
 ]
 

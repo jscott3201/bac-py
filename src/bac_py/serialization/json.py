@@ -6,9 +6,51 @@ import logging
 from enum import IntEnum
 from typing import Any
 
-import orjson
+try:
+    import orjson
+except ImportError:  # pragma: no cover
+    orjson = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
+
+
+def json_default(obj: object) -> object:
+    """Default handler for serializing BACnet types to JSON.
+
+    Use as the *default* argument to :func:`json.dumps` or
+    :func:`orjson.dumps` so that BACnet objects serialize automatically.
+
+    Handles:
+
+    * Objects with a ``to_dict()`` method (``BitString``, ``ObjectIdentifier``,
+      ``BACnetDate``, ``BACnetTime``, ``StatusFlags``, and all other BACnet
+      constructed types).
+    * ``bytes`` and ``memoryview`` → hex string.
+    * ``IntEnum`` subclasses (``ObjectType``, ``PropertyIdentifier``, …) → ``int``.
+
+    Example::
+
+        import json
+        from bac_py import json_default
+
+        result = await client.read_multiple(...)
+        print(json.dumps(result, default=json_default))
+
+    :param obj: The object to convert.
+    :returns: A JSON-serializable representation.
+    :raises TypeError: If *obj* is not a recognised type.
+    """
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+    if isinstance(obj, bytes):
+        return obj.hex()
+    if isinstance(obj, memoryview):
+        return bytes(obj).hex()
+    if isinstance(obj, IntEnum):
+        return int(obj)
+    msg = f"Cannot serialize {type(obj).__name__}"
+    logger.warning("serialize failed: %s", msg)
+    raise TypeError(msg)
 
 
 class JsonSerializer:
@@ -29,6 +71,9 @@ class JsonSerializer:
         pretty: bool = False,
         sort_keys: bool = False,
     ) -> None:
+        if orjson is None:  # pragma: no cover
+            msg = "orjson is required for JsonSerializer — install bac-py[serialization]"
+            raise ImportError(msg)
         self._options = orjson.OPT_NON_STR_KEYS
         if pretty:
             self._options |= orjson.OPT_INDENT_2
@@ -55,14 +100,4 @@ class JsonSerializer:
 
     def _default(self, obj: Any) -> Any:
         """Handle BACnet types that orjson cannot serialize natively."""
-        if hasattr(obj, "to_dict"):
-            return obj.to_dict()
-        if isinstance(obj, bytes):
-            return obj.hex()
-        if isinstance(obj, memoryview):
-            return bytes(obj).hex()
-        if isinstance(obj, IntEnum):
-            return int(obj)
-        msg = f"Cannot serialize {type(obj).__name__}"
-        logger.warning("serialize failed: %s", msg)
-        raise TypeError(msg)
+        return json_default(obj)
