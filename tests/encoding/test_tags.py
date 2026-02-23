@@ -314,6 +314,26 @@ class TestExtractContextValue:
         assert value == b""
         assert end_offset == len(buf)
 
+    def test_application_boolean_true(self):
+        """Application-tagged Boolean True (LVT=1, zero content octets)."""
+        # Boolean True: tag=1, APPLICATION, LVT=1 → single byte 0x11
+        bool_true = b"\x11"
+        buf = encode_opening_tag(3) + bool_true + encode_closing_tag(3)
+        _, offset = decode_tag(buf, 0)
+        value, end_offset = extract_context_value(buf, offset, 3)
+        assert value == bool_true
+        assert end_offset == len(buf)
+
+    def test_application_boolean_false(self):
+        """Application-tagged Boolean False (LVT=0, zero content octets)."""
+        # Boolean False: tag=1, APPLICATION, LVT=0 → single byte 0x10
+        bool_false = b"\x10"
+        buf = encode_opening_tag(3) + bool_false + encode_closing_tag(3)
+        _, offset = decode_tag(buf, 0)
+        value, end_offset = extract_context_value(buf, offset, 3)
+        assert value == bool_false
+        assert end_offset == len(buf)
+
     def test_missing_closing_tag_raises(self):
         """Missing closing tag raises ValueError."""
         buf = encode_opening_tag(3) + encode_tag(0, TagClass.APPLICATION, 1) + b"\x42"
@@ -337,7 +357,7 @@ class TestExtractContextValue:
 
     def test_memoryview_input(self):
         """Works with memoryview input."""
-        inner = encode_tag(1, TagClass.APPLICATION, 1) + b"\xff"
+        inner = encode_tag(2, TagClass.APPLICATION, 1) + b"\xff"
         buf = memoryview(encode_opening_tag(0) + inner + encode_closing_tag(0))
         _, offset = decode_tag(buf, 0)
         value, _ = extract_context_value(buf, offset, 0)

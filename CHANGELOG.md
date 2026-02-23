@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.6] - 2026-02-23
+
+### Fixed
+
+- **`extract_context_value()` Boolean True decode failure**: Fixed a bug where
+  `extract_context_value()` in `encoding/tags.py` failed with
+  `"Missing closing tag"` when the context-wrapped data contained an
+  application-tagged Boolean with value `True`. Per Clause 20.2.3,
+  application-tagged Booleans encode the value in the tag's L/V/T bits with zero
+  content octets, but the function was treating the L/V/T value as a content byte
+  count, advancing 1 byte too far and skipping past the closing tag. Boolean
+  `False` was unaffected (LVT=0 happened to produce correct advancement). This
+  caused any `ReadProperty` or `ReadPropertyMultiple` of a Boolean property set
+  to `True` (e.g. `log-enable`, `out-of-service`, `stop-when-full`) to fail on
+  the client side when decoding the response.
+
 ## [1.5.5] - 2026-02-23
 
 ### Changed
