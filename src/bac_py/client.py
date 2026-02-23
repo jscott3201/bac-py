@@ -709,9 +709,9 @@ class Client:
 
     async def read_property(
         self,
-        address: BACnetAddress,
-        object_identifier: ObjectIdentifier,
-        property_identifier: PropertyIdentifier,
+        address: str | BACnetAddress,
+        object_identifier: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
+        property_identifier: str | int | PropertyIdentifier,
         array_index: int | None = None,
         timeout: float | None = None,
     ) -> ReadPropertyACK:
@@ -720,14 +720,18 @@ class Client:
         See :meth:`~bac_py.app.client.BACnetClient.read_property`.
         """
         return await self._require_client().read_property(
-            address, object_identifier, property_identifier, array_index, timeout=timeout
+            parse_address(address),
+            parse_object_identifier(object_identifier),
+            parse_property_identifier(property_identifier),
+            array_index,
+            timeout=timeout,
         )
 
     async def write_property(
         self,
-        address: BACnetAddress,
-        object_identifier: ObjectIdentifier,
-        property_identifier: PropertyIdentifier,
+        address: str | BACnetAddress,
+        object_identifier: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
+        property_identifier: str | int | PropertyIdentifier,
         value: bytes,
         priority: int | None = None,
         array_index: int | None = None,
@@ -738,9 +742,9 @@ class Client:
         See :meth:`~bac_py.app.client.BACnetClient.write_property`.
         """
         await self._require_client().write_property(
-            address,
-            object_identifier,
-            property_identifier,
+            parse_address(address),
+            parse_object_identifier(object_identifier),
+            parse_property_identifier(property_identifier),
             value,
             priority,
             array_index,
@@ -749,7 +753,7 @@ class Client:
 
     async def read_property_multiple(
         self,
-        address: BACnetAddress,
+        address: str | BACnetAddress,
         read_access_specs: list[ReadAccessSpecification],
         timeout: float | None = None,
     ) -> ReadPropertyMultipleACK:
@@ -758,12 +762,12 @@ class Client:
         See :meth:`~bac_py.app.client.BACnetClient.read_property_multiple`.
         """
         return await self._require_client().read_property_multiple(
-            address, read_access_specs, timeout=timeout
+            parse_address(address), read_access_specs, timeout=timeout
         )
 
     async def write_property_multiple(
         self,
-        address: BACnetAddress,
+        address: str | BACnetAddress,
         write_access_specs: list[WriteAccessSpecification],
         timeout: float | None = None,
     ) -> None:
@@ -772,14 +776,14 @@ class Client:
         See :meth:`~bac_py.app.client.BACnetClient.write_property_multiple`.
         """
         await self._require_client().write_property_multiple(
-            address, write_access_specs, timeout=timeout
+            parse_address(address), write_access_specs, timeout=timeout
         )
 
     async def read_range(
         self,
-        address: BACnetAddress,
-        object_identifier: ObjectIdentifier,
-        property_identifier: PropertyIdentifier,
+        address: str | BACnetAddress,
+        object_identifier: str | tuple[str | ObjectType | int, int] | ObjectIdentifier,
+        property_identifier: str | int | PropertyIdentifier,
         array_index: int | None = None,
         range_qualifier: RangeByPosition | RangeBySequenceNumber | RangeByTime | None = None,
         timeout: float | None = None,
@@ -789,9 +793,9 @@ class Client:
         See :meth:`~bac_py.app.client.BACnetClient.read_range`.
         """
         return await self._require_client().read_range(
-            address,
-            object_identifier,
-            property_identifier,
+            parse_address(address),
+            parse_object_identifier(object_identifier),
+            parse_property_identifier(property_identifier),
             array_index,
             range_qualifier,
             timeout=timeout,

@@ -44,7 +44,7 @@ async with Client(instance_number=999) as client:
 | **Convenience API** | String-based addressing (`"ai,1"`, `"pv"`), smart type coercion, auto-discovery |
 | **Serialization** | `to_dict()`/`from_dict()` on all data types; optional `orjson` backend |
 | **Conformance** | BIBB declarations and PICS generation per Clause 24 |
-| **Quality** | 6,475+ unit tests, Docker integration tests, local benchmarks, type-safe enums and frozen dataclasses throughout |
+| **Quality** | 6,500+ unit tests, Docker integration tests, local benchmarks, type-safe enums and frozen dataclasses throughout |
 
 ## Installation
 
@@ -294,7 +294,9 @@ bac-py offers two API levels:
 
 **`Client`** -- simplified wrapper for common tasks. Accepts string addresses,
 string object/property identifiers, and Python values. Ideal for scripts,
-integrations, and most client-side work.
+integrations, and most client-side work. Both convenience methods (`read`,
+`write`) and protocol-level methods (`read_property`, `write_property`, etc.)
+accept flexible string inputs.
 
 **`BACnetApplication` + `BACnetClient`** -- full protocol-level access for
 server handlers, router mode, custom service registration, raw encoded bytes,
@@ -306,6 +308,22 @@ methods are available alongside the convenience methods, and the underlying
 
 ### Protocol-Level Example
 
+Protocol-level methods accept the same flexible string inputs as convenience
+methods, while working with raw encoded bytes:
+
+```python
+from bac_py.encoding.primitives import encode_application_real
+
+async with Client(instance_number=999) as client:
+    await client.write_property(
+        "192.168.1.100", "av,1", "pv",
+        value=encode_application_real(72.5),
+        priority=8,
+    )
+```
+
+Typed objects also work (and are passed through with zero overhead):
+
 ```python
 from bac_py.encoding.primitives import encode_application_real
 from bac_py.network.address import parse_address
@@ -313,11 +331,9 @@ from bac_py.types.enums import ObjectType, PropertyIdentifier
 from bac_py.types.primitives import ObjectIdentifier
 
 async with Client(instance_number=999) as client:
-    address = parse_address("192.168.1.100")
-    obj_id = ObjectIdentifier(ObjectType.ANALOG_VALUE, 1)
-
     await client.write_property(
-        address, obj_id,
+        parse_address("192.168.1.100"),
+        ObjectIdentifier(ObjectType.ANALOG_VALUE, 1),
         PropertyIdentifier.PRESENT_VALUE,
         value=encode_application_real(72.5),
         priority=8,
@@ -449,7 +465,7 @@ for detailed walkthroughs.
 ## Testing
 
 ```bash
-make test          # 6,475+ unit tests
+make test          # 6,500+ unit tests
 make lint          # ruff check + format verification
 make typecheck     # mypy
 make docs          # sphinx-build

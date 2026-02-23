@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.5] - 2026-02-23
+
+### Changed
+
+- **Flexible input types for protocol-level `Client` methods**: `read_property()`,
+  `write_property()`, and `read_range()` now accept `str | BACnetAddress` for
+  addresses, `str | tuple | ObjectIdentifier` for object identifiers, and
+  `str | int | PropertyIdentifier` for property identifiers -- matching the
+  convenience API (`read()`, `write()`). `read_property_multiple()` and
+  `write_property_multiple()` now accept `str | BACnetAddress` for addresses.
+  All parse functions use fast `isinstance` pass-through for already-typed
+  objects, so existing code is fully backward-compatible with no performance
+  overhead. The underlying `BACnetClient` retains strict-typed signatures as
+  the intentional low-level API.
+
 ## [1.5.4] - 2026-02-20
 
 ### Added

@@ -824,6 +824,66 @@ class TestClientProtocolDelegation:
         await client.read_range(addr, oid, PropertyIdentifier.LOG_BUFFER)
         mock.read_range.assert_called_once()
 
+    # --- String-input parsing for protocol-level methods ---
+
+    async def test_read_property_string_inputs(self):
+        client, mock = _make_protocol_mock_client()
+        await client.read_property("10.0.0.1", "ai,1", "pv")
+        args = mock.read_property.call_args[0]
+        assert args[0] == parse_address("10.0.0.1")
+        assert args[1] == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        assert args[2] == PropertyIdentifier.PRESENT_VALUE
+
+    async def test_write_property_string_inputs(self):
+        client, mock = _make_protocol_mock_client()
+        await client.write_property("10.0.0.1", "av,1", "pv", b"\x44\x42\x28\x00\x00")
+        args = mock.write_property.call_args[0]
+        assert args[0] == parse_address("10.0.0.1")
+        assert args[1] == ObjectIdentifier(ObjectType.ANALOG_VALUE, 1)
+        assert args[2] == PropertyIdentifier.PRESENT_VALUE
+
+    async def test_read_range_string_inputs(self):
+        client, mock = _make_protocol_mock_client()
+        await client.read_range("10.0.0.1", "tl,1", "log-buffer")
+        args = mock.read_range.call_args[0]
+        assert args[0] == parse_address("10.0.0.1")
+        assert args[1] == ObjectIdentifier(ObjectType.TREND_LOG, 1)
+        assert args[2] == PropertyIdentifier.LOG_BUFFER
+
+    async def test_read_property_multiple_string_address(self):
+        client, mock = _make_protocol_mock_client()
+        await client.read_property_multiple("10.0.0.1", [])
+        args = mock.read_property_multiple.call_args[0]
+        assert args[0] == parse_address("10.0.0.1")
+
+    async def test_write_property_multiple_string_address(self):
+        client, mock = _make_protocol_mock_client()
+        await client.write_property_multiple("10.0.0.1", [])
+        args = mock.write_property_multiple.call_args[0]
+        assert args[0] == parse_address("10.0.0.1")
+
+    async def test_read_property_mixed_inputs(self):
+        """String address + typed ObjectIdentifier + PropertyIdentifier enum."""
+        client, mock = _make_protocol_mock_client()
+        oid = ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+        await client.read_property("10.0.0.1", oid, PropertyIdentifier.PRESENT_VALUE)
+        args = mock.read_property.call_args[0]
+        assert args[0] == parse_address("10.0.0.1")
+        assert args[1] == oid
+        assert args[2] == PropertyIdentifier.PRESENT_VALUE
+
+    async def test_read_property_tuple_object_id(self):
+        client, mock = _make_protocol_mock_client()
+        await client.read_property("10.0.0.1", ("analog-input", 1), "pv")
+        args = mock.read_property.call_args[0]
+        assert args[1] == ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)
+
+    async def test_write_property_int_property_id(self):
+        client, mock = _make_protocol_mock_client()
+        await client.write_property("10.0.0.1", "av,1", 85, b"\x44\x42\x28\x00\x00")
+        args = mock.write_property.call_args[0]
+        assert args[2] == PropertyIdentifier.PRESENT_VALUE
+
 
 class TestClientCreateObjectStringType:
     """Test Client.create_object with string object_type resolution."""
