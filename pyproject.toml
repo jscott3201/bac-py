@@ -1,6 +1,6 @@
 [project]
 name = "bac-py"
-version = "1.5.6"
+version = "1.5.7"
 description = "Asynchronous BACnet protocol library for Python — BACnet/IP, IPv6, Ethernet, and Secure Connect"
 readme = "README.md"
 requires-python = ">=3.13"

@@ -6,7 +6,6 @@ UnconfirmedAuditNotification (Clause 13.21).
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Self
 
@@ -36,7 +35,6 @@ from bac_py.types.audit_types import (
 from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import ObjectIdentifier
 
-_logger = logging.getLogger(__name__)
 _MAX_DECODED_ITEMS = 10_000
 _MAX_NESTING_DEPTH = 32
 
@@ -101,6 +99,7 @@ class AuditLogQueryRequest:
         if tag.number == 1 and tag.is_opening:
             # by-target
             inner_start = new_offset
+            inner_end = new_offset
             depth = 1
             scan = new_offset
             while depth > 0 and scan < len(data):
@@ -127,6 +126,7 @@ class AuditLogQueryRequest:
         else:
             # [2] by-source
             inner_start = new_offset
+            inner_end = new_offset
             depth = 1
             scan = new_offset
             while depth > 0 and scan < len(data):

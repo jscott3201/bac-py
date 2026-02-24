@@ -1254,7 +1254,9 @@ class BACnetClient:
                         if elem.property_access_error is not None:
                             continue
                         pid = elem.property_identifier
-                        val = elem.property_value
+                        val = (
+                            decode_and_unwrap(elem.property_value) if elem.property_value else None
+                        )
                         if pid == PropertyIdentifier.PROFILE_NAME:
                             profile_name = val if isinstance(val, str) else None
                         elif pid == PropertyIdentifier.PROFILE_LOCATION:
@@ -1337,13 +1339,13 @@ class BACnetClient:
                 PropertyIdentifier.SUBORDINATE_LIST,
                 timeout=timeout,
             )
-            subordinates = ack.property_value
-            if not isinstance(subordinates, list):
+            raw_subordinates = decode_all_application_values(ack.property_value)
+            if not isinstance(raw_subordinates, list):
                 return
         except (BACnetError, BACnetTimeoutError, TimeoutError):
             return
 
-        for sub in subordinates:
+        for sub in raw_subordinates:
             if isinstance(sub, ObjectIdentifier):
                 result.append(sub)
                 if sub.object_type == ObjectType.STRUCTURED_VIEW:
@@ -2780,12 +2782,13 @@ class BACnetClient:
             timeout=timeout,
         )
         config_file_ids: list[ObjectIdentifier] = []
-        if isinstance(ack.property_value, list):
-            for v in ack.property_value:
+        decoded_files = decode_all_application_values(ack.property_value)
+        if isinstance(decoded_files, list):
+            for v in decoded_files:
                 if isinstance(v, ObjectIdentifier):
                     config_file_ids.append(v)
-        elif isinstance(ack.property_value, ObjectIdentifier):
-            config_file_ids.append(ack.property_value)
+        elif isinstance(decoded_files, ObjectIdentifier):
+            config_file_ids.append(decoded_files)
 
         # Step 4: Download each file
         file_contents: list[tuple[ObjectIdentifier, bytes]] = []
@@ -2881,8 +2884,9 @@ class BACnetClient:
             PropertyIdentifier.OBJECT_IDENTIFIER,
             timeout=timeout,
         )
-        if isinstance(ack.property_value, ObjectIdentifier):
-            return ack.property_value
+        decoded = decode_and_unwrap(ack.property_value)
+        if isinstance(decoded, ObjectIdentifier):
+            return decoded
         return ObjectIdentifier(ObjectType.DEVICE, 4194303)
 
     async def _poll_backup_restore_state(
@@ -2892,8 +2896,10 @@ class BACnetClient:
         target_states: tuple[BackupAndRestoreState, ...],
         poll_interval: float = 1.0,
         timeout: float | None = None,
+        overall_timeout: float = 300.0,
     ) -> BackupAndRestoreState:
         """Poll BACKUP_AND_RESTORE_STATE until it reaches a target state."""
+        deadline = asyncio.get_event_loop().time() + overall_timeout
         while True:
             ack = await self.read_property(
                 address,
@@ -2901,12 +2907,17 @@ class BACnetClient:
                 PropertyIdentifier.BACKUP_AND_RESTORE_STATE,
                 timeout=timeout,
             )
-            raw_state = ack.property_value
-            if isinstance(raw_state, int):
-                state = BackupAndRestoreState(raw_state)
+            decoded_state = decode_and_unwrap(ack.property_value)
+            if isinstance(decoded_state, int):
+                state = BackupAndRestoreState(decoded_state)
                 if state in target_states:
                     return state
-            await asyncio.sleep(poll_interval)
+            remaining = deadline - asyncio.get_event_loop().time()
+            if remaining <= 0:
+                from bac_py.services.errors import BACnetTimeoutError
+
+                raise BACnetTimeoutError("Timed out waiting for backup/restore state")
+            await asyncio.sleep(min(poll_interval, remaining))
 
     async def _download_file(
         self,

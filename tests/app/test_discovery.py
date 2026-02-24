@@ -11,6 +11,7 @@ from bac_py.app.client import (
     DiscoveredDevice,
     UnconfiguredDevice,
 )
+from bac_py.encoding.primitives import encode_application_character_string
 from bac_py.network.address import BACnetAddress, BIPAddress
 from bac_py.services.read_property import ReadPropertyACK
 from bac_py.services.read_property_multiple import (
@@ -31,6 +32,13 @@ from bac_py.types.primitives import ObjectIdentifier
 
 PEER_MAC = BIPAddress(host="192.168.1.100", port=0xBAC0).encode()
 PEER = BACnetAddress(mac_address=PEER_MAC)
+
+
+def _encode_oid_list(oids: list[ObjectIdentifier]) -> bytes:
+    """Encode a list of ObjectIdentifiers as concatenated application-tagged bytes."""
+    from bac_py.encoding.primitives import encode_application_object_id
+
+    return b"".join(encode_application_object_id(o.object_type, o.instance_number) for o in oids)
 
 
 def _base_device(instance: int = 100, address: BACnetAddress = PEER) -> DiscoveredDevice:
@@ -240,15 +248,20 @@ class TestDiscoverExtended:
                         list_of_results=[
                             ReadResultElement(
                                 property_identifier=PropertyIdentifier.PROFILE_NAME,
-                                property_value="BACnet-HVAC",
+                                property_value=encode_application_character_string("BACnet-HVAC"),
                             ),
                             ReadResultElement(
                                 property_identifier=PropertyIdentifier.PROFILE_LOCATION,
-                                property_value="https://example.com/profile",
+                                property_value=encode_application_character_string(
+                                    "https://example.com/profile"
+                                ),
                             ),
                             ReadResultElement(
                                 property_identifier=PropertyIdentifier.TAGS,
-                                property_value=[{"name": "floor", "value": "3"}],
+                                property_value=(
+                                    encode_application_character_string("floor")
+                                    + encode_application_character_string("3")
+                                ),
                             ),
                         ],
                     )
@@ -266,7 +279,7 @@ class TestDiscoverExtended:
         assert dev.instance == 100
         assert dev.profile_name == "BACnet-HVAC"
         assert dev.profile_location == "https://example.com/profile"
-        assert dev.tags == [{"name": "floor", "value": "3"}]
+        assert dev.tags == ["floor", "3"]
 
     async def test_gracefully_handles_unsupported_properties(self):
         """Devices without profile properties return None for those fields."""
@@ -364,7 +377,7 @@ class TestTraverseHierarchy:
             return ReadPropertyACK(
                 object_identifier=obj_id,
                 property_identifier=prop_id,
-                property_value=[ai1, ai2],
+                property_value=_encode_oid_list([ai1, ai2]),
             )
 
         root = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
@@ -390,18 +403,18 @@ class TestTraverseHierarchy:
                 return ReadPropertyACK(
                     object_identifier=obj_id,
                     property_identifier=prop_id,
-                    property_value=[sv2, ai1],
+                    property_value=_encode_oid_list([sv2, ai1]),
                 )
             elif obj_id == sv2:
                 return ReadPropertyACK(
                     object_identifier=obj_id,
                     property_identifier=prop_id,
-                    property_value=[bi1],
+                    property_value=_encode_oid_list([bi1]),
                 )
             return ReadPropertyACK(
                 object_identifier=obj_id,
                 property_identifier=prop_id,
-                property_value=[],
+                property_value=b"",
             )
 
         with patch.object(client, "read_property", side_effect=mock_read_prop):
@@ -425,12 +438,12 @@ class TestTraverseHierarchy:
                 return ReadPropertyACK(
                     object_identifier=obj_id,
                     property_identifier=prop_id,
-                    property_value=[sv2],
+                    property_value=_encode_oid_list([sv2]),
                 )
             return ReadPropertyACK(
                 object_identifier=obj_id,
                 property_identifier=prop_id,
-                property_value=[ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)],
+                property_value=_encode_oid_list([ObjectIdentifier(ObjectType.ANALOG_INPUT, 1)]),
             )
 
         with patch.object(client, "read_property", side_effect=mock_read_prop):
@@ -448,7 +461,7 @@ class TestTraverseHierarchy:
             return ReadPropertyACK(
                 object_identifier=obj_id,
                 property_identifier=prop_id,
-                property_value=[],
+                property_value=b"",
             )
 
         sv = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
@@ -486,13 +499,13 @@ class TestTraverseHierarchy:
                 return ReadPropertyACK(
                     object_identifier=obj_id,
                     property_identifier=prop_id,
-                    property_value=[sv2],
+                    property_value=_encode_oid_list([sv2]),
                 )
             else:
                 return ReadPropertyACK(
                     object_identifier=obj_id,
                     property_identifier=prop_id,
-                    property_value=[sv1],
+                    property_value=_encode_oid_list([sv1]),
                 )
 
         with patch.object(client, "read_property", side_effect=mock_read_prop):

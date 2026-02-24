@@ -824,11 +824,7 @@ class EventEngine:
         reliability = obj._properties.get(
             PropertyIdentifier.RELIABILITY, Reliability.NO_FAULT_DETECTED
         )
-        fault_result = (
-            reliability
-            if reliability != Reliability.NO_FAULT_DETECTED
-            else Reliability.NO_FAULT_DETECTED
-        )
+        fault_result = reliability
 
         # Check Reliability_Evaluation_Inhibit (Clause 13.2.2, p.638)
         rel_inhibit = obj._properties.get(PropertyIdentifier.RELIABILITY_EVALUATION_INHIBIT)
@@ -931,14 +927,11 @@ class EventEngine:
             life_safety_alarm_values = obj._properties.get(
                 PropertyIdentifier.LIFE_SAFETY_ALARM_VALUES, ()
             )
-            if not isinstance(alarm_values, tuple):
-                alarm_values = tuple(int(v) for v in alarm_values)
-            else:
-                alarm_values = tuple(int(v) for v in alarm_values)
-            if not isinstance(life_safety_alarm_values, tuple):
-                life_safety_alarm_values = tuple(int(v) for v in life_safety_alarm_values)
-            else:
-                life_safety_alarm_values = tuple(int(v) for v in life_safety_alarm_values)
+            alarm_values = tuple(int(v) for v in alarm_values)
+            life_safety_alarm_values = obj._properties.get(
+                PropertyIdentifier.LIFE_SAFETY_ALARM_VALUES, ()
+            )
+            life_safety_alarm_values = tuple(int(v) for v in life_safety_alarm_values)
             return evaluate_change_of_life_safety(
                 tracking_value, int(mode), alarm_values, life_safety_alarm_values
             )

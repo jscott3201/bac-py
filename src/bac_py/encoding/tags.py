@@ -283,6 +283,10 @@ def extract_context_value(
         elif t.is_closing:
             depth -= 1
             if depth == 0:
+                if t.number != tag_number:
+                    msg = f"Closing tag {t.number} does not match opening tag {tag_number}"
+                    logger.warning(msg)
+                    raise ValueError(msg)
                 value_end = offset
                 return bytes(data[value_start:value_end]), new_offset
             offset = new_offset

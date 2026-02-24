@@ -2774,23 +2774,29 @@ class TestBackupRestore:
         return client
 
     async def test_discover_device_oid_returns_oid(self):
-        """_discover_device_oid returns ObjectIdentifier when property_value is one."""
+        """_discover_device_oid returns ObjectIdentifier when property_value is encoded bytes."""
+        from bac_py.encoding.primitives import encode_application_object_id
+
         client = self._make_client()
 
         oid = ObjectIdentifier(ObjectType.DEVICE, 100)
         mock_ack = MagicMock()
-        mock_ack.property_value = oid
+        mock_ack.property_value = encode_application_object_id(
+            oid.object_type, oid.instance_number
+        )
         client.read_property = AsyncMock(return_value=mock_ack)
 
         result = await client._discover_device_oid(PEER)
         assert result == oid
 
     async def test_discover_device_oid_fallback(self):
-        """_discover_device_oid falls back to wildcard when value is not ObjectIdentifier."""
+        """_discover_device_oid falls back to wildcard when value decodes to non-OID."""
+        from bac_py.encoding.primitives import encode_application_enumerated
+
         client = self._make_client()
 
         mock_ack = MagicMock()
-        mock_ack.property_value = b"\x91\x00"  # raw bytes, not ObjectIdentifier
+        mock_ack.property_value = encode_application_enumerated(0)
         client.read_property = AsyncMock(return_value=mock_ack)
 
         result = await client._discover_device_oid(PEER)
@@ -2798,14 +2804,17 @@ class TestBackupRestore:
 
     async def test_poll_backup_restore_state_returns_on_target(self):
         """_poll_backup_restore_state returns when target state is reached."""
+        from bac_py.encoding.primitives import encode_application_enumerated
         from bac_py.types.enums import BackupAndRestoreState
 
         client = self._make_client()
         device_oid = ObjectIdentifier(ObjectType.DEVICE, 100)
 
-        # Return int value matching a target state
+        # Return encoded enumerated value matching a target state
         mock_ack = MagicMock()
-        mock_ack.property_value = int(BackupAndRestoreState.PERFORMING_A_BACKUP)
+        mock_ack.property_value = encode_application_enumerated(
+            int(BackupAndRestoreState.PERFORMING_A_BACKUP)
+        )
         client.read_property = AsyncMock(return_value=mock_ack)
 
         result = await client._poll_backup_restore_state(
@@ -2821,17 +2830,22 @@ class TestBackupRestore:
 
     async def test_poll_backup_restore_state_polls_until_target(self):
         """_poll_backup_restore_state polls multiple times until target state."""
+        from bac_py.encoding.primitives import encode_application_enumerated
         from bac_py.types.enums import BackupAndRestoreState
 
         client = self._make_client()
         device_oid = ObjectIdentifier(ObjectType.DEVICE, 100)
 
-        # First returns non-int (bytes), second returns target int
+        # First returns non-target state, second returns target
         non_target_ack = MagicMock()
-        non_target_ack.property_value = b"\x91\x00"  # bytes, not int
+        non_target_ack.property_value = encode_application_enumerated(
+            int(BackupAndRestoreState.IDLE)
+        )
 
         target_ack = MagicMock()
-        target_ack.property_value = int(BackupAndRestoreState.PERFORMING_A_BACKUP)
+        target_ack.property_value = encode_application_enumerated(
+            int(BackupAndRestoreState.PERFORMING_A_BACKUP)
+        )
 
         client.read_property = AsyncMock(side_effect=[non_target_ack, target_ack])
 
@@ -2899,6 +2913,10 @@ class TestBackupRestore:
 
     async def test_backup_device_full_procedure(self):
         """backup_device executes the 5-step backup procedure."""
+        from bac_py.encoding.primitives import (
+            encode_application_enumerated,
+            encode_application_object_id,
+        )
         from bac_py.services.file_access import AtomicReadFileACK, StreamReadACK
         from bac_py.types.enums import BackupAndRestoreState
 
@@ -2910,17 +2928,23 @@ class TestBackupRestore:
         # Mock reinitialize_device (Steps 1 and 5)
         client.reinitialize_device = AsyncMock()
 
-        # Mock _discover_device_oid (Step 2a)
+        # Mock _discover_device_oid (Step 2a) — encoded OID bytes
         discover_ack = MagicMock()
-        discover_ack.property_value = device_oid
+        discover_ack.property_value = encode_application_object_id(
+            device_oid.object_type, device_oid.instance_number
+        )
 
-        # Mock _poll state (Step 2b)
+        # Mock _poll state (Step 2b) — encoded enumerated bytes
         state_ack = MagicMock()
-        state_ack.property_value = int(BackupAndRestoreState.PERFORMING_A_BACKUP)
+        state_ack.property_value = encode_application_enumerated(
+            int(BackupAndRestoreState.PERFORMING_A_BACKUP)
+        )
 
-        # Mock read config files (Step 3)
+        # Mock read config files (Step 3) — encoded OID bytes
         config_ack = MagicMock()
-        config_ack.property_value = file_oid  # single ObjectIdentifier
+        config_ack.property_value = encode_application_object_id(
+            file_oid.object_type, file_oid.instance_number
+        )
 
         client.read_property = AsyncMock(side_effect=[discover_ack, state_ack, config_ack])
 
@@ -2945,6 +2969,10 @@ class TestBackupRestore:
     async def test_restore_device_full_procedure(self):
         """restore_device executes the 4-step restore procedure."""
         from bac_py.app.client import BackupData
+        from bac_py.encoding.primitives import (
+            encode_application_enumerated,
+            encode_application_object_id,
+        )
         from bac_py.services.file_access import AtomicWriteFileACK
         from bac_py.types.enums import BackupAndRestoreState
 
@@ -2961,13 +2989,17 @@ class TestBackupRestore:
         # Mock reinitialize_device (Steps 1 and 4)
         client.reinitialize_device = AsyncMock()
 
-        # Mock _discover_device_oid (Step 2a)
+        # Mock _discover_device_oid (Step 2a) — encoded OID bytes
         discover_ack = MagicMock()
-        discover_ack.property_value = device_oid
+        discover_ack.property_value = encode_application_object_id(
+            device_oid.object_type, device_oid.instance_number
+        )
 
-        # Mock _poll state (Step 2b)
+        # Mock _poll state (Step 2b) — encoded enumerated bytes
         state_ack = MagicMock()
-        state_ack.property_value = int(BackupAndRestoreState.PERFORMING_A_RESTORE)
+        state_ack.property_value = encode_application_enumerated(
+            int(BackupAndRestoreState.PERFORMING_A_RESTORE)
+        )
 
         client.read_property = AsyncMock(side_effect=[discover_ack, state_ack])
 
@@ -2985,6 +3017,10 @@ class TestBackupRestore:
 
     async def test_backup_device_multiple_config_files(self):
         """backup_device handles multiple configuration files."""
+        from bac_py.encoding.primitives import (
+            encode_application_enumerated,
+            encode_application_object_id,
+        )
         from bac_py.services.file_access import AtomicReadFileACK, StreamReadACK
         from bac_py.types.enums import BackupAndRestoreState
 
@@ -2996,17 +3032,23 @@ class TestBackupRestore:
 
         client.reinitialize_device = AsyncMock()
 
-        # _discover_device_oid
+        # _discover_device_oid — encoded OID bytes
         discover_ack = MagicMock()
-        discover_ack.property_value = device_oid
+        discover_ack.property_value = encode_application_object_id(
+            device_oid.object_type, device_oid.instance_number
+        )
 
-        # _poll state
+        # _poll state — encoded enumerated bytes
         state_ack = MagicMock()
-        state_ack.property_value = int(BackupAndRestoreState.PERFORMING_A_BACKUP)
+        state_ack.property_value = encode_application_enumerated(
+            int(BackupAndRestoreState.PERFORMING_A_BACKUP)
+        )
 
-        # config files list
+        # config files list — concatenated encoded OIDs (decoded as list)
         config_ack = MagicMock()
-        config_ack.property_value = [file_oid1, file_oid2]
+        config_ack.property_value = encode_application_object_id(
+            file_oid1.object_type, file_oid1.instance_number
+        ) + encode_application_object_id(file_oid2.object_type, file_oid2.instance_number)
 
         client.read_property = AsyncMock(side_effect=[discover_ack, state_ack, config_ack])
 
@@ -3084,10 +3126,11 @@ class TestDiscoveryExtensions:
     async def test_discover_extended_enriches_with_rpm(self):
         """discover_extended() enriches devices with profile metadata via RPM.
 
-        The _enrich_device method checks isinstance(val, str) on property_value,
-        so we mock read_property_multiple to return pre-decoded string values.
+        The _enrich_device method now decodes raw bytes via decode_and_unwrap,
+        so we mock read_property_multiple to return encoded string values.
         """
         from bac_py.app.client import DiscoveredDevice
+        from bac_py.encoding.primitives import encode_application_character_string
 
         app = self._make_app()
         client = BACnetClient(app)
@@ -3100,18 +3143,18 @@ class TestDiscoveryExtensions:
 
         app.register_temporary_handler.side_effect = capture_handler
 
-        # Mock RPM to return decoded result elements with str property_value
+        # Mock RPM to return result elements with encoded property_value bytes
         mock_rpm_ack = MagicMock()
         mock_result = MagicMock()
         mock_result.list_of_results = [
             MagicMock(
                 property_identifier=PropertyIdentifier.PROFILE_NAME,
-                property_value="TestProfile",
+                property_value=encode_application_character_string("TestProfile"),
                 property_access_error=None,
             ),
             MagicMock(
                 property_identifier=PropertyIdentifier.PROFILE_LOCATION,
-                property_value="http://example.com",
+                property_value=encode_application_character_string("http://example.com"),
                 property_access_error=None,
             ),
             MagicMock(
@@ -3147,18 +3190,19 @@ class TestDiscoveryExtensions:
     async def test_traverse_hierarchy_non_list_returns_early(self):
         """_traverse_hierarchy_recursive returns early for non-list subordinates.
 
-        The method checks isinstance(subordinates, list). Since read_property
-        returns raw bytes in property_value, a non-list value causes early return.
-        We mock read_property to return a non-list property_value.
+        The method decodes raw bytes and checks isinstance(decoded, list).
+        A single encoded value (non-list) causes early return.
         """
+        from bac_py.encoding.primitives import encode_application_unsigned
+
         app = self._make_app()
         client = BACnetClient(app)
 
         root = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
 
-        # Return a non-list property_value (a single int)
+        # Return a single encoded unsigned (decodes to int, not list)
         mock_ack = MagicMock()
-        mock_ack.property_value = 42  # not a list
+        mock_ack.property_value = encode_application_unsigned(42)
         client.read_property = AsyncMock(return_value=mock_ack)
 
         result = await client.traverse_hierarchy(PEER, root)
@@ -3168,22 +3212,27 @@ class TestDiscoveryExtensions:
     async def test_traverse_hierarchy_handles_cycles(self):
         """_traverse_hierarchy_recursive handles visited nodes to avoid cycles.
 
-        We mock read_property to return list property_values containing
-        ObjectIdentifier subordinates.
+        We mock read_property to return encoded ObjectIdentifier lists.
         """
+        from bac_py.encoding.primitives import encode_application_object_id
+
         app = self._make_app()
         client = BACnetClient(app)
 
         root = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 1)
         child = ObjectIdentifier(ObjectType.STRUCTURED_VIEW, 2)
 
-        # Root has child as subordinate
+        # Root has child as subordinate (encoded as concatenated OID bytes)
         root_ack = MagicMock()
-        root_ack.property_value = [child]
+        root_ack.property_value = encode_application_object_id(
+            child.object_type, child.instance_number
+        )
 
         # Child refers back to root (cycle)
         child_ack = MagicMock()
-        child_ack.property_value = [root]
+        child_ack.property_value = encode_application_object_id(
+            root.object_type, root.instance_number
+        )
 
         client.read_property = AsyncMock(side_effect=[root_ack, child_ack])
 

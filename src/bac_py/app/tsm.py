@@ -150,7 +150,9 @@ class ClientTSM:
         :raises BACnetAbortError: On Abort-PDU response.
         :raises BACnetTimeoutError: On timeout after all retries.
         """
-        effective_max_apdu = max_apdu_override or self._max_apdu_length
+        effective_max_apdu = (
+            max_apdu_override if max_apdu_override is not None else self._max_apdu_length
+        )
         loop = self._loop
         if loop is None:
             loop = self._loop = asyncio.get_running_loop()
@@ -366,7 +368,7 @@ class ClientTSM:
         self, txn: ClientTransaction, effective_max_apdu: int | None = None
     ) -> None:
         """Encode and send a non-segmented confirmed request APDU."""
-        max_apdu = effective_max_apdu or self._max_apdu_length
+        max_apdu = effective_max_apdu if effective_max_apdu is not None else self._max_apdu_length
         pdu = ConfirmedRequestPDU(
             segmented=False,
             more_follows=False,
@@ -388,7 +390,7 @@ class ClientTSM:
         self, txn: ClientTransaction, effective_max_apdu: int | None = None
     ) -> None:
         """Begin sending a segmented request."""
-        max_apdu = effective_max_apdu or self._max_apdu_length
+        max_apdu = effective_max_apdu if effective_max_apdu is not None else self._max_apdu_length
         try:
             sender = SegmentSender.create(
                 payload=txn.request_data,

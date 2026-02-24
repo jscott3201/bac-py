@@ -915,9 +915,13 @@ class DefaultServerHandlers:
         # Pass 2: Apply all writes
         for obj, properties in validated:
             for pv in properties:
+                try:
+                    write_value = decode_and_unwrap(pv.value)
+                except (ValueError, IndexError):
+                    raise BACnetError(ErrorClass.PROPERTY, ErrorCode.INVALID_DATA_TYPE) from None
                 await obj.async_write_property(
                     pv.property_identifier,
-                    pv.value,
+                    write_value,
                     pv.priority,
                     pv.property_array_index,
                 )
@@ -2071,11 +2075,16 @@ class DefaultServerHandlers:
             raise BACnetError(ErrorClass.VT, ErrorCode.UNKNOWN_VT_CLASS)
 
         # Allocate a session — use a simple counter on the app
+        sessions: dict[int, dict[str, Any]] = getattr(self._app, "_vt_sessions", {})
+        max_vt_sessions = 64
+        if len(sessions) >= max_vt_sessions:
+            logger.warning("vt_open: session limit (%d) reached from %s", max_vt_sessions, source)
+            raise BACnetError(ErrorClass.RESOURCES, ErrorCode.NO_VT_SESSIONS_AVAILABLE)
+
         session_counter = getattr(self._app, "_vt_session_counter", 0) + 1
         self._app._vt_session_counter = session_counter  # type: ignore[attr-defined]
 
         # Store session mapping
-        sessions = getattr(self._app, "_vt_sessions", {})
         sessions[session_counter] = {
             "source": source,
             "vt_class": request.vt_class,
@@ -2103,6 +2112,9 @@ class DefaultServerHandlers:
             if session_id not in sessions:
                 logger.warning("vt_close: unknown VT session %s from %s", session_id, source)
                 raise BACnetError(ErrorClass.VT, ErrorCode.UNKNOWN_VT_SESSION)
+            if sessions[session_id]["source"] != source:
+                logger.warning("vt_close: session %s not owned by %s", session_id, source)
+                raise BACnetError(ErrorClass.VT, ErrorCode.UNKNOWN_VT_SESSION)
             del sessions[session_id]
         logger.info(
             "VT-Close from %s: sessions=%s",
@@ -2124,9 +2136,17 @@ class DefaultServerHandlers:
         """
         request = VTDataRequest.decode(data)
         sessions = getattr(self._app, "_vt_sessions", {})
-        if request.vt_session_identifier not in sessions:
+        session = sessions.get(request.vt_session_identifier)
+        if session is None:
             logger.warning(
                 "vt_data: unknown VT session %d from %s",
+                request.vt_session_identifier,
+                source,
+            )
+            raise BACnetError(ErrorClass.VT, ErrorCode.UNKNOWN_VT_SESSION)
+        if session["source"] != source:
+            logger.warning(
+                "vt_data: session %d not owned by %s",
                 request.vt_session_identifier,
                 source,
             )

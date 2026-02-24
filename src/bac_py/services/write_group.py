@@ -6,7 +6,6 @@ via group addressing.
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from typing import Self
 
@@ -24,7 +23,6 @@ from bac_py.encoding.tags import (
     extract_context_value,
 )
 
-_logger = logging.getLogger(__name__)
 _MAX_DECODED_ITEMS = 10_000
 
 

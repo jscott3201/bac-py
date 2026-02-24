@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
 from bac_py.encoding.primitives import (
@@ -30,7 +29,6 @@ from bac_py.types.constructed import BACnetTimeStamp
 from bac_py.types.enums import ObjectType
 from bac_py.types.primitives import ObjectIdentifier
 
-_logger = logging.getLogger(__name__)
 _MAX_DECODED_ITEMS = 10_000
 _MAX_NESTING_DEPTH = 32
 

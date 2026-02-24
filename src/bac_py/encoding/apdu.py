@@ -28,17 +28,6 @@ _MAX_SEGMENTS_ENCODE: dict[int, int] = {
 _MAX_SEGMENTS_UNSPECIFIED = 0  # B'000'
 _MAX_SEGMENTS_OVER_64 = 7  # B'111'
 
-_MAX_SEGMENTS_DECODE: dict[int, int | None] = {
-    0: None,  # Unspecified
-    1: 2,
-    2: 4,
-    3: 8,
-    4: 16,
-    5: 32,
-    6: 64,
-    7: None,  # Greater than 64 (also treated as unlimited)
-}
-
 # Fast tuple lookup for decode (indexed 0-7)
 _MAX_SEGMENTS_DECODE_TUPLE: tuple[int | None, ...] = (None, 2, 4, 8, 16, 32, 64, None)
 
@@ -50,15 +39,6 @@ _MAX_APDU_ENCODE: dict[int, int] = {
     480: 3,
     1024: 4,
     1476: 5,
-}
-
-_MAX_APDU_DECODE: dict[int, int] = {
-    0: 50,
-    1: 128,
-    2: 206,
-    3: 480,
-    4: 1024,
-    5: 1476,
 }
 
 # Fast tuple lookup for decode (indexed 0-5, default 1476 for 6+)

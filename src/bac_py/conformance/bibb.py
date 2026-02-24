@@ -362,5 +362,7 @@ class BIBBMatrix:
 
         # B-role: check server handlers
         return all(
-            svc.value in self._registry._confirmed for svc in bibb.confirmed_services
-        ) and all(svc.value in self._registry._unconfirmed for svc in bibb.unconfirmed_services)
+            self._registry.has_confirmed_handler(svc.value) for svc in bibb.confirmed_services
+        ) and all(
+            self._registry.has_unconfirmed_handler(svc.value) for svc in bibb.unconfirmed_services
+        )

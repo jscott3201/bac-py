@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
 from bac_py.encoding.primitives import (
@@ -39,7 +38,6 @@ from bac_py.types.enums import (
 )
 from bac_py.types.primitives import BitString, ObjectIdentifier
 
-_logger = logging.getLogger(__name__)
 _MAX_DECODED_ITEMS = 10_000
 
 # ---------------------------------------------------------------------------
@@ -295,7 +293,9 @@ class GetEnrollmentSummaryRequest:
                 offset += tag.length
                 # closing tag 4
                 closing, offset = decode_tag(data, offset)
-                assert closing.is_closing and closing.number == 4
+                if not (closing.is_closing and closing.number == 4):
+                    msg = "Expected closing tag 4 for eventStateFilter"
+                    raise ValueError(msg)
 
         # [5] notificationClassFilter (optional)
         notification_class_filter, offset = decode_optional_context(
@@ -541,7 +541,9 @@ class GetEventInformationACK:
 
         # [0] listOfEventSummaries -- opening tag 0
         tag, offset = decode_tag(data, offset)
-        assert tag.is_opening and tag.number == 0
+        if not (tag.is_opening and tag.number == 0):
+            msg = "Expected opening tag 0 for listOfEventSummaries"
+            raise ValueError(msg)
 
         summaries: list[EventSummary] = []
         while offset < len(data):
@@ -590,13 +592,17 @@ class GetEventInformationACK:
 
         # [3] eventTimeStamps -- opening tag 3
         tag, offset = decode_tag(data, offset)
-        assert tag.is_opening and tag.number == 3
+        if not (tag.is_opening and tag.number == 3):
+            msg = "Expected opening tag 3 for eventTimeStamps"
+            raise ValueError(msg)
         timestamps: list[BACnetTimeStamp] = []
         for _ in range(3):
             ts, offset = BACnetTimeStamp.decode(data, offset)
             timestamps.append(ts)
         closing, offset = decode_tag(data, offset)
-        assert closing.is_closing and closing.number == 3
+        if not (closing.is_closing and closing.number == 3):
+            msg = "Expected closing tag 3 for eventTimeStamps"
+            raise ValueError(msg)
 
         # [4] notifyType
         tag, offset = decode_tag(data, offset)
@@ -610,14 +616,18 @@ class GetEventInformationACK:
 
         # [6] eventPriorities -- opening tag 6
         tag, offset = decode_tag(data, offset)
-        assert tag.is_opening and tag.number == 6
+        if not (tag.is_opening and tag.number == 6):
+            msg = "Expected opening tag 6 for eventPriorities"
+            raise ValueError(msg)
         priorities: list[int] = []
         for _ in range(3):
             tag, offset = decode_tag(data, offset)
             priorities.append(decode_unsigned(data[offset : offset + tag.length]))
             offset += tag.length
         closing, offset = decode_tag(data, offset)
-        assert closing.is_closing and closing.number == 6
+        if not (closing.is_closing and closing.number == 6):
+            msg = "Expected closing tag 6 for eventPriorities"
+            raise ValueError(msg)
 
         return (
             EventSummary(

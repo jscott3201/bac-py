@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.7] - 2026-02-24
+
+### Fixed
+
+- **Client decode bugs**: Fixed five methods in `app/client.py` that performed
+  `isinstance` checks on raw application-tagged bytes without first calling
+  `decode_and_unwrap()` or `decode_all_application_values()`:
+  `_traverse_hierarchy_recursive`, `discover_extended` enrichment,
+  `_discover_device_oid`, `_poll_backup_restore_state`, and `backup_device`
+  config file decoding. These could cause silent data misinterpretation or
+  `TypeError` at runtime.
+- **WritePropertyMultiple server decode**: `handle_write_property_multiple` in
+  `app/server.py` now calls `decode_and_unwrap()` on property values before
+  writing, matching the pattern used elsewhere.
+- **Segmentation double-counting**: `SegmentationManager._total_bytes` no longer
+  double-counts when a duplicate segment is received, which could cause
+  premature reassembly completion.
+- **Audit log query unbound variable**: `AuditLogQueryByTargetACK.decode()` and
+  `AuditLogQueryBySourceACK.decode()` in `services/audit.py` now initialize
+  `inner_end` before the while loop, fixing an `UnboundLocalError` on empty
+  inner sequences.
+- **`extract_context_value()` closing tag validation**: The function now verifies
+  that the closing tag number matches the expected opening tag number, raising
+  `ValueError` on mismatch instead of silently accepting malformed packets.
+- **TSM falsy-value bug**: Three places in `app/tsm.py` used `x or default`
+  which incorrectly replaced valid falsy values (e.g., `0`, `0.0`) with
+  defaults. Changed to explicit `if x is not None` checks.
+- **Schedule engine midnight race**: `ScheduleEngine._evaluate_all` now reads
+  `datetime.now()` once per evaluation instead of calling `date.today()` and
+  `datetime.now().time()` separately, preventing a rare midnight-crossing
+  inconsistency.
+
+### Changed
+
+- **`LifeSafetyOperationRequest.decode` tag class check**: Added explicit
+  `TagClass.CONTEXT` validation before decoding context tag 0, raising
+  `ValueError` with a clear message if an application tag is encountered.
+- **Decode assertions → ValueError**: Replaced 10 bare `assert` statements in
+  `services/alarm_summary.py` and `services/event_notification.py` decode paths
+  with `raise ValueError(...)`, ensuring decode errors are never silenced by
+  `-O` optimization.
+- **VT session hardening**: Added source-address validation on
+  `VT-Close` / `VT-Data` requests and a 64-session cap to prevent resource
+  exhaustion via unbounded VT session creation.
+- **Routing table cap**: `RoutingTable.update_route` now enforces a 2048-entry
+  limit, rejecting new entries when the table is full to prevent memory
+  exhaustion from malicious route advertisements.
+- **Address decode bounds checks**: `BIPAddress.decode` and `BIP6Address.decode`
+  now validate minimum buffer lengths (6 and 18 bytes respectively) before
+  parsing, raising `ValueError` instead of producing truncated addresses.
+- **BIBB conformance public API**: `ServiceRegistry` now exposes
+  `has_confirmed_handler()` and `has_unconfirmed_handler()` methods;
+  `conformance/bibb.py` uses these instead of accessing private `_confirmed` /
+  `_unconfirmed` dictionaries.
+
+### Removed
+
+- **Dead code**: Removed unused `_min_unsigned_bytes()` from
+  `encoding/primitives.py`, superseded `_MAX_SEGMENTS_DECODE` /
+  `_MAX_APDU_DECODE` dicts from `encoding/apdu.py`, and 84-line
+  `encode_npdu_with_source()` from `network/npdu.py`.
+- **Redundant branches**: Eliminated no-op ternary and identical if/else
+  branches in `app/event_engine.py`, and a redundant conditional in
+  `segmentation/manager.py` `handle_segment_ack`.
+- **Unused loggers**: Removed 8 unused `_logger` definitions and their
+  `import logging` statements from service modules (`alarm_summary`,
+  `object_mgmt`, `cov`, `virtual_terminal`, `read_property_multiple`,
+  `write_property_multiple`, `write_group`, `audit`).
+
 ## [1.5.6] - 2026-02-23
 
 ### Fixed

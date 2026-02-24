@@ -44,17 +44,6 @@ _CHARSET_DECODERS: dict[int, str] = {
 }
 
 
-def _min_unsigned_bytes(value: int) -> int:
-    """Return the minimum number of bytes needed to encode an unsigned integer.
-
-    :param value: Non-negative integer to measure.
-    :returns: Byte count (1--4) required for big-endian encoding.
-    """
-    if value == 0:
-        return 1
-    return (value.bit_length() + 7) // 8
-
-
 # --- Unsigned Integer (Clause 20.2.4) ---
 
 # Pre-computed single-byte unsigned encodings for values 0-255.

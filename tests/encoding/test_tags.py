@@ -406,6 +406,14 @@ class TestContextNestingDepthLimit:
         value, _ = extract_context_value(buf, offset, 0)
         assert value == inner
 
+    def test_mismatched_closing_tag_number(self):
+        """Closing tag number must match the expected opening tag number."""
+        # Open with tag 2, close with tag 3 — should raise ValueError
+        buf = encode_opening_tag(2) + encode_closing_tag(3)
+        _, offset = decode_tag(buf, 0)
+        with pytest.raises(ValueError, match="does not match opening tag"):
+            extract_context_value(buf, offset, 2)
+
 
 # ---------------------------------------------------------------------------
 # Security: tag length sanity limit

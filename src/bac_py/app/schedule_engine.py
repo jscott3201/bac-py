@@ -96,8 +96,9 @@ class ScheduleEngine:
     def _evaluate_cycle(self) -> None:
         """Run one evaluation cycle."""
         db = self._app.object_db
-        today = datetime.date.today()
-        now = datetime.datetime.now().time()
+        _now = datetime.datetime.now()
+        today = _now.date()
+        now = _now.time()
 
         # 1. Evaluate all Calendar objects
         for cal_obj in db.get_objects_of_type(ObjectType.CALENDAR):

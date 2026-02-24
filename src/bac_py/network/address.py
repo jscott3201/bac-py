@@ -42,7 +42,11 @@ class BIPAddress:
 
         :param data: At least 6 bytes of raw address data.
         :returns: The decoded :class:`BIPAddress`.
+        :raises ValueError: If *data* is shorter than 6 bytes.
         """
+        if len(data) < 6:
+            msg = f"BIPAddress requires at least 6 bytes, got {len(data)}"
+            raise ValueError(msg)
         host = f"{data[0]}.{data[1]}.{data[2]}.{data[3]}"
         port = int.from_bytes(data[4:6], "big")
         return _cached_bip_address(host, port)
@@ -92,7 +96,13 @@ class BIP6Address:
 
     @classmethod
     def decode(cls, data: bytes | memoryview) -> BIP6Address:
-        """Decode from 18-byte wire format."""
+        """Decode from 18-byte wire format.
+
+        :raises ValueError: If *data* is shorter than 18 bytes.
+        """
+        if len(data) < 18:
+            msg = f"BIP6Address requires at least 18 bytes, got {len(data)}"
+            raise ValueError(msg)
         host = socket.inet_ntop(socket.AF_INET6, bytes(data[:16]))
         port = int.from_bytes(data[16:18], "big")
         return cls(host=host, port=port)

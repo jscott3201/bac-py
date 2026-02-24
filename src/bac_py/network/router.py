@@ -132,6 +132,8 @@ class RoutingTable:
     the asyncio event loop thread.
     """
 
+    _MAX_ENTRIES = 2048
+
     def __init__(self) -> None:
         self._ports: dict[int, RouterPort] = {}
         self._entries: dict[int, RoutingTableEntry] = {}
@@ -282,6 +284,13 @@ class RoutingTable:
             existing.next_router_mac = next_router_mac
             existing.reachability = NetworkReachability.REACHABLE
         else:
+            if len(self._entries) >= self._MAX_ENTRIES:
+                logger.warning(
+                    "Routing table full (%d entries), ignoring DNET %d",
+                    self._MAX_ENTRIES,
+                    dnet,
+                )
+                return
             self._entries[dnet] = RoutingTableEntry(
                 network_number=dnet,
                 port_id=port_id,

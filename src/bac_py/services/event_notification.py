@@ -17,6 +17,7 @@ from bac_py.encoding.primitives import (
     encode_unsigned,
 )
 from bac_py.encoding.tags import (
+    TagClass,
     as_memoryview,
     decode_optional_context,
     decode_tag,
@@ -154,7 +155,9 @@ class EventNotificationRequest:
         tag, offset = decode_tag(data, offset)  # opening tag 3
         time_stamp, offset = BACnetTimeStamp.decode(data, offset)
         closing, offset = decode_tag(data, offset)  # closing tag 3
-        assert closing.is_closing and closing.number == 3
+        if not (closing.is_closing and closing.number == 3):
+            msg = "Expected closing tag 3 for timeStamp"
+            raise ValueError(msg)
 
         # [4] notificationClass
         tag, offset = decode_tag(data, offset)
@@ -201,7 +204,9 @@ class EventNotificationRequest:
                 offset = new_offset
                 event_values, offset = decode_notification_parameters(data, offset)
                 closing, offset = decode_tag(data, offset)
-                assert closing.is_closing and closing.number == 12
+                if not (closing.is_closing and closing.number == 12):
+                    msg = "Expected closing tag 12 for eventValues"
+                    raise ValueError(msg)
 
         return cls(
             process_identifier=process_identifier,
@@ -299,7 +304,9 @@ class AcknowledgeAlarmRequest:
         tag, offset = decode_tag(data, offset)  # opening tag 3
         time_stamp, offset = BACnetTimeStamp.decode(data, offset)
         closing, offset = decode_tag(data, offset)  # closing tag 3
-        assert closing.is_closing and closing.number == 3
+        if not (closing.is_closing and closing.number == 3):
+            msg = "Expected closing tag 3 for timeStamp"
+            raise ValueError(msg)
 
         # [4] acknowledgmentSource
         tag, offset = decode_tag(data, offset)
@@ -310,7 +317,9 @@ class AcknowledgeAlarmRequest:
         tag, offset = decode_tag(data, offset)  # opening tag 5
         time_of_acknowledgment, offset = BACnetTimeStamp.decode(data, offset)
         closing, offset = decode_tag(data, offset)  # closing tag 5
-        assert closing.is_closing and closing.number == 5
+        if not (closing.is_closing and closing.number == 5):
+            msg = "Expected closing tag 5 for timeOfAcknowledgment"
+            raise ValueError(msg)
 
         return cls(
             acknowledging_process_identifier=acknowledging_process_identifier,
@@ -387,7 +396,7 @@ class LifeSafetyOperationRequest:
         object_identifier: ObjectIdentifier | None = None
         if offset < len(data):
             tag, new_offset = decode_tag(data, offset)
-            if tag.number == 3:
+            if tag.cls == TagClass.CONTEXT and tag.number == 3:
                 obj_type, instance = decode_object_identifier(
                     data[new_offset : new_offset + tag.length]
                 )

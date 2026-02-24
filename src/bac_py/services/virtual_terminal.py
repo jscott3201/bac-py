@@ -5,7 +5,6 @@ VT-Open (Clause 17.1), VT-Close (Clause 17.2), VT-Data (Clause 17.3).
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 
 from bac_py.encoding.primitives import (
@@ -19,7 +18,6 @@ from bac_py.encoding.primitives import (
 from bac_py.encoding.tags import as_memoryview, decode_tag
 from bac_py.types.enums import VTClass
 
-_logger = logging.getLogger(__name__)
 _MAX_DECODED_ITEMS = 10_000
 
 

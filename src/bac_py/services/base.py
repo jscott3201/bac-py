@@ -100,3 +100,19 @@ class ServiceRegistry:
         handler = self._unconfirmed.get(service_choice)
         if handler is not None:
             await handler(service_choice, request_data, source)
+
+    def has_confirmed_handler(self, service_choice: int) -> bool:
+        """Check whether a confirmed service handler is registered.
+
+        :param service_choice: Confirmed service choice number.
+        :returns: ``True`` if a handler is registered.
+        """
+        return service_choice in self._confirmed
+
+    def has_unconfirmed_handler(self, service_choice: int) -> bool:
+        """Check whether an unconfirmed service handler is registered.
+
+        :param service_choice: Unconfirmed service choice number.
+        :returns: ``True`` if a handler is registered.
+        """
+        return service_choice in self._unconfirmed

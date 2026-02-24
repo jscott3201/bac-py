@@ -221,17 +221,13 @@ class SegmentSender:
         self.actual_window_size = actual_window_size
 
         if negative:
-            # Re-send from the segment after the last successfully received
             logger.debug(
                 "negative ack: invoke_id=%d seq=%d, resending from idx=%d",
                 self.invoke_id,
                 ack_seq,
                 acked_idx + 1,
             )
-            self._window_start_idx = acked_idx + 1
-        else:
-            # Advance past all acknowledged segments
-            self._window_start_idx = acked_idx + 1
+        self._window_start_idx = acked_idx + 1
 
         if self.is_complete:
             logger.info(
@@ -354,6 +350,9 @@ class SegmentReceiver:
         if in_window(seq_num, expected_seq, self.actual_window_size):
             # Map sequence to absolute index
             abs_idx = self._seq_to_abs_idx(seq_num)
+            old = self._segments.get(abs_idx)
+            if old is not None:
+                self._total_bytes -= len(old)
             self._segments[abs_idx] = data
             self._total_bytes += len(data)
             if self._total_bytes > _MAX_REASSEMBLY_SIZE:
